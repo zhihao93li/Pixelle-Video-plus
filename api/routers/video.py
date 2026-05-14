@@ -17,16 +17,17 @@ Supports both synchronous and asynchronous video generation.
 """
 
 import os
+
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
 
 from api.dependencies import PixelleVideoDep
 from api.schemas.video import (
+    VideoGenerateAsyncResponse,
     VideoGenerateRequest,
     VideoGenerateResponse,
-    VideoGenerateAsyncResponse,
 )
-from api.tasks import task_manager, TaskType
+from api.tasks import TaskType, task_manager
 
 router = APIRouter(prefix="/video", tags=["Video Generation"])
 
@@ -54,8 +55,8 @@ def path_to_url(request: Request, file_path: str) -> str:
 
         Domain:  With domain request -> https://your-domain.com/api/files/...
     """
-    from pathlib import Path
     import os
+    from pathlib import Path
 
     # Normalize path separators to forward slashes first (for cross-platform compatibility)
     file_path = file_path.replace("\\", "/")
@@ -134,6 +135,8 @@ async def generate_video_sync(
             "video_fps": request_body.video_fps,
             "frame_template": request_body.frame_template,
             "prompt_prefix": request_body.prompt_prefix,
+            "image_prompt_visual_context": request_body.image_prompt_visual_context,
+            "image_prompt_generation_rules": request_body.image_prompt_generation_rules,
             "bgm_path": request_body.bgm_path,
             "bgm_volume": request_body.bgm_volume,
         }
@@ -241,6 +244,8 @@ async def generate_video_async(
                 "video_fps": request_body.video_fps,
                 "frame_template": request_body.frame_template,
                 "prompt_prefix": request_body.prompt_prefix,
+                "image_prompt_visual_context": request_body.image_prompt_visual_context,
+                "image_prompt_generation_rules": request_body.image_prompt_generation_rules,
                 "bgm_path": request_body.bgm_path,
                 "bgm_volume": request_body.bgm_volume,
                 # Progress callback can be added here if needed

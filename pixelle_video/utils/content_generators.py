@@ -19,7 +19,7 @@ These functions are reusable across different pipelines.
 
 import json
 import re
-from typing import List, Optional, Literal
+from typing import List, Literal, Optional
 
 from loguru import logger
 
@@ -273,7 +273,10 @@ async def generate_image_prompts(
     max_words: int = 60,
     batch_size: int = 10,
     max_retries: int = 3,
-    progress_callback: Optional[callable] = None
+    progress_callback: Optional[callable] = None,
+    visual_context: Optional[str] = None,
+    generation_rules: Optional[str] = None,
+    all_narrations: Optional[List[str]] = None
 ) -> List[str]:
     """
     Generate image prompts from narrations (with batching and retry)
@@ -286,6 +289,9 @@ async def generate_image_prompts(
         batch_size: Max narrations per batch (default: 10)
         max_retries: Max retry attempts per batch (default: 3)
         progress_callback: Optional callback(completed, total, message) for progress updates
+        visual_context: User-provided visual consistency context
+        generation_rules: User-provided image prompt generation rules
+        all_narrations: Full storyboard narration list for continuity context
     
     Returns:
         List of image prompts (base prompts, without prefix applied)
@@ -293,6 +299,7 @@ async def generate_image_prompts(
     from pixelle_video.prompts import build_image_prompt_prompt
     
     logger.info(f"Generating image prompts for {len(narrations)} narrations (batch_size={batch_size})")
+    full_context_narrations = all_narrations if all_narrations is not None else narrations
     
     # Split narrations into batches
     batches = [narrations[i:i + batch_size] for i in range(0, len(narrations), batch_size)]
@@ -311,7 +318,10 @@ async def generate_image_prompts(
                 prompt = build_image_prompt_prompt(
                     narrations=batch_narrations,
                     min_words=min_words,
-                    max_words=max_words
+                    max_words=max_words,
+                    visual_context=visual_context,
+                    generation_rules=generation_rules,
+                    all_narrations=full_context_narrations
                 )
                 
                 response = await llm_service(
@@ -500,4 +510,3 @@ def _parse_json(text: str) -> dict:
     
     # If all fails, raise error
     raise json.JSONDecodeError("No valid JSON found", text, 0)
-

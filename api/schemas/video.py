@@ -89,6 +89,14 @@ class VideoGenerateRequest(BaseModel):
     
     # === Image Style ===
     prompt_prefix: Optional[str] = Field(None, description="Image style prefix")
+    image_prompt_visual_context: Optional[str] = Field(
+        None,
+        description="Visual consistency context used by the LLM when generating per-frame image prompts",
+    )
+    image_prompt_generation_rules: Optional[str] = Field(
+        None,
+        description="Custom rules used by the LLM to transform narrations into per-frame image prompts",
+    )
     
     # === BGM ===
     bgm_path: Optional[str] = Field(None, description="Background music path")

@@ -19,7 +19,6 @@ For generating image prompts from narrations.
 import json
 from typing import List, Optional
 
-
 # ==================== PRESET IMAGE STYLES ====================
 # Predefined visual styles for different use cases
 
@@ -51,19 +50,16 @@ IMAGE_PROMPT_GENERATION_PROMPT = """# Role Definition
 You are a professional visual creative designer, skilled at creating expressive and symbolic image prompts for video scripts, transforming abstract concepts into concrete visual scenes.
 
 # Core Task
-Based on the existing video script, create corresponding **English** image prompts for each storyboard's "narration content", ensuring visual scenes perfectly match the narrative content and enhance audience understanding and memory.
+Based on the existing video script, create corresponding **English** image prompts for each storyboard's narration content, ensuring visual scenes match the narrative content and enhance audience understanding and memory.
 
-**Important: The input contains {narrations_count} narrations. You must generate one corresponding image prompt for each narration, totaling {narrations_count} image prompts.**
-
-# Input Content
-{narrations_json}
+You will receive both the full storyboard context and the current batch to generate. Use the full storyboard context only for continuity and consistency. Output image prompts only for the current batch.
 
 # Output Requirements
 
 ## Image Prompt Specifications
 - Language: **Must use English** (for AI image generation models)
 - Description structure: scene + character action + emotion + symbolic elements
-- Description length: Ensure clear, complete, and creative descriptions (recommended 50-100 English words)
+- Description length: Ensure clear, complete, and creative descriptions
 
 ## Visual Creative Requirements
 - Each image must accurately reflect the specific content and emotion of the corresponding narration
@@ -95,32 +91,33 @@ Based on the existing video script, create corresponding **English** image promp
 Strictly output in the following JSON format, **image prompts must be in English**:
 
 ```json
-{{
+{
   "image_prompts": [
     "[detailed English image prompt following the style requirements]",
     "[detailed English image prompt following the style requirements]"
   ]
-}}
+}
 ```
 
 # Important Reminders
 1. Only output JSON format content, do not add any explanations
 2. Ensure JSON format is strictly correct and can be directly parsed by the program
-3. Input is {{"narrations": [narration array]}} format, output is {{"image_prompts": [image prompt array]}} format
-4. **The output image_prompts array must contain exactly {narrations_count} elements, corresponding one-to-one with the input narrations array**
+3. Output is {"image_prompts": [image prompt array]} format
+4. The output image_prompts array must correspond one-to-one with the current batch narrations
 5. **Image prompts must use English** (for AI image generation models)
 6. Image prompts must accurately reflect the specific content and emotion of the corresponding narration
 7. Each image must be creative and visually impactful, avoid being monotonous
 8. Ensure visual scenes can enhance the persuasiveness of the copy and audience understanding
-
-Now, please create {narrations_count} corresponding **English** image prompts for the above {narrations_count} narrations. Only output JSON, no other content.
 """
 
 
 def build_image_prompt_prompt(
     narrations: List[str],
     min_words: int,
-    max_words: int
+    max_words: int,
+    visual_context: Optional[str] = None,
+    generation_rules: Optional[str] = None,
+    all_narrations: Optional[List[str]] = None
 ) -> str:
     """
     Build image prompt generation prompt
@@ -128,9 +125,12 @@ def build_image_prompt_prompt(
     Note: Style/prefix will be applied later via prompt_prefix in config.
     
     Args:
-        narrations: List of narrations
+        narrations: Current batch of narrations to generate image prompts for
         min_words: Minimum word count
         max_words: Maximum word count
+        visual_context: User-provided visual consistency context
+        generation_rules: User-provided image prompt generation rules
+        all_narrations: Full storyboard narration list for continuity context
     
     Returns:
         Formatted prompt for LLM
@@ -138,16 +138,49 @@ def build_image_prompt_prompt(
     Example:
         >>> build_image_prompt_prompt(narrations, 50, 100)
     """
-    narrations_json = json.dumps(
-        {"narrations": narrations},
+    full_narrations = all_narrations if all_narrations is not None else narrations
+    rules = (generation_rules or "").strip() or IMAGE_PROMPT_GENERATION_PROMPT.strip()
+    visual_context_text = (visual_context or "").strip() or "None provided."
+
+    full_context_json = json.dumps(
+        {"all_narrations": full_narrations},
         ensure_ascii=False,
         indent=2
     )
-    
-    return IMAGE_PROMPT_GENERATION_PROMPT.format(
-        narrations_json=narrations_json,
-        narrations_count=len(narrations),
-        min_words=min_words,
-        max_words=max_words
+
+    current_batch_json = json.dumps(
+        {"current_batch_narrations": narrations},
+        ensure_ascii=False,
+        indent=2
     )
 
+    return f"""{rules}
+
+# User Visual Consistency Settings
+{visual_context_text}
+
+# Full Storyboard Context
+Use this complete storyboard only to maintain character, setting, visual motif, and continuity consistency across the video.
+
+{full_context_json}
+
+# Current Batch To Generate
+Generate image prompts only for these narrations.
+
+{current_batch_json}
+
+# Batch Output Contract
+- Generate exactly {len(narrations)} image prompts, one for each item in current_batch_narrations.
+- Do not generate prompts for narrations that are only present in all_narrations.
+- Target {min_words}-{max_words} English words per image prompt when possible.
+- If visual consistency settings are provided, express them naturally inside each generated scene description as needed; do not copy them as a separate block.
+- Only output valid JSON in this exact shape:
+
+```json
+{{
+  "image_prompts": [
+    "English image prompt for current batch item 1"
+  ]
+}}
+```
+"""
