@@ -26,6 +26,7 @@ Note: Requires FFmpeg to be installed on the system.
 
 import os
 import shutil
+import subprocess
 import tempfile
 import uuid
 from pathlib import Path
@@ -37,7 +38,7 @@ from loguru import logger
 from pixelle_video.utils.os_util import (
     get_resource_path,
     list_resource_files,
-    resource_exists
+    resource_exists,
 )
 
 
@@ -132,6 +133,16 @@ class VideoService:
             raise ValueError("Videos list cannot be empty")
         
         if len(videos) == 1:
+            if bgm_path:
+                logger.info(f"Only one video provided, adding BGM directly to {output}")
+                return self._add_bgm_to_video(
+                    video=videos[0],
+                    bgm_path=bgm_path,
+                    output=output,
+                    volume=bgm_volume,
+                    mode=bgm_mode
+                )
+
             logger.info(f"Only one video provided, copying to {output}")
             shutil.copy(videos[0], output)
             return output
@@ -233,9 +244,7 @@ class VideoService:
                 output
             ])
             
-            # Run command
-            import subprocess
-            result = subprocess.run(
+            subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
@@ -412,8 +421,6 @@ class VideoService:
                 fps_num, fps_den = map(int, fps_str.split('/'))
                 fps = fps_num / fps_den if fps_den != 0 else 30
                 
-                # Create black video for padding
-                black_video_path = self._get_unique_temp_path("black_pad", os.path.basename(output))
                 black_input = ffmpeg.input(
                     f'color=c=black:s={width}x{height}:r={fps}',
                     f='lavfi',
@@ -435,7 +442,7 @@ class VideoService:
             audio_stream = audio_stream.filter('apad', whole_dur=target_duration)
         
         if not video_has_audio:
-            logger.info(f"Video has no audio stream, adding audio track")
+            logger.info("Video has no audio stream, adding audio track")
             # Video is silent, just add the audio
             try:
                 (
@@ -1001,4 +1008,3 @@ class VideoService:
             error_msg = e.stderr.decode() if e.stderr else str(e)
             logger.error(f"FFmpeg error padding video: {error_msg}")
             raise RuntimeError(f"Failed to pad video: {error_msg}")
-

@@ -15,8 +15,9 @@ Configuration schema with Pydantic models
 
 Single source of truth for all configuration defaults and validation.
 """
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Literal, Optional
+
+from pydantic import BaseModel, Field, model_validator
 
 
 class LLMConfig(BaseModel):
@@ -37,12 +38,58 @@ class TTSComfyUIConfig(BaseModel):
     default_workflow: Optional[str] = Field(default=None, description="Default TTS workflow (optional)")
 
 
+class TTSFishAudioConfig(BaseModel):
+    """Fish Audio TTS configuration"""
+    api_key: str = Field(default="", description="Fish Audio API key. If empty, FISH_API_KEY env var is used.")
+    base_url: str = Field(default="https://api.fish.audio", description="Fish Audio API base URL")
+    model: Literal["s1", "s2-pro"] = Field(default="s2-pro", description="Fish Audio TTS model")
+    reference_id: Optional[str] = Field(default=None, description="Default Fish Audio voice model ID")
+    speed: float = Field(default=1.0, ge=0.5, le=2.0, description="Speaking rate multiplier")
+    volume: float = Field(default=0.0, description="Volume adjustment in dB")
+    normalize_loudness: bool = Field(default=True, description="Normalize output loudness")
+    temperature: float = Field(default=0.7, ge=0.0, le=1.0, description="Controls expressiveness")
+    top_p: float = Field(default=0.7, ge=0.0, le=1.0, description="Controls diversity via nucleus sampling")
+    chunk_length: int = Field(default=300, ge=100, le=300, description="Text segment size for processing")
+    normalize: bool = Field(default=True, description="Normalize text before synthesis")
+    format: Literal["wav", "pcm", "mp3", "opus"] = Field(default="mp3", description="Output audio format")
+    sample_rate: Optional[int] = Field(default=None, description="Optional output sample rate")
+    mp3_bitrate: Literal[64, 128, 192] = Field(default=128, description="MP3 bitrate in kbps")
+    opus_bitrate: Literal[-1000, 24000, 32000, 48000, 64000] = Field(default=-1000, description="Opus bitrate in bps")
+    latency: Literal["low", "normal", "balanced"] = Field(default="normal", description="Latency-quality trade-off")
+    max_new_tokens: int = Field(default=1024, description="Maximum audio tokens per chunk")
+    repetition_penalty: float = Field(default=1.2, description="Penalty for repeated audio patterns")
+    min_chunk_length: int = Field(default=50, ge=0, le=100, description="Minimum characters before chunk split")
+    condition_on_previous_chunks: bool = Field(default=True, description="Use previous chunks as voice context")
+    early_stop_threshold: float = Field(default=1.0, ge=0.0, le=1.0, description="Early stopping threshold")
+    timeout: float = Field(default=120.0, gt=0.0, description="HTTP request timeout in seconds")
+
+
 class TTSSubConfig(BaseModel):
     """TTS-specific configuration (under comfyui.tts)"""
-    inference_mode: str = Field(default="local", description="TTS inference mode: 'local' or 'comfyui'")
+    inference_mode: Literal["local", "comfyui", "fish"] = Field(
+        default="local",
+        description="TTS inference mode: 'local', 'comfyui', or 'fish'"
+    )
     local: TTSLocalConfig = Field(default_factory=TTSLocalConfig, description="Local TTS (Edge TTS) configuration")
     comfyui: TTSComfyUIConfig = Field(default_factory=TTSComfyUIConfig, description="ComfyUI TTS configuration")
-    
+    fish_audio: TTSFishAudioConfig = Field(default_factory=TTSFishAudioConfig, description="Fish Audio TTS configuration")
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_default_workflow(cls, data):
+        """Move legacy tts.default_workflow into tts.comfyui.default_workflow."""
+        if not isinstance(data, dict):
+            return data
+
+        legacy_workflow = data.get("default_workflow")
+        if legacy_workflow:
+            data = dict(data)
+            comfyui_config = dict(data.get("comfyui") or {})
+            comfyui_config.setdefault("default_workflow", legacy_workflow)
+            data["comfyui"] = comfyui_config
+
+        return data
+
     # Backward compatibility: keep default_workflow at top level
     @property
     def default_workflow(self) -> Optional[str]:
@@ -94,7 +141,7 @@ class PixelleVideoConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
     template: TemplateConfig = Field(default_factory=TemplateConfig)
-    
+
     def is_llm_configured(self) -> bool:
         """Check if LLM is properly configured"""
         return bool(
@@ -102,12 +149,11 @@ class PixelleVideoConfig(BaseModel):
             self.llm.base_url and self.llm.base_url.strip() and
             self.llm.model and self.llm.model.strip()
         )
-    
+
     def validate_required(self) -> bool:
         """Validate required configuration"""
         return self.is_llm_configured()
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary (for backward compatibility)"""
         return self.model_dump()
-

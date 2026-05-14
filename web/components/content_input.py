@@ -14,10 +14,47 @@
 Content input components for web UI (left column)
 """
 
+import re
+from pathlib import Path
+from typing import Any
+
 import streamlit as st
 
 from web.i18n import tr
 from web.utils.async_helpers import get_project_version
+
+BGM_AUDIO_EXTENSIONS = ('.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg')
+BGM_UPLOAD_TYPES = [ext.lstrip(".") for ext in BGM_AUDIO_EXTENSIONS]
+
+
+def _safe_bgm_filename(filename: str) -> str:
+    raw_name = (filename or "").replace("\\", "/")
+    name = Path(raw_name).name.strip()
+    suffix = Path(name).suffix.lower()
+
+    if suffix not in BGM_AUDIO_EXTENSIONS:
+        allowed = ", ".join(BGM_AUDIO_EXTENSIONS)
+        raise ValueError(f"Unsupported BGM file type: {suffix or 'missing extension'}; allowed: {allowed}")
+
+    stem = Path(name).stem.strip()
+    safe_stem = re.sub(r"[^\w.-]+", "_", stem, flags=re.UNICODE).strip("._-")
+    if not safe_stem:
+        safe_stem = "bgm"
+
+    return f"{safe_stem}{suffix}"
+
+
+def save_uploaded_bgm_file(uploaded_file: Any, target_dir: Path | str | None = None) -> str:
+    """Persist an uploaded BGM file into the custom BGM directory."""
+    from pixelle_video.utils.os_util import get_data_path
+
+    saved_name = _safe_bgm_filename(getattr(uploaded_file, "name", ""))
+    bgm_dir = Path(target_dir) if target_dir is not None else Path(get_data_path("bgm"))
+    bgm_dir.mkdir(parents=True, exist_ok=True)
+
+    target_path = bgm_dir / saved_name
+    target_path.write_bytes(bytes(uploaded_file.getbuffer()))
+    return saved_name
 
 
 def render_content_input():
@@ -204,11 +241,35 @@ def render_bgm_section(key_prefix=""):
         try:
             all_files = list_resource_files("bgm")
             # Filter to audio files only
-            audio_extensions = ('.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg')
-            bgm_files = sorted([f for f in all_files if f.lower().endswith(audio_extensions)])
+            bgm_files = sorted([f for f in all_files if f.lower().endswith(BGM_AUDIO_EXTENSIONS)])
         except Exception as e:
             st.warning(f"Failed to load BGM files: {e}")
             bgm_files = []
+
+        selector_key = f"{key_prefix}bgm_selector"
+        upload_state_key = f"{key_prefix}last_uploaded_bgm"
+        uploaded_bgm = st.file_uploader(
+            tr("bgm.upload"),
+            type=BGM_UPLOAD_TYPES,
+            accept_multiple_files=False,
+            key=f"{key_prefix}bgm_uploader",
+            help=tr("bgm.upload_help")
+        )
+        st.caption(tr("bgm.upload_hint"))
+
+        if uploaded_bgm is not None:
+            upload_signature = f"{uploaded_bgm.name}:{getattr(uploaded_bgm, 'size', '')}"
+            try:
+                saved_bgm_name = _safe_bgm_filename(uploaded_bgm.name)
+                if st.session_state.get(upload_state_key) != upload_signature:
+                    saved_bgm_name = save_uploaded_bgm_file(uploaded_bgm)
+                    st.session_state[upload_state_key] = upload_signature
+                    st.session_state[selector_key] = saved_bgm_name
+                    st.success(tr("bgm.upload_success", file=saved_bgm_name))
+
+                bgm_files = sorted(set(bgm_files + [saved_bgm_name]))
+            except Exception as e:
+                st.error(tr("bgm.upload_error", error=str(e)))
         
         # Add special "None" option
         bgm_options = [tr("bgm.none")] + bgm_files
@@ -223,7 +284,7 @@ def render_bgm_section(key_prefix=""):
             bgm_options,
             index=default_index,
             label_visibility="collapsed",
-            key=f"{key_prefix}bgm_selector"
+            key=selector_key
         )
         
         # BGM volume slider (only show when BGM is selected)
@@ -280,4 +341,3 @@ def render_version_info():
             f'<img src="{badge_url}" alt="GitHub stars" style="vertical-align: middle;">'
             f'</a>',
             unsafe_allow_html=True)
-

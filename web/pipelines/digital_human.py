@@ -398,6 +398,11 @@ class DigitalHumanPipelineUI(PipelineUI):
                             if tts_inference_mode == "local":
                                 tts_kwargs["voice"] = tts_voice
                                 tts_kwargs["speed"] = tts_speed
+                            elif tts_inference_mode == "fish":
+                                if tts_voice:
+                                    tts_kwargs["reference_id"] = tts_voice
+                                if tts_speed is not None:
+                                    tts_kwargs["speed"] = tts_speed
                             elif tts_inference_mode == "comfyui":
                                 if tts_workflow:
                                     tts_kwargs["workflow"] = tts_workflow
@@ -492,6 +497,11 @@ class DigitalHumanPipelineUI(PipelineUI):
                                 if tts_inference_mode == "local":
                                     tts_kwargs["voice"] = tts_voice
                                     tts_kwargs["speed"] = tts_speed
+                                elif tts_inference_mode == "fish":
+                                    if tts_voice:
+                                        tts_kwargs["reference_id"] = tts_voice
+                                    if tts_speed is not None:
+                                        tts_kwargs["speed"] = tts_speed
                                 elif tts_inference_mode == "comfyui":
                                     if tts_workflow:
                                         tts_kwargs["workflow"] = tts_workflow
@@ -573,6 +583,11 @@ class DigitalHumanPipelineUI(PipelineUI):
                                 if tts_inference_mode == "local":
                                     tts_kwargs["voice"] = tts_voice
                                     tts_kwargs["speed"] = tts_speed
+                                elif tts_inference_mode == "fish":
+                                    if tts_voice:
+                                        tts_kwargs["reference_id"] = tts_voice
+                                    if tts_speed is not None:
+                                        tts_kwargs["speed"] = tts_speed
                                 elif tts_inference_mode == "comfyui":
                                     if tts_workflow:
                                         tts_kwargs["workflow"] = tts_workflow
@@ -672,4 +687,3 @@ class DigitalHumanPipelineUI(PipelineUI):
 
 # Register self
 register_pipeline_ui(DigitalHumanPipelineUI)
-

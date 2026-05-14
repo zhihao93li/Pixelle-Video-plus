@@ -86,11 +86,11 @@ class CustomPipeline(BasePipeline):
         custom_param_example: str = "default_value",
         
         # === Standard Parameters (keep these for compatibility) ===
-        tts_inference_mode: Optional[str] = None,  # "local" or "comfyui"
+        tts_inference_mode: Optional[str] = None,  # "local", "comfyui", or "fish"
         voice_id: Optional[str] = None,  # Deprecated, use tts_voice
-        tts_voice: Optional[str] = None,  # Voice ID for local mode
+        tts_voice: Optional[str] = None,  # Voice ID for local mode or Fish reference_id
         tts_workflow: Optional[str] = None,
-        tts_speed: float = 1.2,
+        tts_speed: Optional[float] = None,
         ref_audio: Optional[str] = None,
         
         media_workflow: Optional[str] = None,
@@ -132,15 +132,21 @@ class CustomPipeline(BasePipeline):
         # Support both old API (voice_id) and new API (tts_inference_mode + tts_voice)
         final_voice_id = None
         final_tts_workflow = tts_workflow
+        default_tts_mode = self.core.tts.config.get("inference_mode", "local")
+        final_tts_mode = tts_inference_mode or default_tts_mode
         
-        if tts_inference_mode:
+        if final_tts_mode:
             # New API from web UI
-            if tts_inference_mode == "local":
+            if final_tts_mode == "local":
                 # Local Edge TTS mode - use tts_voice
-                final_voice_id = tts_voice or "zh-CN-YunjianNeural"
+                final_voice_id = tts_voice or voice_id or "zh-CN-YunjianNeural"
                 final_tts_workflow = None  # Don't use workflow in local mode
                 logger.debug(f"TTS Mode: local (voice={final_voice_id})")
-            elif tts_inference_mode == "comfyui":
+            elif final_tts_mode == "fish":
+                final_voice_id = tts_voice or voice_id
+                final_tts_workflow = None
+                logger.debug(f"TTS Mode: fish (reference_id={final_voice_id or 'default'})")
+            elif final_tts_mode == "comfyui":
                 # ComfyUI workflow mode
                 final_voice_id = None  # Don't use voice_id in ComfyUI mode
                 # tts_workflow already set from parameter
@@ -265,7 +271,7 @@ class CustomPipeline(BasePipeline):
             min_image_prompt_words=30,
             max_image_prompt_words=60,
             video_fps=video_fps,
-            tts_inference_mode=tts_inference_mode or "local",  # TTS inference mode (CRITICAL FIX)
+            tts_inference_mode=final_tts_mode,  # TTS inference mode (CRITICAL FIX)
             voice_id=final_voice_id,  # Use processed voice_id
             tts_workflow=final_tts_workflow,  # Use processed workflow
             tts_speed=tts_speed,
@@ -560,4 +566,3 @@ class QuickPipeline(BasePipeline):
 pixelle_video.pipelines["quick"] = QuickPipeline(pixelle_video)
 result = await pixelle_video.generate_video(text=content, pipeline="quick")
 """
-

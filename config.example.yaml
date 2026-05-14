@@ -28,7 +28,21 @@ comfyui:
   
   # TTS-specific configuration
   tts:
-    default_workflow: selfhost/tts_edge.json  # TTS workflow to use
+    inference_mode: local  # Options: local, comfyui, fish
+    local:
+      voice: zh-CN-YunjianNeural
+      speed: 1.2
+    comfyui:
+      default_workflow: selfhost/tts_edge.json  # TTS workflow to use when inference_mode is comfyui
+    fish_audio:
+      api_key: ""  # Fish Audio API key; can also use FISH_API_KEY environment variable
+      base_url: https://api.fish.audio
+      model: s2-pro
+      reference_id: null  # Optional Fish Audio voice model ID
+      speed: 1.0
+      format: mp3
+      mp3_bitrate: 128
+      latency: normal
   
   # Image-specific configuration
   image:

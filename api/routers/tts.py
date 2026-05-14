@@ -31,16 +31,16 @@ async def tts_synthesize(
 ):
     """
     Text-to-Speech synthesis endpoint
-    
+
     Convert text to speech audio using ComfyUI workflows.
-    
+
     - **text**: Text to synthesize
     - **workflow**: TTS workflow key (optional, uses default if not specified)
     - **ref_audio**: Reference audio for voice cloning (optional)
     - **voice_id**: (Deprecated) Voice ID for legacy compatibility
-    
+
     Returns path to generated audio file and duration.
-    
+
     Examples:
     ```json
     {
@@ -48,7 +48,7 @@ async def tts_synthesize(
         "workflow": "runninghub/tts_edge.json"
     }
     ```
-    
+
     With voice cloning:
     ```json
     {
@@ -60,35 +60,43 @@ async def tts_synthesize(
     """
     try:
         logger.info(f"TTS synthesis request: {request.text[:50]}...")
-        
+
         # Build TTS parameters
         tts_params = {"text": request.text}
-        
+        if request.inference_mode:
+            tts_params["inference_mode"] = request.inference_mode
+
         # Add workflow if specified
         if request.workflow:
             tts_params["workflow"] = request.workflow
-        
+
         # Add ref_audio if specified
         if request.ref_audio:
             tts_params["ref_audio"] = request.ref_audio
-        
-        # Legacy voice_id support (deprecated)
-        if request.voice_id and not request.workflow:
-            logger.warning("voice_id parameter is deprecated, please use workflow instead")
+
+        if request.reference_id:
+            tts_params["reference_id"] = request.reference_id
+
+        if request.speed is not None:
+            tts_params["speed"] = request.speed
+
+        if request.fish_model:
+            tts_params["fish_model"] = request.fish_model
+
+        if request.voice_id:
             tts_params["voice"] = request.voice_id
-        
+
         # Call TTS service
         audio_path = await pixelle_video.tts(**tts_params)
-        
+
         # Get audio duration
         duration = get_audio_duration(audio_path)
-        
+
         return TTSSynthesizeResponse(
             audio_path=audio_path,
             duration=duration
         )
-        
+
     except Exception as e:
         logger.error(f"TTS synthesis error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-

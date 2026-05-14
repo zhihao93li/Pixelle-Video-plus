@@ -28,7 +28,19 @@ comfyui:
     prompt_prefix: "Minimalist illustration style"
   
   tts:
-    default_workflow: "selfhost/tts_edge.json"
+    inference_mode: "local"  # local, comfyui, fish
+    local:
+      voice: "zh-CN-YunjianNeural"
+      speed: 1.2
+    comfyui:
+      default_workflow: "selfhost/tts_edge.json"
+    fish_audio:
+      api_key: ""  # 也可以用 FISH_API_KEY 环境变量
+      base_url: "https://api.fish.audio"
+      model: "s2-pro"
+      reference_id: null
+      speed: 1.0
+      format: "mp3"
 
 template:
   default_template: "1080x1920/image_default.html"
@@ -73,7 +85,13 @@ template:
 
 ### TTS 配置
 
-- `default_workflow`: 默认 TTS 工作流
+- `inference_mode`: TTS 合成方式，可选 `local`、`comfyui`、`fish`
+- `local.voice`: Edge TTS 音色 ID
+- `local.speed`: Edge TTS 语速倍率
+- `comfyui.default_workflow`: ComfyUI TTS 工作流
+- `fish_audio.api_key`: Fish Audio API Key；留空时读取 `FISH_API_KEY`
+- `fish_audio.reference_id`: Fish Audio 声音模型 ID；留空时使用 Fish 默认音色
+- `fish_audio.model`: Fish Audio 模型，推荐 `s2-pro`
 
 ---
 
@@ -86,4 +104,3 @@ template:
 ## 更多信息
 
 配置文件会自动在首次运行时创建。
-

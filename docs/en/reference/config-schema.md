@@ -28,7 +28,19 @@ comfyui:
     prompt_prefix: "Minimalist illustration style"
   
   tts:
-    default_workflow: "selfhost/tts_edge.json"
+    inference_mode: "local"  # local, comfyui, fish
+    local:
+      voice: "zh-CN-YunjianNeural"
+      speed: 1.2
+    comfyui:
+      default_workflow: "selfhost/tts_edge.json"
+    fish_audio:
+      api_key: ""  # You can also use the FISH_API_KEY env var
+      base_url: "https://api.fish.audio"
+      model: "s2-pro"
+      reference_id: null
+      speed: 1.0
+      format: "mp3"
 
 template:
   default_template: "1080x1920/image_default.html"
@@ -73,7 +85,13 @@ template:
 
 ### TTS Configuration
 
-- `default_workflow`: Default TTS workflow
+- `inference_mode`: TTS provider, one of `local`, `comfyui`, or `fish`
+- `local.voice`: Edge TTS voice ID
+- `local.speed`: Edge TTS speed multiplier
+- `comfyui.default_workflow`: ComfyUI TTS workflow
+- `fish_audio.api_key`: Fish Audio API key; if empty, `FISH_API_KEY` is used
+- `fish_audio.reference_id`: Fish Audio voice model ID; if empty, Fish's default voice is used
+- `fish_audio.model`: Fish Audio model, `s2-pro` recommended
 
 ---
 
@@ -86,4 +104,3 @@ template:
 ## More Information
 
 The configuration file is automatically created on first run.
-

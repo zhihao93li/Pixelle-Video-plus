@@ -14,7 +14,8 @@
 Video generation API schemas
 """
 
-from typing import Optional, Literal, Dict, Any
+from typing import Any, Dict, Literal, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -37,6 +38,10 @@ class VideoGenerateRequest(BaseModel):
     n_scenes: Optional[int] = Field(5, ge=1, le=20, description="Number of scenes (only used in 'generate' mode, ignored in 'fixed' mode)")
     
     # === TTS Parameters ===
+    tts_inference_mode: Optional[Literal["local", "comfyui", "fish"]] = Field(
+        None,
+        description="TTS provider: 'local', 'comfyui', or 'fish'. If not specified, uses config."
+    )
     tts_workflow: Optional[str] = Field(
         None, 
         description="TTS workflow key (e.g., 'runninghub/tts_edge.json'). If not specified, uses default workflow from config."
@@ -47,7 +52,13 @@ class VideoGenerateRequest(BaseModel):
     )
     voice_id: Optional[str] = Field(
         None, 
-        description="(Deprecated) TTS voice ID for legacy compatibility"
+        description="TTS voice ID (local Edge TTS voice ID, or Fish Audio reference_id in fish mode)"
+    )
+    tts_speed: Optional[float] = Field(
+        None,
+        ge=0.5,
+        le=2.0,
+        description="TTS speech speed multiplier"
     )
     
     # === LLM Parameters ===
@@ -113,4 +124,3 @@ class VideoGenerateAsyncResponse(BaseModel):
     success: bool = True
     message: str = "Task created successfully"
     task_id: str = Field(..., description="Task ID for tracking progress")
-

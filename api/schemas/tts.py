@@ -14,13 +14,18 @@
 TTS API schemas
 """
 
-from typing import Optional
+from typing import Literal, Optional
+
 from pydantic import BaseModel, Field
 
 
 class TTSSynthesizeRequest(BaseModel):
     """TTS synthesis request"""
     text: str = Field(..., description="Text to synthesize")
+    inference_mode: Optional[Literal["local", "comfyui", "fish"]] = Field(
+        None,
+        description="TTS provider: 'local' (Edge TTS), 'comfyui' (workflow), or 'fish' (Fish Audio API). If not specified, uses config."
+    )
     workflow: Optional[str] = Field(
         None, 
         description="TTS workflow key (e.g., 'runninghub/tts_edge.json' or 'selfhost/tts_edge.json'). If not specified, uses default workflow from config."
@@ -31,15 +36,30 @@ class TTSSynthesizeRequest(BaseModel):
     )
     voice_id: Optional[str] = Field(
         None, 
-        description="Voice ID (deprecated, use workflow instead)"
+        description="Voice ID (local Edge TTS voice ID, or Fish Audio reference_id in fish mode)"
+    )
+    reference_id: Optional[str] = Field(
+        None,
+        description="Fish Audio voice model ID. Takes precedence over voice_id in fish mode."
+    )
+    speed: Optional[float] = Field(
+        None,
+        ge=0.5,
+        le=2.0,
+        description="Speech speed multiplier"
+    )
+    fish_model: Optional[Literal["s1", "s2-pro"]] = Field(
+        None,
+        description="Fish Audio model override"
     )
     
     class Config:
         json_schema_extra = {
             "example": {
                 "text": "Hello, welcome to Pixelle-Video!",
-                "workflow": "runninghub/tts_edge.json",
-                "ref_audio": None
+                "inference_mode": "fish",
+                "reference_id": "fish-audio-voice-model-id",
+                "speed": 1.0
             }
         }
 
@@ -50,4 +70,3 @@ class TTSSynthesizeResponse(BaseModel):
     message: str = "Success"
     audio_path: str = Field(..., description="Path to generated audio file")
     duration: float = Field(..., description="Audio duration in seconds")
-

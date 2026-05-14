@@ -174,6 +174,12 @@ class FrameProcessor:
                 tts_params["voice"] = config.voice_id
             if config.tts_speed is not None:
                 tts_params["speed"] = config.tts_speed
+        elif config.tts_inference_mode == "fish":
+            # Fish Audio mode: voice_id maps to Fish Audio reference_id
+            if config.voice_id:
+                tts_params["reference_id"] = config.voice_id
+            if config.tts_speed is not None:
+                tts_params["speed"] = config.tts_speed
         else:  # comfyui
             # ComfyUI mode: pass workflow, voice, speed, and ref_audio
             if config.tts_workflow:
@@ -444,4 +450,3 @@ class FrameProcessor:
             logger.warning(f"Failed to get video duration: {e}, using audio duration")
             # Fallback: use audio duration if available
             return 1.0  # Default to 1 second if unable to determine
-

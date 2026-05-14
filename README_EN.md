@@ -14,6 +14,8 @@
 
 https://github.com/user-attachments/assets/a42e7457-fcc8-40da-83fc-784c45a8b95d
 
+> **Pixelle-Video-plus** is an enhanced fork based on the original [AIDC-AI/Pixelle-Video](https://github.com/AIDC-AI/Pixelle-Video). It currently adds Fish Audio API TTS, WebUI BGM upload, and fuller TTS/BGM configuration controls.
+
 Just input a **topic**, and Pixelle-Video will automatically:
 - ✍️ Write video script
 - 🎨 Generate AI images/videos  
@@ -32,6 +34,7 @@ Just input a **topic**, and Pixelle-Video will automatically:
 
 ## 📋 Recent Updates
 
+- ✅ **2026-05-14**: Plus fork added Fish Audio API TTS, WebUI Fish Audio key / voice ID configuration, and direct custom BGM upload
 - ✅ **2026-01-26**: Added the Motion Transfer pipeline — upload a reference video and an image to transfer motion.
 - ✅ **2026-01-14**: Added "Digital Human" and "Image-to-Video" pipelines, multi-language TTS voices support
 - ✅ **2026-01-06**: Added RunningHub 48G VRAM machine support
@@ -51,8 +54,8 @@ Just input a **topic**, and Pixelle-Video will automatically:
 - ✅ **AI Smart Copywriting** - Intelligently create narration based on topic, no need to write scripts yourself
 - ✅ **AI Generated Images** - Each sentence comes with beautiful AI illustrations
 - ✅ **AI Generated Videos** - Support AI video generation models (like WAN 2.1) to create dynamic video content
-- ✅ **AI Generated Voice** - Support Edge-TTS, Index-TTS and many other mainstream TTS solutions
-- ✅ **Background Music** - Support adding BGM to make videos more atmospheric
+- ✅ **AI Generated Voice** - Support Edge-TTS, ComfyUI TTS workflows, and Fish Audio API
+- ✅ **Background Music** - Select built-in BGM or upload custom music directly in the WebUI
 - ✅ **Visual Styles** - Multiple templates to choose from, create unique video styles
 - ✅ **Flexible Dimensions** - Support portrait, landscape and other video dimensions
 - ✅ **Multiple AI Models** - Support GPT, Qwen, DeepSeek, Ollama and more
@@ -226,8 +229,8 @@ After installation, run `ffmpeg -version` in the terminal to verify successful i
 #### Step 1: Clone Project
 
 ```bash
-git clone https://github.com/AIDC-AI/Pixelle-Video.git
-cd Pixelle-Video
+git clone https://github.com/zhihao93li/Pixelle-Video-plus.git
+cd Pixelle-Video-plus
 ```
 
 #### Step 2: Launch Web Interface
@@ -296,16 +299,17 @@ After configuration, click "Save Configuration".
 #### Background Music (BGM)
 - **No BGM**: Pure voice narration
 - **Built-in Music**: Select preset background music (such as default.mp3)
-- **Custom Music**: Put your music files (MP3/WAV, etc.) in the `bgm/` folder
+- **Custom Music**: Click "Upload BGM" in the WebUI to choose a local music file. It will be saved to `data/bgm/` and added to the dropdown automatically
+- **Manual Add**: You can also place music files (MP3/WAV/FLAC/M4A/AAC/OGG) in `data/bgm/`
 - Click "Preview BGM" to preview music
 
 
 ### 🎤 Voice Settings (Middle Column)
 
-#### TTS Workflow
-- Select TTS workflow from dropdown menu (supports Edge-TTS, Index-TTS, etc.)
-- System will automatically scan TTS workflows in the `workflows/` folder
-- If you know ComfyUI, you can customize TTS workflows
+#### TTS Synthesis Mode
+- **Local Synthesis**: Uses Edge-TTS and works out of the box
+- **ComfyUI Synthesis**: Uses TTS workflows from `workflows/`, suitable for local/self-hosted TTS such as Index-TTS
+- **Fish Audio**: Uses the Fish Audio API. Configure the Fish Audio API key in "System Configuration", optionally set a default voice ID, and override it when generating
 
 #### Reference Audio (Optional)
 - Upload reference audio file for voice cloning (supports MP3/WAV/FLAC and other formats)
@@ -429,4 +433,3 @@ This project is released under the Apache License 2.0. For details, please see t
 ## ⭐ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=AIDC-AI/Pixelle-Video&type=Date)](https://star-history.com/#AIDC-AI/Pixelle-Video&Date)
-

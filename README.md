@@ -16,6 +16,8 @@ https://github.com/user-attachments/assets/a42e7457-fcc8-40da-83fc-784c45a8b95d
 
 <br/>
 
+> **Pixelle-Video-plus** 是基于原始 [AIDC-AI/Pixelle-Video](https://github.com/AIDC-AI/Pixelle-Video) 的增强 fork，当前增加了 Fish Audio API TTS、WebUI 背景音乐上传，以及更完整的 TTS/BGM 配置入口。
+
 只需输入一个 **主题**，Pixelle-Video 就能自动完成：
 - ✍️ 撰写视频文案  
 - 🎨 生成 AI 配图/视频  
@@ -33,6 +35,7 @@ https://github.com/user-attachments/assets/a42e7457-fcc8-40da-83fc-784c45a8b95d
 
 ## 📋 最近更新
 
+- ✅ **2026-05-14**: Plus fork 新增 Fish Audio API TTS 支持，WebUI 可配置 Fish Audio Key/音色 ID，并支持直接上传自定义背景音乐
 - ✅ **2026-01-26**: 新增「动作迁移」模块，上传参考视频和图片进行动作迁移
 - ✅ **2026-01-14**: 新增「数字人口播」和「图生视频」流水线，新增多语言 TTS 音色支持
 - ✅ **2026-01-06**: 新增 RunningHub 48G 显存机器调用支持
@@ -52,8 +55,8 @@ https://github.com/user-attachments/assets/a42e7457-fcc8-40da-83fc-784c45a8b95d
 - ✅ **AI 智能文案** - 根据主题智能创作解说词，无需自己写脚本
 - ✅ **AI 生成配图** - 每句话都配上精美的 AI 插图
 - ✅ **AI 生成视频** - 支持使用 AI 视频生成模型（如 WAN 2.1）创建动态视频内容
-- ✅ **AI 生成语音** - 支持 Edge-TTS、Index-TTS 等众多主流 TTS 方案
-- ✅ **背景音乐** - 支持添加 BGM，让视频更有氛围
+- ✅ **AI 生成语音** - 支持 Edge-TTS、ComfyUI TTS 工作流和 Fish Audio API
+- ✅ **背景音乐** - 支持选择内置 BGM，也支持在 WebUI 上传自定义音乐
 - ✅ **视觉风格** - 多种模板可选，打造独特视频风格
 - ✅ **灵活尺寸** - 支持竖屏、横屏等多种视频尺寸
 - ✅ **多种 AI 模型** - 支持 GPT、通义千问、DeepSeek、Ollama 等
@@ -230,8 +233,8 @@ sudo apt install ffmpeg
 #### 第一步：下载项目
 
 ```bash
-git clone https://github.com/AIDC-AI/Pixelle-Video.git
-cd Pixelle-Video
+git clone https://github.com/zhihao93li/Pixelle-Video-plus.git
+cd Pixelle-Video-plus
 ```
 
 #### 第二步：启动 Web 界面
@@ -300,16 +303,17 @@ uv run streamlit run web/app.py
 #### 背景音乐（BGM）
 - **无 BGM**: 纯人声解说
 - **内置音乐**: 选择预置的背景音乐（如 default.mp3）
-- **自定义音乐**: 将你的音乐文件（MP3/WAV 等）放到 `bgm/` 文件夹
+- **自定义音乐**: 在 WebUI 点击「上传背景音乐」选择本地音乐，文件会保存到 `data/bgm/` 并自动加入下拉列表
+- **手动添加**: 也可以将你的音乐文件（MP3/WAV/FLAC/M4A/AAC/OGG）放到 `data/bgm/`
 - 点击「试听 BGM」可以预览音乐
 
 
 ### 🎤 语音设置（中间栏）
 
-#### TTS 工作流
-- 从下拉菜单选择 TTS 工作流（支持 Edge-TTS、Index-TTS 等）
-- 系统会自动扫描 `workflows/` 文件夹中的 TTS 工作流
-- 如果懂 ComfyUI，可以自定义 TTS 工作流
+#### TTS 合成方式
+- **本地合成**: 使用 Edge-TTS，开箱即用
+- **ComfyUI 合成**: 使用 `workflows/` 中的 TTS 工作流，适合 Index-TTS 等本地/自建能力
+- **Fish Audio**: 使用 Fish Audio API，在「系统配置」里填写 Fish Audio API Key，可设置默认音色 ID，也可在生成时覆盖
 
 #### 参考音频（可选）
 - 上传参考音频文件用于声音克隆（支持 MP3/WAV/FLAC 等格式）
@@ -433,4 +437,3 @@ Pixelle-Video 的设计受到以下优秀开源项目的启发：
 ## ⭐ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=AIDC-AI/Pixelle-Video&type=Date)](https://star-history.com/#AIDC-AI/Pixelle-Video&Date)
-

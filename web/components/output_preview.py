@@ -146,6 +146,10 @@ def render_single_output(pixelle_video, video_params):
                 if tts_mode == "local":
                     video_params["tts_voice"] = selected_voice
                     video_params["tts_speed"] = tts_speed
+                elif tts_mode == "fish":
+                    if selected_voice:
+                        video_params["tts_voice"] = selected_voice
+                    video_params["tts_speed"] = tts_speed
                 else:  # comfyui
                     video_params["tts_workflow"] = tts_workflow_key
                     if ref_audio_path:
@@ -261,6 +265,13 @@ def render_batch_output(pixelle_video, video_params):
             
             # Add TTS parameters based on mode (only add non-None values)
             if shared_config["tts_inference_mode"] == "local":
+                tts_voice = video_params.get("tts_voice")
+                tts_speed = video_params.get("tts_speed")
+                if tts_voice:
+                    shared_config["tts_voice"] = tts_voice
+                if tts_speed:
+                    shared_config["tts_speed"] = tts_speed
+            elif shared_config["tts_inference_mode"] == "fish":
                 tts_voice = video_params.get("tts_voice")
                 tts_speed = video_params.get("tts_speed")
                 if tts_voice:

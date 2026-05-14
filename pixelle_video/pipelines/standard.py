@@ -233,17 +233,23 @@ class StandardPipeline(LinearVideoPipeline):
         tts_voice = ctx.params.get("tts_voice")
         voice_id = ctx.params.get("voice_id")
         tts_workflow = ctx.params.get("tts_workflow")
+        default_tts_mode = self.core.tts.config.get("inference_mode", "local")
+        final_tts_mode = tts_inference_mode or default_tts_mode
         
         final_voice_id = None
         final_tts_workflow = tts_workflow
         
-        if tts_inference_mode:
+        if final_tts_mode:
             # New API from web UI
-            if tts_inference_mode == "local":
-                final_voice_id = tts_voice or "zh-CN-YunjianNeural"
+            if final_tts_mode == "local":
+                final_voice_id = tts_voice or voice_id or "zh-CN-YunjianNeural"
                 final_tts_workflow = None
                 logger.debug(f"TTS Mode: local (voice={final_voice_id})")
-            elif tts_inference_mode == "comfyui":
+            elif final_tts_mode == "fish":
+                final_voice_id = tts_voice or voice_id
+                final_tts_workflow = None
+                logger.debug(f"TTS Mode: fish (reference_id={final_voice_id or 'default'})")
+            elif final_tts_mode == "comfyui":
                 final_voice_id = None
                 logger.debug(f"TTS Mode: comfyui (workflow={final_tts_workflow})")
         else:
@@ -260,10 +266,10 @@ class StandardPipeline(LinearVideoPipeline):
             min_image_prompt_words=ctx.params.get("min_image_prompt_words", 30),
             max_image_prompt_words=ctx.params.get("max_image_prompt_words", 60),
             video_fps=ctx.params.get("video_fps", 30),
-            tts_inference_mode=tts_inference_mode or "local",
+            tts_inference_mode=final_tts_mode,
             voice_id=final_voice_id,
             tts_workflow=final_tts_workflow,
-            tts_speed=ctx.params.get("tts_speed", 1.2),
+            tts_speed=ctx.params.get("tts_speed"),
             ref_audio=ctx.params.get("ref_audio"),
             media_width=ctx.params.get("media_width"),
             media_height=ctx.params.get("media_height"),

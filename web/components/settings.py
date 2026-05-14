@@ -16,9 +16,9 @@ System settings component for web UI
 
 import streamlit as st
 
-from web.i18n import tr, get_language
-from web.utils.streamlit_helpers import safe_rerun
 from pixelle_video.config import config_manager
+from web.i18n import get_language, tr
+from web.utils.streamlit_helpers import safe_rerun
 
 
 def render_advanced_settings():
@@ -39,7 +39,11 @@ def render_advanced_settings():
                 st.markdown(f"**{tr('settings.llm.title')}**")
                 
                 # Quick preset selection
-                from pixelle_video.llm_presets import get_preset_names, get_preset, find_preset_by_base_url_and_model
+                from pixelle_video.llm_presets import (
+                    find_preset_by_base_url_and_model,
+                    get_preset,
+                    get_preset_names,
+                )
                 
                 # Custom at the end
                 preset_names = get_preset_names() + ["Custom"]
@@ -289,6 +293,43 @@ def render_advanced_settings():
                     )
                     # Convert display value back to actual value
                     runninghub_48g_enabled = runninghub_instance_type_display == tr("settings.comfyui.runninghub_instance_48g")
+
+                st.markdown("---")
+
+                # Fish Audio TTS configuration
+                st.markdown(f"**{tr('settings.fish_audio.title')}**")
+                fish_audio_config = comfyui_config.get("tts", {}).get("fish_audio", {})
+                fish_key_col, fish_model_col = st.columns(2)
+                with fish_key_col:
+                    fish_audio_api_key = st.text_input(
+                        tr("settings.fish_audio.api_key"),
+                        value=fish_audio_config.get("api_key", ""),
+                        type="password",
+                        help=tr("settings.fish_audio.api_key_help"),
+                        key="fish_audio_api_key_input"
+                    )
+                with fish_model_col:
+                    fish_audio_model = st.selectbox(
+                        tr("settings.fish_audio.model"),
+                        options=["s2-pro", "s1"],
+                        index=0 if fish_audio_config.get("model", "s2-pro") == "s2-pro" else 1,
+                        help=tr("settings.fish_audio.model_help"),
+                        key="fish_audio_model_input"
+                    )
+
+                fish_audio_reference_id = st.text_input(
+                    tr("settings.fish_audio.reference_id"),
+                    value=fish_audio_config.get("reference_id") or "",
+                    help=tr("settings.fish_audio.reference_id_help"),
+                    key="fish_audio_reference_id_input"
+                )
+                fish_audio_base_url = st.text_input(
+                    tr("settings.fish_audio.base_url"),
+                    value=fish_audio_config.get("base_url", "https://api.fish.audio"),
+                    help=tr("settings.fish_audio.base_url_help"),
+                    key="fish_audio_base_url_input"
+                )
+                st.caption(tr("settings.fish_audio.hint"))
         
         # ====================================================================
         # Action Buttons (full width at bottom)
@@ -315,6 +356,12 @@ def render_advanced_settings():
                         runninghub_concurrent_limit=int(runninghub_concurrent_limit),
                         runninghub_instance_type=instance_type
                     )
+                    config_manager.set_tts_fish_audio_config(
+                        api_key=fish_audio_api_key or "",
+                        reference_id=fish_audio_reference_id or "",
+                        model=fish_audio_model,
+                        base_url=fish_audio_base_url or "https://api.fish.audio",
+                    )
                     
                     # Only save to file if LLM config is valid
                     if llm_api_key and llm_base_url and llm_model:
@@ -332,4 +379,3 @@ def render_advanced_settings():
                 config_manager.save()
                 st.success(tr("status.config_reset"))
                 safe_rerun()
-

@@ -17,9 +17,11 @@ Provides unified access to configuration with automatic validation.
 """
 from pathlib import Path
 from typing import Any, Optional
+
 from loguru import logger
-from .schema import PixelleVideoConfig
+
 from .loader import load_config_dict, save_config_dict
+from .schema import PixelleVideoConfig
 
 
 class ConfigManager:
@@ -133,6 +135,10 @@ class ConfigManager:
             "runninghub_concurrent_limit": self.config.comfyui.runninghub_concurrent_limit,
             "runninghub_instance_type": self.config.comfyui.runninghub_instance_type,
             "tts": {
+                "inference_mode": self.config.comfyui.tts.inference_mode,
+                "local": self.config.comfyui.tts.local.model_dump(),
+                "comfyui": self.config.comfyui.tts.comfyui.model_dump(),
+                "fish_audio": self.config.comfyui.tts.fish_audio.model_dump(),
                 "default_workflow": self.config.comfyui.tts.default_workflow,
             },
             "image": {
@@ -146,7 +152,7 @@ class ConfigManager:
         }
     
     def set_comfyui_config(
-        self, 
+        self,
         comfyui_url: Optional[str] = None,
         comfyui_api_key: Optional[str] = None,
         runninghub_api_key: Optional[str] = None,
@@ -170,3 +176,23 @@ class ConfigManager:
         if updates:
             self.update({"comfyui": updates})
 
+    def set_tts_fish_audio_config(
+        self,
+        api_key: Optional[str] = None,
+        reference_id: Optional[str] = None,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ):
+        """Set Fish Audio TTS configuration"""
+        updates = {}
+        if api_key is not None:
+            updates["api_key"] = api_key
+        if reference_id is not None:
+            updates["reference_id"] = reference_id if reference_id else None
+        if model is not None:
+            updates["model"] = model
+        if base_url is not None:
+            updates["base_url"] = base_url if base_url else "https://api.fish.audio"
+
+        if updates:
+            self.update({"comfyui": {"tts": {"fish_audio": updates}}})
