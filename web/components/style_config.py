@@ -802,31 +802,18 @@ def render_style_config(pixelle_video):
                 size_info_text = tr('style.image_size_info', width=media_width, height=media_height)
             st.info(f"📐 {size_info_text}")
 
-            # Prompt prefix input
-            # Get current prompt_prefix from config (based on media type)
-            current_prefix = comfyui_config.get(media_config_key, {}).get("prompt_prefix", "")
-
-            # Prompt prefix input (temporary, not saved to config)
+            # Unified style input (temporary, not saved to config)
             prompt_prefix = st.text_area(
                 tr('style.prompt_prefix'),
-                value=current_prefix,
+                value="",
                 placeholder=tr("style.prompt_prefix_placeholder"),
                 height=80,
                 label_visibility="visible",
                 help=tr("style.prompt_prefix_help")
             )
 
-            with st.expander(tr("style.image_prompt_generation_title"), expanded=False):
+            with st.expander(tr("style.image_prompt_generation_title"), expanded=True):
                 st.caption(tr("style.image_prompt_generation_hint"))
-
-                image_prompt_visual_context = st.text_area(
-                    tr("style.image_prompt_visual_context"),
-                    value="",
-                    placeholder=tr("style.image_prompt_visual_context_placeholder"),
-                    height=120,
-                    key="image_prompt_visual_context",
-                    help=tr("style.image_prompt_visual_context_help")
-                )
 
                 image_prompt_generation_rules = st.text_area(
                     tr("style.image_prompt_generation_rules"),
