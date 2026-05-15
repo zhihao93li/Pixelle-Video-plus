@@ -22,11 +22,11 @@ def test_config_manager_saves_and_reloads_publish_config(tmp_path):
         buffer_channel_tiktok="channel-tiktok",
         buffer_channel_youtube="channel-youtube",
         buffer_channel_x="channel-x",
-        r2_account_id="account",
-        r2_bucket="pixlle-publish",
-        r2_access_key_id="r2-access",
-        r2_secret_access_key="r2-secret",
-        r2_public_base_url="https://media.example.com",
+        cos_region="ap-hongkong",
+        cos_bucket="pixlle-publish-1250000000",
+        cos_secret_id="cos-secret-id",
+        cos_secret_key="cos-secret-key",
+        cos_public_base_url="https://pixlle-publish-1250000000.cos.ap-hongkong.myqcloud.com",
     )
     manager.save()
 
@@ -42,12 +42,12 @@ def test_config_manager_saves_and_reloads_publish_config(tmp_path):
                 "x": "channel-x",
             },
         },
-        "r2": {
-            "account_id": "account",
-            "bucket": "pixlle-publish",
-            "access_key_id": "r2-access",
-            "secret_access_key": "r2-secret",
-            "public_base_url": "https://media.example.com",
+        "cos": {
+            "region": "ap-hongkong",
+            "bucket": "pixlle-publish-1250000000",
+            "secret_id": "cos-secret-id",
+            "secret_key": "cos-secret-key",
+            "public_base_url": "https://pixlle-publish-1250000000.cos.ap-hongkong.myqcloud.com",
             "endpoint_url": None,
         },
     }
@@ -66,7 +66,7 @@ def test_publish_manager_uses_publish_config_channels(tmp_path):
                     "x": "channel-x",
                 },
             },
-            "r2": {},
+            "cos": {},
         },
     )
 

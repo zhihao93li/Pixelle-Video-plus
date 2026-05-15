@@ -17,8 +17,23 @@ System settings component for web UI
 import streamlit as st
 
 from pixelle_video.config import config_manager
+from pixelle_video.services.buffer_publisher import BufferPublisher
 from web.i18n import get_language, tr
+from web.utils.async_helpers import run_async
 from web.utils.streamlit_helpers import safe_rerun
+
+BUFFER_CHANNEL_WIDGET_KEYS = {
+    "youtube": "publish_buffer_channel_youtube_input",
+    "tiktok": "publish_buffer_channel_tiktok_input",
+    "x": "publish_buffer_channel_x_input",
+}
+
+
+def _format_buffer_channel(channel: dict) -> str:
+    channel_id = channel.get("id") or ""
+    service = channel.get("service") or "unknown"
+    display_name = channel.get("displayName") or channel.get("name") or channel_id
+    return f"{service}: {display_name} ({channel_id})"
 
 
 def render_advanced_settings():
@@ -341,8 +356,8 @@ def render_advanced_settings():
                 tr(
                     "settings.publish.hint",
                     fallback=(
-                        "Configure Buffer and Cloudflare R2 for manual publishing from History. "
-                        "R2 public read and lifecycle rules still need to be configured in Cloudflare."
+                        "Configure Buffer and Tencent COS for manual publishing from History. "
+                        "COS public read and lifecycle rules still need to be configured in Tencent Cloud."
                     ),
                 )
             )
@@ -350,9 +365,9 @@ def render_advanced_settings():
             publish_config = config_manager.get_publish_config()
             buffer_config = publish_config.get("buffer", {})
             buffer_channels = buffer_config.get("channels", {})
-            r2_config = publish_config.get("r2", {})
+            cos_config = publish_config.get("cos", {})
 
-            buffer_col, r2_col = st.columns(2)
+            buffer_col, cos_col = st.columns(2)
             with buffer_col:
                 st.markdown(f"**{tr('settings.publish.buffer_title', fallback='Buffer')}**")
                 buffer_api_key = st.text_input(
@@ -365,63 +380,128 @@ def render_advanced_settings():
                     ),
                     key="publish_buffer_api_key_input",
                 )
+
+                for platform, widget_key in BUFFER_CHANNEL_WIDGET_KEYS.items():
+                    st.session_state.setdefault(widget_key, buffer_channels.get(platform, ""))
+
+                if st.button(
+                    tr("settings.publish.buffer_fetch_channels", fallback="Fetch Buffer Channels"),
+                    key="publish_buffer_fetch_channels_btn",
+                    use_container_width=True,
+                ):
+                    if not buffer_api_key.strip():
+                        st.error(
+                            tr(
+                                "settings.publish.buffer_fetch_missing_key",
+                                fallback="Enter a Buffer API Key before fetching channels.",
+                            )
+                        )
+                    else:
+                        try:
+                            publisher = BufferPublisher(api_key=buffer_api_key)
+                            channels = run_async(publisher.list_channels())
+                            detected_channels = BufferPublisher.supported_channel_ids_from_channels(channels)
+
+                            st.session_state["publish_buffer_last_channels"] = channels
+                            for platform, widget_key in BUFFER_CHANNEL_WIDGET_KEYS.items():
+                                if detected_channels.get(platform):
+                                    st.session_state[widget_key] = detected_channels[platform]
+
+                            if detected_channels:
+                                found = ", ".join(sorted(detected_channels))
+                                st.success(
+                                    tr(
+                                        "settings.publish.buffer_fetch_success",
+                                        fallback="Fetched Buffer channels and filled: {found}.",
+                                        found=found,
+                                    )
+                                )
+                            else:
+                                st.warning(
+                                    tr(
+                                        "settings.publish.buffer_fetch_no_supported",
+                                        fallback=(
+                                            "Buffer channels were fetched, but no supported YouTube, "
+                                            "TikTok, or X channels were found."
+                                        ),
+                                    )
+                                )
+                        except Exception as exc:
+                            st.error(
+                                tr(
+                                    "settings.publish.buffer_fetch_failed",
+                                    fallback="Failed to fetch Buffer channels: {error}",
+                                    error=str(exc),
+                                )
+                            )
+
+                last_channels = st.session_state.get("publish_buffer_last_channels") or []
+                if last_channels:
+                    st.caption(
+                        tr(
+                            "settings.publish.buffer_fetched_channels",
+                            fallback="Fetched channels:",
+                        )
+                        + " "
+                        + "; ".join(_format_buffer_channel(channel) for channel in last_channels)
+                    )
+
                 buffer_channel_youtube = st.text_input(
                     tr("settings.publish.buffer_channel_youtube", fallback="YouTube Channel ID"),
-                    value=buffer_channels.get("youtube", ""),
-                    key="publish_buffer_channel_youtube_input",
+                    key=BUFFER_CHANNEL_WIDGET_KEYS["youtube"],
                 )
                 buffer_channel_tiktok = st.text_input(
                     tr("settings.publish.buffer_channel_tiktok", fallback="TikTok Channel ID"),
-                    value=buffer_channels.get("tiktok", ""),
-                    key="publish_buffer_channel_tiktok_input",
+                    key=BUFFER_CHANNEL_WIDGET_KEYS["tiktok"],
                 )
                 buffer_channel_x = st.text_input(
                     tr("settings.publish.buffer_channel_x", fallback="X Channel ID"),
-                    value=buffer_channels.get("x", ""),
-                    key="publish_buffer_channel_x_input",
+                    key=BUFFER_CHANNEL_WIDGET_KEYS["x"],
                 )
 
-            with r2_col:
-                st.markdown(f"**{tr('settings.publish.r2_title', fallback='Cloudflare R2')}**")
-                r2_account_id = st.text_input(
-                    tr("settings.publish.r2_account_id", fallback="R2 Account ID"),
-                    value=r2_config.get("account_id", ""),
-                    key="publish_r2_account_id_input",
+            with cos_col:
+                st.markdown(f"**{tr('settings.publish.cos_title', fallback='Tencent COS')}**")
+                cos_region = st.text_input(
+                    tr("settings.publish.cos_region", fallback="COS Region"),
+                    value=cos_config.get("region", ""),
+                    help=tr("settings.publish.cos_region_help", fallback="Example: ap-hongkong, ap-singapore, ap-guangzhou."),
+                    key="publish_cos_region_input",
                 )
-                r2_bucket = st.text_input(
-                    tr("settings.publish.r2_bucket", fallback="R2 Bucket"),
-                    value=r2_config.get("bucket", ""),
-                    key="publish_r2_bucket_input",
+                cos_bucket = st.text_input(
+                    tr("settings.publish.cos_bucket", fallback="COS Bucket"),
+                    value=cos_config.get("bucket", ""),
+                    help=tr("settings.publish.cos_bucket_help", fallback="Use the full BucketName-APPID value, for example pixlle-1250000000."),
+                    key="publish_cos_bucket_input",
                 )
-                r2_access_key_id = st.text_input(
-                    tr("settings.publish.r2_access_key_id", fallback="R2 Access Key ID"),
-                    value=r2_config.get("access_key_id", ""),
+                cos_secret_id = st.text_input(
+                    tr("settings.publish.cos_secret_id", fallback="COS SecretId"),
+                    value=cos_config.get("secret_id", ""),
                     type="password",
-                    key="publish_r2_access_key_id_input",
+                    key="publish_cos_secret_id_input",
                 )
-                r2_secret_access_key = st.text_input(
-                    tr("settings.publish.r2_secret_access_key", fallback="R2 Secret Access Key"),
-                    value=r2_config.get("secret_access_key", ""),
+                cos_secret_key = st.text_input(
+                    tr("settings.publish.cos_secret_key", fallback="COS SecretKey"),
+                    value=cos_config.get("secret_key", ""),
                     type="password",
-                    key="publish_r2_secret_access_key_input",
+                    key="publish_cos_secret_key_input",
                 )
-                r2_public_base_url = st.text_input(
-                    tr("settings.publish.r2_public_base_url", fallback="R2 Public Base URL"),
-                    value=r2_config.get("public_base_url", ""),
+                cos_public_base_url = st.text_input(
+                    tr("settings.publish.cos_public_base_url", fallback="COS Public Base URL"),
+                    value=cos_config.get("public_base_url", ""),
                     help=tr(
-                        "settings.publish.r2_public_base_url_help",
-                        fallback="Example: https://pub-xxx.r2.dev or a custom public domain.",
+                        "settings.publish.cos_public_base_url_help",
+                        fallback="Example: https://bucket-appid.cos.ap-hongkong.myqcloud.com or a custom public domain.",
                     ),
-                    key="publish_r2_public_base_url_input",
+                    key="publish_cos_public_base_url_input",
                 )
-                r2_endpoint_url = st.text_input(
-                    tr("settings.publish.r2_endpoint_url", fallback="R2 Endpoint URL"),
-                    value=r2_config.get("endpoint_url") or "",
+                cos_endpoint_url = st.text_input(
+                    tr("settings.publish.cos_endpoint_url", fallback="COS Endpoint URL"),
+                    value=cos_config.get("endpoint_url") or "",
                     help=tr(
-                        "settings.publish.r2_endpoint_url_help",
-                        fallback="Optional. Leave empty to use https://{account_id}.r2.cloudflarestorage.com.",
+                        "settings.publish.cos_endpoint_url_help",
+                        fallback="Optional. Leave empty to use https://cos.{region}.myqcloud.com.",
                     ),
-                    key="publish_r2_endpoint_url_input",
+                    key="publish_cos_endpoint_url_input",
                 )
         
         # ====================================================================
@@ -460,12 +540,12 @@ def render_advanced_settings():
                         buffer_channel_tiktok=buffer_channel_tiktok or "",
                         buffer_channel_youtube=buffer_channel_youtube or "",
                         buffer_channel_x=buffer_channel_x or "",
-                        r2_account_id=r2_account_id or "",
-                        r2_bucket=r2_bucket or "",
-                        r2_access_key_id=r2_access_key_id or "",
-                        r2_secret_access_key=r2_secret_access_key or "",
-                        r2_public_base_url=r2_public_base_url or "",
-                        r2_endpoint_url=r2_endpoint_url or "",
+                        cos_region=cos_region or "",
+                        cos_bucket=cos_bucket or "",
+                        cos_secret_id=cos_secret_id or "",
+                        cos_secret_key=cos_secret_key or "",
+                        cos_public_base_url=cos_public_base_url or "",
+                        cos_endpoint_url=cos_endpoint_url or "",
                     )
                     
                     # Only save to file if LLM config is valid

@@ -30,7 +30,7 @@ CHANNEL_ENV_BY_PLATFORM = {
 
 
 class PublishManager:
-    """Coordinate R2 uploads, Buffer posts, and local publish status."""
+    """Coordinate object storage uploads, Buffer posts, and local publish status."""
 
     def __init__(
         self,
@@ -63,8 +63,8 @@ class PublishManager:
 
     def _get_storage(self) -> PublicMediaStorage:
         if self.storage is None:
-            r2_config = self.publish_config.get("r2")
-            self.storage = PublicMediaStorage.from_config(r2_config) if r2_config else PublicMediaStorage.from_env()
+            cos_config = self.publish_config.get("cos")
+            self.storage = PublicMediaStorage.from_config(cos_config) if cos_config else PublicMediaStorage.from_env()
         return self.storage
 
     def _get_publisher(self) -> BufferPublisher:
@@ -158,11 +158,13 @@ class PublishManager:
 
         if publishable_jobs and not public_url:
             try:
-                public_url = self._get_storage().upload_video(video_path, task_id=task_id)
+                storage = self._get_storage()
+                public_url = storage.upload_video(video_path, task_id=task_id)
             except Exception as exc:
+                storage_name = getattr(self.storage, "display_name", "Object storage")
                 for job in publishable_jobs:
                     job["status"] = "failed"
-                    job["error"] = f"R2 upload failed: {exc}"
+                    job["error"] = f"{storage_name} upload failed: {exc}"
                     job["updated_at"] = datetime.now().isoformat()
                 record["jobs"] = list(jobs_by_platform.values())
                 await self.save_publish_record(task_id, record)
@@ -233,9 +235,9 @@ class PublishManager:
         try:
             storage = self._get_storage()
             ok, message = await asyncio.to_thread(storage.check_upload_roundtrip)
-            checks.append({"name": "Cloudflare R2", "ok": ok, "message": message})
+            checks.append({"name": storage.display_name, "ok": ok, "message": message})
         except Exception as exc:
-            checks.append({"name": "Cloudflare R2", "ok": False, "message": str(exc)})
+            checks.append({"name": "Tencent COS", "ok": False, "message": str(exc)})
 
         try:
             publisher = self._get_publisher()

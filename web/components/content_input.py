@@ -27,6 +27,26 @@ BGM_AUDIO_EXTENSIONS = ('.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg')
 BGM_UPLOAD_TYPES = [ext.lstrip(".") for ext in BGM_AUDIO_EXTENSIONS]
 
 
+def parse_batch_text_input(text_input: str, mode: str) -> list[str]:
+    """Parse batch text input into one item per video."""
+    text = (text_input or "").strip()
+    if not text:
+        return []
+
+    if mode == "fixed":
+        return [
+            block.strip()
+            for block in re.split(r"(?m)^\s*---+\s*$", text)
+            if block.strip()
+        ]
+
+    return [
+        line.strip()
+        for line in text.split("\n")
+        if line.strip()
+    ]
+
+
 def _safe_bgm_filename(filename: str) -> str:
     raw_name = (filename or "").replace("\\", "/")
     name = Path(raw_name).name.strip()
@@ -147,80 +167,131 @@ def render_content_input():
         
         else:
             # ================================================================
-            # Batch mode (simplified YAGNI version)
+            # Batch mode
             # ================================================================
             st.markdown(f"**{tr('batch.section_title')}**")
+
+            batch_content_mode = st.radio(
+                tr("batch.content_mode_label"),
+                ["generate", "fixed"],
+                horizontal=True,
+                format_func=lambda x: tr(f"mode.{x}"),
+                help=tr("batch.content_mode_help")
+            )
             
             # Batch rules info
-            st.info(f"""
+            if batch_content_mode == "fixed":
+                st.info(f"""
 **{tr('batch.rules_title')}**
-- ✅ {tr('batch.rule_1')}
-- ✅ {tr('batch.rule_2')}
+- ✅ {tr('batch.rule_fixed_1')}
+- ✅ {tr('batch.rule_fixed_2')}
+- ✅ {tr('batch.rule_3')}
+            """)
+            else:
+                st.info(f"""
+**{tr('batch.rules_title')}**
+- ✅ {tr('batch.rule_generate_1')}
+- ✅ {tr('batch.rule_generate_2')}
 - ✅ {tr('batch.rule_3')}
             """)
             
-            # Batch topics input
+            input_label = (
+                tr("batch.scripts_label")
+                if batch_content_mode == "fixed"
+                else tr("batch.topics_label")
+            )
+            input_placeholder = (
+                tr("batch.scripts_placeholder")
+                if batch_content_mode == "fixed"
+                else tr("batch.topics_placeholder")
+            )
+            input_help = (
+                tr("batch.scripts_help")
+                if batch_content_mode == "fixed"
+                else tr("batch.topics_help")
+            )
+
+            # Batch content input
             text_input = st.text_area(
-                tr("batch.topics_label"),
+                input_label,
                 height=300,
-                placeholder=tr("batch.topics_placeholder"),
-                help=tr("batch.topics_help")
+                placeholder=input_placeholder,
+                help=input_help
             )
             
-            # Split topics by newline
+            batch_items = parse_batch_text_input(text_input, batch_content_mode)
+
             if text_input:
-                # Simple split by newline, filter empty lines
-                topics = [
-                    line.strip() 
-                    for line in text_input.strip().split('\n') 
-                    if line.strip()
-                ]
-                
-                if topics:
+                if batch_items:
                     # Check count limit
-                    if len(topics) > 100:
-                        st.error(tr("batch.count_error", count=len(topics)))
-                        topics = []
+                    if len(batch_items) > 100:
+                        st.error(tr("batch.count_error", count=len(batch_items)))
+                        batch_items = []
                     else:
-                        st.success(tr("batch.count_success", count=len(topics)))
+                        st.success(tr("batch.count_success", count=len(batch_items)))
                         
-                        # Preview topics list
+                        # Preview batch item list
                         with st.expander(tr("batch.preview_title"), expanded=False):
-                            for i, topic in enumerate(topics, 1):
-                                st.markdown(f"`{i}.` {topic}")
+                            for i, item in enumerate(batch_items, 1):
+                                preview_text = item.splitlines()[0] if item.splitlines() else item
+                                if len(preview_text) > 80:
+                                    preview_text = f"{preview_text[:80]}..."
+                                st.markdown(f"`{i}.` {preview_text}")
                 else:
-                    topics = []
-            else:
-                topics = []
+                    batch_items = []
             
             st.markdown("---")
             
             # Title prefix (optional)
+            title_prefix_help = (
+                tr("batch.title_prefix_help_fixed")
+                if batch_content_mode == "fixed"
+                else tr("batch.title_prefix_help")
+            )
             title_prefix = st.text_input(
                 tr("batch.title_prefix_label"),
                 placeholder=tr("batch.title_prefix_placeholder"),
-                help=tr("batch.title_prefix_help")
+                help=title_prefix_help
             )
             
-            # Number of scenes (unified for all videos)
-            n_scenes = st.slider(
-                tr("batch.n_scenes_label"),
-                min_value=3,
-                max_value=30,
-                value=5,
-                help=tr("batch.n_scenes_help")
-            )
-            st.caption(tr("batch.n_scenes_caption", n=n_scenes))
+            if batch_content_mode == "fixed":
+                split_mode_options = {
+                    "paragraph": tr("split.mode_paragraph"),
+                    "line": tr("split.mode_line"),
+                    "sentence": tr("split.mode_sentence"),
+                }
+                split_mode = st.selectbox(
+                    tr("split.mode_label"),
+                    options=list(split_mode_options.keys()),
+                    format_func=lambda x: split_mode_options[x],
+                    index=0,
+                    help=tr("split.mode_help")
+                )
+                n_scenes = 5
+                st.info(tr("video.frames_fixed_mode_hint"))
+            else:
+                split_mode = "paragraph"
+
+                # Number of scenes (unified for all videos)
+                n_scenes = st.slider(
+                    tr("batch.n_scenes_label"),
+                    min_value=3,
+                    max_value=30,
+                    value=5,
+                    help=tr("batch.n_scenes_help")
+                )
+                st.caption(tr("batch.n_scenes_caption", n=n_scenes))
             
             # Config info
             st.info(f"📌 {tr('batch.config_info')}")
             
             return {
                 "batch_mode": True,
-                "topics": topics,
-                "mode": "generate",  # Fixed to AI generate content
+                "topics": batch_items,
+                "mode": batch_content_mode,
                 "title_prefix": title_prefix,
                 "n_scenes": n_scenes,
+                "split_mode": split_mode,
             }
 
 

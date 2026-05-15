@@ -13,10 +13,19 @@
 """
 Lightweight batch manager for Streamlit (Simplified YAGNI version)
 """
-import time
 import traceback
-from typing import List, Dict, Any, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional
+
 from loguru import logger
+
+
+def _batch_item_label(item: str, index: int) -> str:
+    first_line = (item or "").strip().splitlines()[0] if (item or "").strip() else ""
+    if not first_line:
+        first_line = f"Task {index}"
+    if len(first_line) > 80:
+        return f"{first_line[:80]}..."
+    return first_line
 
 
 class SimpleBatchManager:
@@ -24,8 +33,8 @@ class SimpleBatchManager:
     Ultra-simple batch manager following YAGNI principle
     
     Design principles:
-    1. Only supports "AI generate content" mode
-    2. Same config for all videos, only topics differ
+    1. Supports batch AI topics and batch fixed scripts
+    2. Same config for all videos, only input text differs
     3. No CSV, no complex validation, just loop and execute
     """
     
@@ -48,7 +57,7 @@ class SimpleBatchManager:
         
         Args:
             pixelle_video: PixelleVideoCore instance
-            topics: List of topics (one per video)
+            topics: List of topics or fixed scripts (one per video)
             shared_config: Shared configuration for all videos
             overall_progress_callback: Callback for overall progress
             task_progress_callback_factory: Factory function to create per-task callback
@@ -66,47 +75,52 @@ class SimpleBatchManager:
         self.errors = []
         self.total_count = len(topics)
         
-        logger.info(f"Starting batch generation: {self.total_count} topics")
+        mode = shared_config.get("mode", "generate")
+        logger.info(f"Starting batch generation: {self.total_count} items (mode={mode})")
         
-        for idx, topic in enumerate(topics, 1):
+        for idx, item in enumerate(topics, 1):
             self.current_index = idx
+            item_label = _batch_item_label(item, idx)
             
             # Report overall progress
             if overall_progress_callback:
                 overall_progress_callback(
                     current=idx,
                     total=self.total_count,
-                    topic=topic
+                    topic=item_label
                 )
             
             try:
-                logger.info(f"Task {idx}/{self.total_count} started: {topic}")
+                logger.info(f"Task {idx}/{self.total_count} started: {item_label}")
                 
                 # Extract title_prefix from shared_config (not a valid parameter for generate_video)
                 title_prefix = shared_config.get("title_prefix")
                 
                 # Build task params (merge topic with shared config, excluding title_prefix)
                 task_params = {
-                    "text": topic,  # Topic as input
-                    "mode": "generate",  # Fixed mode
+                    "text": item,
+                    "mode": mode,
                 }
                 
                 # Merge shared config, excluding title_prefix and None values
                 # Filter out None values to avoid interfering with parameter logic in generate_video
                 for key, value in shared_config.items():
-                    if key != "title_prefix" and value is not None:
+                    if key not in ("title_prefix", "mode") and value is not None:
                         task_params[key] = value
                 
                 # Generate title using title_prefix
-                if title_prefix:
-                    task_params["title"] = f"{title_prefix} - {topic}"
-                else:
-                    # Use topic as title
-                    task_params["title"] = topic
+                if mode == "generate":
+                    if title_prefix:
+                        task_params["title"] = f"{title_prefix} - {item_label}"
+                    else:
+                        # Use topic as title
+                        task_params["title"] = item_label
+                elif title_prefix:
+                    task_params["title"] = f"{title_prefix} - {idx}"
                 
                 # Add per-task progress callback
                 if task_progress_callback_factory:
-                    task_params["progress_callback"] = task_progress_callback_factory(idx, topic)
+                    task_params["progress_callback"] = task_progress_callback_factory(idx, item_label)
                 
                 # Execute generation
                 from web.utils.async_helpers import run_async
@@ -119,7 +133,8 @@ class SimpleBatchManager:
                 # Record success
                 self.results.append({
                     "index": idx,
-                    "topic": topic,
+                    "topic": item_label,
+                    "input_text": item,
                     "task_id": task_id,
                     "video_path": result.video_path,
                     "status": "success"
@@ -137,7 +152,8 @@ class SimpleBatchManager:
                 
                 self.errors.append({
                     "index": idx,
-                    "topic": topic,
+                    "topic": item_label,
+                    "input_text": item,
                     "error": error_msg,
                     "traceback": error_trace,
                     "status": "failed"
@@ -162,4 +178,3 @@ class SimpleBatchManager:
             "success_count": success_count,
             "failed_count": failed_count
         }
-

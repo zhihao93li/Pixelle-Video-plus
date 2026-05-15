@@ -148,20 +148,20 @@ class BufferPublishConfig(BaseModel):
     channels: BufferChannelsConfig = Field(default_factory=BufferChannelsConfig)
 
 
-class R2PublishConfig(BaseModel):
-    """Cloudflare R2 public media storage configuration."""
-    account_id: str = Field(default="", description="Cloudflare account ID")
-    bucket: str = Field(default="", description="Cloudflare R2 bucket name")
-    access_key_id: str = Field(default="", description="R2 access key ID")
-    secret_access_key: str = Field(default="", description="R2 secret access key")
-    public_base_url: str = Field(default="", description="Public base URL for R2 objects")
-    endpoint_url: Optional[str] = Field(default=None, description="Optional custom S3-compatible endpoint")
+class COSPublishConfig(BaseModel):
+    """Tencent Cloud COS public media storage configuration."""
+    region: str = Field(default="", description="Tencent COS region, e.g. ap-hongkong")
+    bucket: str = Field(default="", description="Tencent COS bucket name in BucketName-APPID format")
+    secret_id: str = Field(default="", description="Tencent Cloud SecretId")
+    secret_key: str = Field(default="", description="Tencent Cloud SecretKey")
+    public_base_url: str = Field(default="", description="Public base URL for COS objects")
+    endpoint_url: Optional[str] = Field(default=None, description="Optional COS S3-compatible endpoint")
 
 
 class PublishConfig(BaseModel):
     """Publishing configuration for Buffer and public media storage."""
     buffer: BufferPublishConfig = Field(default_factory=BufferPublishConfig)
-    r2: R2PublishConfig = Field(default_factory=R2PublishConfig)
+    cos: COSPublishConfig = Field(default_factory=COSPublishConfig)
 
 
 class PixelleVideoConfig(BaseModel):

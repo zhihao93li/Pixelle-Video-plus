@@ -27,6 +27,14 @@ class BufferPostResult:
 class BufferPublisher:
     """Small wrapper around Buffer's GraphQL API."""
 
+    SUPPORTED_CHANNEL_SERVICES = {
+        "youtube": "youtube",
+        "youtube-shorts": "youtube",
+        "tiktok": "tiktok",
+        "twitter": "x",
+        "x": "x",
+    }
+
     CREATE_VIDEO_POST_MUTATION = """
     mutation CreatePost($input: CreatePostInput!) {
       createPost(input: $input) {
@@ -40,6 +48,29 @@ class BufferPublisher:
         ... on MutationError {
           message
         }
+      }
+    }
+    """
+
+    GET_ORGANIZATIONS_QUERY = """
+    query GetOrganizations {
+      account {
+        organizations {
+          id
+          name
+        }
+      }
+    }
+    """
+
+    LIST_CHANNELS_QUERY = """
+    query GetChannels($input: ChannelsInput!) {
+      channels(input: $input) {
+        id
+        name
+        displayName
+        service
+        isQueuePaused
       }
     }
     """
@@ -108,6 +139,44 @@ class BufferPublisher:
             raise BufferPublishError("; ".join(messages))
 
         return data.get("data") or {}
+
+    async def list_organizations(self) -> list[dict[str, Any]]:
+        """List organizations available to the configured Buffer API key."""
+        data = await self._graphql(self.GET_ORGANIZATIONS_QUERY)
+        account = data.get("account") or {}
+        organizations = account.get("organizations") or []
+        return [org for org in organizations if isinstance(org, dict)]
+
+    async def list_channels(self, organization_id: str | None = None) -> list[dict[str, Any]]:
+        """List Buffer channels for an organization, defaulting to the first account organization."""
+        resolved_organization_id = (organization_id or "").strip()
+        if not resolved_organization_id:
+            organizations = await self.list_organizations()
+            if not organizations:
+                raise BufferPublishError("Buffer account has no organizations")
+            resolved_organization_id = str(organizations[0].get("id") or "").strip()
+            if not resolved_organization_id:
+                raise BufferPublishError("Buffer organization id is missing")
+
+        data = await self._graphql(
+            self.LIST_CHANNELS_QUERY,
+            variables={"input": {"organizationId": resolved_organization_id}},
+        )
+        channels = data.get("channels") or []
+        return [channel for channel in channels if isinstance(channel, dict)]
+
+    @classmethod
+    def supported_channel_ids_from_channels(cls, channels: list[dict[str, Any]]) -> dict[str, str]:
+        """Return Pixlle-supported platform channel IDs from Buffer channel payloads."""
+        supported: dict[str, str] = {}
+        for channel in channels:
+            channel_id = str(channel.get("id") or "").strip()
+            service = str(channel.get("service") or "").strip().lower().replace("_", "-")
+            platform = cls.SUPPORTED_CHANNEL_SERVICES.get(service)
+            if not channel_id or not platform or platform in supported:
+                continue
+            supported[platform] = channel_id
+        return supported
 
     async def create_video_post(
         self,

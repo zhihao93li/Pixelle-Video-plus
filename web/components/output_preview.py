@@ -256,8 +256,10 @@ def render_batch_output(pixelle_video, video_params):
         ):
             # Prepare shared config
             shared_config = {
+                "mode": video_params.get("mode") or "generate",
                 "title_prefix": video_params.get("title_prefix"),
                 "n_scenes": video_params.get("n_scenes") or 5,
+                "split_mode": video_params.get("split_mode") or "paragraph",
                 "media_workflow": video_params.get("media_workflow"),
                 "frame_template": video_params.get("frame_template"),
                 "prompt_prefix": video_params.get("prompt_prefix") or "",
