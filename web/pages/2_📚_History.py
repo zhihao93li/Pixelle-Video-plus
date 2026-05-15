@@ -16,7 +16,7 @@ History Page - View generation history and manage tasks
 
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, time as datetime_time
 import os
 
 # Add project root to sys.path
@@ -32,6 +32,7 @@ from web.state.session import init_session_state, init_i18n, get_pixelle_video
 from web.components.header import render_header
 from web.i18n import tr
 from web.utils.async_helpers import run_async
+from web.utils.publish_helpers import build_default_caption
 
 # Page config
 st.set_page_config(
@@ -81,6 +82,126 @@ def truncate_text(text: str, max_length: int = 60) -> str:
     if len(text) <= max_length:
         return text
     return text[:max_length] + "..."
+
+
+def render_publish_record(record: dict | None):
+    """Render persisted publish status."""
+    if not record:
+        return
+
+    public_url = record.get("public_video_url")
+    if public_url:
+        st.caption(f"Public video URL: {public_url}")
+
+    jobs = record.get("jobs", [])
+    if not jobs:
+        return
+
+    status_icon = {
+        "pending": "⏳",
+        "uploaded": "☁️",
+        "scheduled": "✅",
+        "sent": "✅",
+        "failed": "❌",
+    }
+
+    for job in jobs:
+        platform = job.get("platform", "unknown")
+        status = job.get("status", "unknown")
+        icon = status_icon.get(status, "•")
+        post_id = job.get("buffer_post_id") or "-"
+        due_at = job.get("due_at") or "-"
+        error = job.get("error")
+        st.markdown(f"{icon} **{platform}**: `{status}` | Buffer post: `{post_id}` | due: `{due_at}`")
+        if error:
+            st.caption(f"Error: {error}")
+
+
+def render_publish_panel(task_id: str, pixelle_video, metadata: dict):
+    """Render Buffer publish controls for a completed task."""
+    if metadata.get("status") != "completed":
+        return
+
+    publish_manager = getattr(pixelle_video, "publish", None)
+    if publish_manager is None:
+        st.warning("Publish manager is not initialized")
+        return
+
+    st.divider()
+    st.markdown("**🚀 Publish to Buffer**")
+
+    record = run_async(publish_manager.load_publish_record(task_id))
+    render_publish_record(record)
+
+    platform_options = ["youtube", "tiktok", "x"]
+    selected_platforms = st.multiselect(
+        "Platforms",
+        options=platform_options,
+        default=["youtube"],
+        key=f"publish_platforms_{task_id}",
+    )
+
+    caption = st.text_area(
+        "Caption",
+        value=build_default_caption(metadata),
+        height=160,
+        key=f"publish_caption_{task_id}",
+    )
+
+    schedule_mode = st.radio(
+        "Schedule mode",
+        options=["Add to Buffer queue", "Schedule at time"],
+        horizontal=True,
+        key=f"publish_schedule_mode_{task_id}",
+    )
+
+    due_at = None
+    if schedule_mode == "Schedule at time":
+        col_date, col_time = st.columns(2)
+        with col_date:
+            due_date = st.date_input("Publish date", key=f"publish_due_date_{task_id}")
+        with col_time:
+            due_time = st.time_input(
+                "Publish time",
+                value=datetime_time(hour=9, minute=0),
+                key=f"publish_due_time_{task_id}",
+            )
+        due_at = datetime.combine(due_date, due_time).astimezone().isoformat()
+
+    col_publish, col_check = st.columns(2)
+    with col_publish:
+        if st.button(
+            "Submit to Buffer",
+            key=f"publish_submit_{task_id}",
+            disabled=not selected_platforms or not caption.strip(),
+            use_container_width=True,
+        ):
+            try:
+                updated_record = run_async(
+                    publish_manager.publish_task(
+                        task_id=task_id,
+                        platforms=selected_platforms,
+                        caption=caption.strip(),
+                        due_at=due_at,
+                    )
+                )
+                st.success("Publish jobs submitted to Buffer")
+                render_publish_record(updated_record)
+            except Exception as e:
+                st.error(f"Publish failed: {e}")
+
+    with col_check:
+        if st.button(
+            "Check publish config",
+            key=f"publish_check_{task_id}",
+            use_container_width=True,
+        ):
+            checks = run_async(publish_manager.check_configuration(selected_platforms or platform_options))
+            for check in checks:
+                if check.get("ok"):
+                    st.success(f"{check['name']}: {check['message']}")
+                else:
+                    st.error(f"{check['name']}: {check['message']}")
 
 
 def render_sidebar_controls(pixelle_video):
@@ -363,9 +484,11 @@ def render_task_detail_modal(task_id: str, pixelle_video):
                 )
         else:
             st.warning("Video file not found")
-    
+
+    render_publish_panel(task_id, pixelle_video, metadata)
+
     st.divider()
-    
+
     # Close button at the bottom
     if st.button("❌ " + tr("history.detail.close"), key=f"close_detail_bottom_{task_id}"):
         st.session_state[f"detail_{task_id}"] = False

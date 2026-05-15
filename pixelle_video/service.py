@@ -20,22 +20,23 @@ import hashlib
 import json
 from typing import Optional
 
-from loguru import logger
 from comfykit import ComfyKit
+from loguru import logger
 
 from pixelle_video.config import config_manager
-from pixelle_video.services.llm_service import LLMService
-from pixelle_video.services.tts_service import TTSService
-from pixelle_video.services.media import MediaService
-from pixelle_video.services.image_analysis import ImageAnalysisService
-from pixelle_video.services.video_analysis import VideoAnalysisService
-from pixelle_video.services.video import VideoService
-from pixelle_video.services.frame_processor import FrameProcessor
-from pixelle_video.services.persistence import PersistenceService
-from pixelle_video.services.history_manager import HistoryManager
-from pixelle_video.pipelines.standard import StandardPipeline
-from pixelle_video.pipelines.custom import CustomPipeline
 from pixelle_video.pipelines.asset_based import AssetBasedPipeline
+from pixelle_video.pipelines.custom import CustomPipeline
+from pixelle_video.pipelines.standard import StandardPipeline
+from pixelle_video.services.frame_processor import FrameProcessor
+from pixelle_video.services.history_manager import HistoryManager
+from pixelle_video.services.image_analysis import ImageAnalysisService
+from pixelle_video.services.llm_service import LLMService
+from pixelle_video.services.media import MediaService
+from pixelle_video.services.persistence import PersistenceService
+from pixelle_video.services.publish_manager import PublishManager
+from pixelle_video.services.tts_service import TTSService
+from pixelle_video.services.video import VideoService
+from pixelle_video.services.video_analysis import VideoAnalysisService
 
 
 class PixelleVideoCore:
@@ -94,6 +95,7 @@ class PixelleVideoCore:
         self.frame_processor: Optional[FrameProcessor] = None
         self.persistence: Optional[PersistenceService] = None
         self.history: Optional[HistoryManager] = None
+        self.publish: Optional[PublishManager] = None
         
         # Video generation pipelines (dictionary of pipeline_name -> pipeline_instance)
         self.pipelines = {}
@@ -204,6 +206,10 @@ class PixelleVideoCore:
         self.frame_processor = FrameProcessor(self)
         self.persistence = PersistenceService(output_dir="output")
         self.history = HistoryManager(self.persistence)
+        self.publish = PublishManager(
+            persistence=self.persistence,
+            publish_config=config_manager.get_publish_config(),
+        )
         
         # 2. Register video generation pipelines
         self.pipelines = {

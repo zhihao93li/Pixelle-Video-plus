@@ -135,12 +135,42 @@ class TemplateConfig(BaseModel):
     )
 
 
+class BufferChannelsConfig(BaseModel):
+    """Buffer channel IDs for each publish target."""
+    tiktok: str = Field(default="", description="Buffer TikTok channel ID")
+    youtube: str = Field(default="", description="Buffer YouTube channel ID")
+    x: str = Field(default="", description="Buffer X channel ID")
+
+
+class BufferPublishConfig(BaseModel):
+    """Buffer publishing configuration."""
+    api_key: str = Field(default="", description="Buffer API key")
+    channels: BufferChannelsConfig = Field(default_factory=BufferChannelsConfig)
+
+
+class R2PublishConfig(BaseModel):
+    """Cloudflare R2 public media storage configuration."""
+    account_id: str = Field(default="", description="Cloudflare account ID")
+    bucket: str = Field(default="", description="Cloudflare R2 bucket name")
+    access_key_id: str = Field(default="", description="R2 access key ID")
+    secret_access_key: str = Field(default="", description="R2 secret access key")
+    public_base_url: str = Field(default="", description="Public base URL for R2 objects")
+    endpoint_url: Optional[str] = Field(default=None, description="Optional custom S3-compatible endpoint")
+
+
+class PublishConfig(BaseModel):
+    """Publishing configuration for Buffer and public media storage."""
+    buffer: BufferPublishConfig = Field(default_factory=BufferPublishConfig)
+    r2: R2PublishConfig = Field(default_factory=R2PublishConfig)
+
+
 class PixelleVideoConfig(BaseModel):
     """Pixelle-Video main configuration"""
     project_name: str = Field(default="Pixelle-Video", description="Project name")
     llm: LLMConfig = Field(default_factory=LLMConfig)
     comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
     template: TemplateConfig = Field(default_factory=TemplateConfig)
+    publish: PublishConfig = Field(default_factory=PublishConfig)
 
     def is_llm_configured(self) -> bool:
         """Check if LLM is properly configured"""

@@ -196,3 +196,59 @@ class ConfigManager:
 
         if updates:
             self.update({"comfyui": {"tts": {"fish_audio": updates}}})
+
+    def get_publish_config(self) -> dict:
+        """Get publish configuration as dict."""
+        return self.config.publish.model_dump()
+
+    def set_publish_config(
+        self,
+        buffer_api_key: Optional[str] = None,
+        buffer_channel_tiktok: Optional[str] = None,
+        buffer_channel_youtube: Optional[str] = None,
+        buffer_channel_x: Optional[str] = None,
+        r2_account_id: Optional[str] = None,
+        r2_bucket: Optional[str] = None,
+        r2_access_key_id: Optional[str] = None,
+        r2_secret_access_key: Optional[str] = None,
+        r2_public_base_url: Optional[str] = None,
+        r2_endpoint_url: Optional[str] = None,
+    ):
+        """Set Buffer and Cloudflare R2 publish configuration."""
+        buffer_updates = {}
+        channel_updates = {}
+        r2_updates = {}
+
+        if buffer_api_key is not None:
+            buffer_updates["api_key"] = buffer_api_key
+        if buffer_channel_tiktok is not None:
+            channel_updates["tiktok"] = buffer_channel_tiktok
+        if buffer_channel_youtube is not None:
+            channel_updates["youtube"] = buffer_channel_youtube
+        if buffer_channel_x is not None:
+            channel_updates["x"] = buffer_channel_x
+
+        if r2_account_id is not None:
+            r2_updates["account_id"] = r2_account_id
+        if r2_bucket is not None:
+            r2_updates["bucket"] = r2_bucket
+        if r2_access_key_id is not None:
+            r2_updates["access_key_id"] = r2_access_key_id
+        if r2_secret_access_key is not None:
+            r2_updates["secret_access_key"] = r2_secret_access_key
+        if r2_public_base_url is not None:
+            r2_updates["public_base_url"] = r2_public_base_url.rstrip("/")
+        if r2_endpoint_url is not None:
+            r2_updates["endpoint_url"] = r2_endpoint_url or None
+
+        if channel_updates:
+            buffer_updates["channels"] = channel_updates
+
+        updates = {}
+        if buffer_updates:
+            updates["buffer"] = buffer_updates
+        if r2_updates:
+            updates["r2"] = r2_updates
+
+        if updates:
+            self.update({"publish": updates})
