@@ -139,7 +139,9 @@ class BufferChannelsConfig(BaseModel):
     """Buffer channel IDs for each publish target."""
     tiktok: str = Field(default="", description="Buffer TikTok channel ID")
     youtube: str = Field(default="", description="Buffer YouTube channel ID")
+    instagram: str = Field(default="", description="Buffer Instagram channel ID")
     x: str = Field(default="", description="Buffer X channel ID")
+    pinterest: str = Field(default="", description="Buffer Pinterest channel ID")
 
 
 class BufferPublishConfig(BaseModel):

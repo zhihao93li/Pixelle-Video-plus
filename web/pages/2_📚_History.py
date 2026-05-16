@@ -26,13 +26,16 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 import streamlit as st
-from loguru import logger
 
 from web.state.session import init_session_state, init_i18n, get_pixelle_video
 from web.components.header import render_header
 from web.i18n import tr
 from web.utils.async_helpers import run_async
-from web.utils.publish_helpers import build_default_caption
+from web.utils.publish_helpers import (
+    append_hashtags_to_caption,
+    build_default_caption,
+    build_default_title,
+)
 
 # Page config
 st.set_page_config(
@@ -92,6 +95,8 @@ def render_publish_record(record: dict | None):
     public_url = record.get("public_video_url")
     if public_url:
         st.caption(f"Public video URL: {public_url}")
+    if record.get("title"):
+        st.caption(f"Title: {record['title']}")
 
     jobs = record.get("jobs", [])
     if not jobs:
@@ -133,12 +138,23 @@ def render_publish_panel(task_id: str, pixelle_video, metadata: dict):
     record = run_async(publish_manager.load_publish_record(task_id))
     render_publish_record(record)
 
-    platform_options = ["youtube", "tiktok", "x"]
+    from pixelle_video.services.publish_manager import (
+        PUBLISH_PLATFORM_LABELS,
+        SUPPORTED_PUBLISH_PLATFORMS,
+    )
+
+    platform_options = list(SUPPORTED_PUBLISH_PLATFORMS)
     selected_platforms = st.multiselect(
         "Platforms",
         options=platform_options,
         default=["youtube"],
+        format_func=lambda platform: PUBLISH_PLATFORM_LABELS.get(platform, platform),
         key=f"publish_platforms_{task_id}",
+    )
+    publish_title = st.text_input(
+        "Title",
+        value=build_default_title(metadata),
+        key=f"publish_title_{task_id}",
     )
 
     caption = st.text_area(
@@ -146,6 +162,20 @@ def render_publish_panel(task_id: str, pixelle_video, metadata: dict):
         value=build_default_caption(metadata),
         height=160,
         key=f"publish_caption_{task_id}",
+    )
+    hashtags = st.text_input(
+        "Hashtags",
+        placeholder="#ai #video #shorts",
+        key=f"publish_hashtags_{task_id}",
+    )
+    publish_caption = append_hashtags_to_caption(caption, hashtags)
+    requires_title = "youtube" in selected_platforms
+    if requires_title and not publish_title.strip():
+        st.warning("YouTube title is required")
+    publish_disabled = (
+        not selected_platforms
+        or not publish_caption.strip()
+        or (requires_title and not publish_title.strip())
     )
 
     schedule_mode = st.radio(
@@ -173,7 +203,7 @@ def render_publish_panel(task_id: str, pixelle_video, metadata: dict):
         if st.button(
             "Submit to Buffer",
             key=f"publish_submit_{task_id}",
-            disabled=not selected_platforms or not caption.strip(),
+            disabled=publish_disabled,
             use_container_width=True,
         ):
             try:
@@ -181,7 +211,8 @@ def render_publish_panel(task_id: str, pixelle_video, metadata: dict):
                     publish_manager.publish_task(
                         task_id=task_id,
                         platforms=selected_platforms,
-                        caption=caption.strip(),
+                        caption=publish_caption.strip(),
+                        title=publish_title.strip(),
                         due_at=due_at,
                     )
                 )

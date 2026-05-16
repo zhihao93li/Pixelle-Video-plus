@@ -28,6 +28,21 @@ def _batch_item_label(item: str, index: int) -> str:
     return first_line
 
 
+def _fixed_batch_title_and_body(item: str, index: int) -> tuple[str, str]:
+    """Use the first line of a stripped block as title and the rest as script body."""
+    text = (item or "").strip()
+    if not text:
+        fallback = f"Task {index}"
+        return fallback, ""
+
+    lines = text.splitlines()
+    title = lines[0].strip() or f"Task {index}"
+    body = "\n".join(lines[1:]).strip()
+    if not body:
+        body = text
+    return title, body
+
+
 class SimpleBatchManager:
     """
     Ultra-simple batch manager following YAGNI principle
@@ -80,7 +95,13 @@ class SimpleBatchManager:
         
         for idx, item in enumerate(topics, 1):
             self.current_index = idx
-            item_label = _batch_item_label(item, idx)
+            fixed_title = None
+            fixed_body = item
+            if mode == "fixed":
+                fixed_title, fixed_body = _fixed_batch_title_and_body(item, idx)
+                item_label = fixed_title
+            else:
+                item_label = _batch_item_label(item, idx)
             
             # Report overall progress
             if overall_progress_callback:
@@ -98,7 +119,7 @@ class SimpleBatchManager:
                 
                 # Build task params (merge topic with shared config, excluding title_prefix)
                 task_params = {
-                    "text": item,
+                    "text": fixed_body,
                     "mode": mode,
                 }
                 
@@ -115,8 +136,8 @@ class SimpleBatchManager:
                     else:
                         # Use topic as title
                         task_params["title"] = item_label
-                elif title_prefix:
-                    task_params["title"] = f"{title_prefix} - {idx}"
+                elif fixed_title:
+                    task_params["title"] = fixed_title
                 
                 # Add per-task progress callback
                 if task_progress_callback_factory:
@@ -134,7 +155,7 @@ class SimpleBatchManager:
                 self.results.append({
                     "index": idx,
                     "topic": item_label,
-                    "input_text": item,
+                    "input_text": fixed_body,
                     "task_id": task_id,
                     "video_path": result.video_path,
                     "status": "success"
@@ -153,7 +174,7 @@ class SimpleBatchManager:
                 self.errors.append({
                     "index": idx,
                     "topic": item_label,
-                    "input_text": item,
+                    "input_text": fixed_body,
                     "error": error_msg,
                     "traceback": error_trace,
                     "status": "failed"

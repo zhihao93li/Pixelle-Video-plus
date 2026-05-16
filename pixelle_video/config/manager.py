@@ -204,6 +204,8 @@ class ConfigManager:
     def set_publish_config(
         self,
         buffer_api_key: Optional[str] = None,
+        buffer_channel_instagram: Optional[str] = None,
+        buffer_channel_pinterest: Optional[str] = None,
         buffer_channel_tiktok: Optional[str] = None,
         buffer_channel_youtube: Optional[str] = None,
         buffer_channel_x: Optional[str] = None,
@@ -221,6 +223,10 @@ class ConfigManager:
 
         if buffer_api_key is not None:
             buffer_updates["api_key"] = buffer_api_key
+        if buffer_channel_instagram is not None:
+            channel_updates["instagram"] = buffer_channel_instagram
+        if buffer_channel_pinterest is not None:
+            channel_updates["pinterest"] = buffer_channel_pinterest
         if buffer_channel_tiktok is not None:
             channel_updates["tiktok"] = buffer_channel_tiktok
         if buffer_channel_youtube is not None:

@@ -23,9 +23,27 @@ from pixelle_video.services.persistence import PersistenceService
 from pixelle_video.services.public_storage import PublicMediaStorage
 
 CHANNEL_ENV_BY_PLATFORM = {
-    "tiktok": "BUFFER_CHANNEL_TIKTOK",
     "youtube": "BUFFER_CHANNEL_YOUTUBE",
+    "tiktok": "BUFFER_CHANNEL_TIKTOK",
+    "instagram": "BUFFER_CHANNEL_INSTAGRAM",
     "x": "BUFFER_CHANNEL_X",
+    "pinterest": "BUFFER_CHANNEL_PINTEREST",
+}
+
+PUBLISH_PLATFORM_ALIASES = {
+    "ig": "instagram",
+    "ins": "instagram",
+    "twitter": "x",
+    "pintrest": "pinterest",
+}
+
+SUPPORTED_PUBLISH_PLATFORMS = tuple(CHANNEL_ENV_BY_PLATFORM)
+PUBLISH_PLATFORM_LABELS = {
+    "instagram": "Instagram",
+    "pinterest": "Pinterest",
+    "tiktok": "TikTok",
+    "youtube": "YouTube",
+    "x": "X",
 }
 
 
@@ -101,6 +119,7 @@ class PublishManager:
         task_id: str,
         platforms: list[str],
         caption: str,
+        title: str | None = None,
         due_at: str | None = None,
     ) -> dict[str, Any]:
         """
@@ -110,6 +129,8 @@ class PublishManager:
         in jobs and do not abort other selected platforms.
         """
         selected_platforms = self._normalize_platforms(platforms)
+        publish_title = (title or "").strip()
+        publish_caption = (caption or "").strip()
         metadata = await self.persistence.load_task_metadata(task_id)
         if not metadata:
             raise FileNotFoundError(f"Task not found: {task_id}")
@@ -128,6 +149,8 @@ class PublishManager:
             "public_video_url": None,
             "jobs": [],
         }
+        record["title"] = publish_title
+        record["caption"] = publish_caption
 
         public_url = record.get("public_video_url")
 
@@ -208,8 +231,10 @@ class PublishManager:
             try:
                 result = await publisher.create_video_post(
                     channel_id=channel_id,
-                    text=caption,
+                    text=publish_caption,
                     video_url=public_url,
+                    title=publish_title,
+                    platform=platform,
                     due_at=due_at,
                 )
             except Exception as exc:
@@ -276,7 +301,8 @@ class PublishManager:
     def _normalize_platforms(self, platforms: list[str]) -> list[str]:
         normalized = []
         for platform in platforms:
-            key = platform.strip().lower()
+            raw_key = platform.strip().lower()
+            key = PUBLISH_PLATFORM_ALIASES.get(raw_key, raw_key)
             if key not in CHANNEL_ENV_BY_PLATFORM:
                 raise ValueError(f"Unsupported publish platform: {platform}")
             if key not in normalized:

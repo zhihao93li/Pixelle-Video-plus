@@ -19,6 +19,8 @@ def test_config_manager_saves_and_reloads_publish_config(tmp_path):
 
     manager.set_publish_config(
         buffer_api_key="buffer-key",
+        buffer_channel_instagram="channel-instagram",
+        buffer_channel_pinterest="channel-pinterest",
         buffer_channel_tiktok="channel-tiktok",
         buffer_channel_youtube="channel-youtube",
         buffer_channel_x="channel-x",
@@ -37,6 +39,8 @@ def test_config_manager_saves_and_reloads_publish_config(tmp_path):
         "buffer": {
             "api_key": "buffer-key",
             "channels": {
+                "instagram": "channel-instagram",
+                "pinterest": "channel-pinterest",
                 "tiktok": "channel-tiktok",
                 "youtube": "channel-youtube",
                 "x": "channel-x",
@@ -62,6 +66,8 @@ def test_publish_manager_uses_publish_config_channels(tmp_path):
             "buffer": {
                 "api_key": "buffer-key",
                 "channels": {
+                    "instagram": "channel-instagram",
+                    "pinterest": "channel-pinterest",
                     "youtube": "channel-youtube",
                     "x": "channel-x",
                 },
@@ -71,6 +77,8 @@ def test_publish_manager_uses_publish_config_channels(tmp_path):
     )
 
     assert manager.channel_ids == {
+        "instagram": "channel-instagram",
+        "pinterest": "channel-pinterest",
         "youtube": "channel-youtube",
         "x": "channel-x",
     }

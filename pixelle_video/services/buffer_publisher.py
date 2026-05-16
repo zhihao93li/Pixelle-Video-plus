@@ -27,7 +27,13 @@ class BufferPostResult:
 class BufferPublisher:
     """Small wrapper around Buffer's GraphQL API."""
 
+    YOUTUBE_DEFAULT_CATEGORY_ID = "22"  # People & Blogs
+
     SUPPORTED_CHANNEL_SERVICES = {
+        "instagram": "instagram",
+        "instagram-business": "instagram",
+        "instagram-personal": "instagram",
+        "pinterest": "pinterest",
         "youtube": "youtube",
         "youtube-shorts": "youtube",
         "tiktok": "tiktok",
@@ -184,16 +190,31 @@ class BufferPublisher:
         channel_id: str,
         text: str,
         video_url: str,
+        title: str | None = None,
+        platform: str | None = None,
         due_at: str | None = None,
     ) -> BufferPostResult:
         """Create a Buffer video post for a single connected channel."""
+        clean_title = (title or "").strip()
+        video_asset: dict[str, Any] = {"url": video_url}
+        if clean_title:
+            video_asset["metadata"] = {"title": clean_title}
+
         post_input: dict[str, Any] = {
             "text": text,
             "channelId": channel_id,
             "schedulingType": "automatic",
             "mode": "addToQueue",
-            "assets": [{"video": {"url": video_url}}],
+            "assets": [{"video": video_asset}],
         }
+
+        if clean_title and (platform or "").strip().lower() == "youtube":
+            post_input["metadata"] = {
+                "youtube": {
+                    "title": clean_title,
+                    "categoryId": self.YOUTUBE_DEFAULT_CATEGORY_ID,
+                }
+            }
 
         if due_at:
             post_input["mode"] = "customScheduled"

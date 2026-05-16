@@ -44,13 +44,13 @@ Second topic
     assert topics == ["First topic", "Second topic"]
 
 
-def test_batch_manager_runs_fixed_mode_without_using_script_as_title():
+def test_batch_manager_uses_first_fixed_line_as_title_and_removes_it_from_script():
     fake = FakePixelleVideo()
     manager = SimpleBatchManager()
 
     result = manager.execute_batch(
         pixelle_video=fake,
-        topics=["Scene one.\n\nScene two."],
+        topics=["My video title\nScene one.\n\nScene two."],
         shared_config={
             "mode": "fixed",
             "split_mode": "paragraph",
@@ -63,25 +63,42 @@ def test_batch_manager_runs_fixed_mode_without_using_script_as_title():
         {
             "text": "Scene one.\n\nScene two.",
             "mode": "fixed",
+            "title": "My video title",
             "split_mode": "paragraph",
             "frame_template": "1080x1920/image_default.html",
         }
     ]
 
 
-def test_batch_manager_can_title_fixed_mode_with_prefix_and_index():
+def test_batch_manager_uses_title_prefix_for_generate_mode():
     fake = FakePixelleVideo()
     manager = SimpleBatchManager()
 
     manager.execute_batch(
         pixelle_video=fake,
-        topics=["First script", "Second script"],
+        topics=["First topic", "Second topic"],
         shared_config={
-            "mode": "fixed",
-            "split_mode": "line",
+            "mode": "generate",
             "title_prefix": "Batch Script",
         },
     )
 
-    assert fake.calls[0]["title"] == "Batch Script - 1"
-    assert fake.calls[1]["title"] == "Batch Script - 2"
+    assert fake.calls[0]["title"] == "Batch Script - First topic"
+    assert fake.calls[1]["title"] == "Batch Script - Second topic"
+
+
+def test_batch_manager_keeps_single_line_fixed_script_as_body_and_title():
+    fake = FakePixelleVideo()
+    manager = SimpleBatchManager()
+
+    manager.execute_batch(
+        pixelle_video=fake,
+        topics=["Single line script"],
+        shared_config={
+            "mode": "fixed",
+            "split_mode": "line",
+        },
+    )
+
+    assert fake.calls[0]["title"] == "Single line script"
+    assert fake.calls[0]["text"] == "Single line script"

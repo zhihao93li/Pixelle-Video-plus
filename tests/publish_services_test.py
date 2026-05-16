@@ -179,6 +179,8 @@ async def test_buffer_publisher_creates_video_post_with_official_asset_shape():
         channel_id="channel-youtube",
         text="caption",
         video_url="https://media.example.com/pixlle/task/final.mp4",
+        title="My video",
+        platform="youtube",
     )
 
     assert result == BufferPostResult(
@@ -192,6 +194,12 @@ async def test_buffer_publisher_creates_video_post_with_official_asset_shape():
     assert request["headers"]["Content-Type"] == "application/json"
     assert request["json"]["variables"]["input"] == {
         "text": "caption",
+        "metadata": {
+            "youtube": {
+                "title": "My video",
+                "categoryId": "22",
+            }
+        },
         "channelId": "channel-youtube",
         "schedulingType": "automatic",
         "mode": "addToQueue",
@@ -199,6 +207,9 @@ async def test_buffer_publisher_creates_video_post_with_official_asset_shape():
             {
                 "video": {
                     "url": "https://media.example.com/pixlle/task/final.mp4",
+                    "metadata": {
+                        "title": "My video",
+                    },
                 }
             }
         ],
@@ -222,7 +233,44 @@ async def test_buffer_publisher_raises_mutation_error_message():
             channel_id="channel-tiktok",
             text="caption",
             video_url="https://media.example.com/pixlle/task/final.mp4",
+            title="My video",
+            platform="tiktok",
         )
+
+
+@pytest.mark.asyncio
+async def test_buffer_publisher_omits_empty_video_title_metadata():
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.payload = {
+        "data": {
+            "createPost": {
+                "post": {
+                    "id": "post-123",
+                    "text": "caption",
+                    "dueAt": None,
+                }
+            }
+        }
+    }
+    publisher = BufferPublisher(api_key="buffer-key", client_factory=FakeAsyncClient)
+
+    await publisher.create_video_post(
+        channel_id="channel-x",
+        text="caption",
+        video_url="https://media.example.com/pixlle/task/final.mp4",
+        title="",
+        platform="x",
+    )
+
+    request = FakeAsyncClient.requests[0]
+    assert "metadata" not in request["json"]["variables"]["input"]
+    assert request["json"]["variables"]["input"]["assets"] == [
+        {
+            "video": {
+                "url": "https://media.example.com/pixlle/task/final.mp4",
+            }
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -278,12 +326,16 @@ def test_buffer_publisher_detects_supported_channel_ids_from_services():
         {"id": "channel-twitter", "service": "twitter"},
         {"id": "channel-x", "service": "x"},
         {"id": "channel-instagram", "service": "instagram"},
+        {"id": "channel-instagram-business", "service": "instagram_business"},
+        {"id": "channel-pinterest", "service": "pinterest"},
     ]
 
     assert BufferPublisher.supported_channel_ids_from_channels(channels) == {
         "youtube": "channel-youtube",
         "tiktok": "channel-tiktok",
         "x": "channel-twitter",
+        "instagram": "channel-instagram",
+        "pinterest": "channel-pinterest",
     }
 
 
@@ -313,7 +365,19 @@ async def test_publish_manager_records_each_platform_independently(tmp_path):
             return f"https://media.example.com/pixlle/{task_id}/final.mp4"
 
     class FakePublisher:
-        async def create_video_post(self, *, channel_id, text, video_url, due_at=None):
+        calls = []
+
+        async def create_video_post(self, *, channel_id, text, video_url, title=None, platform=None, due_at=None):
+            self.calls.append(
+                {
+                    "channel_id": channel_id,
+                    "text": text,
+                    "video_url": video_url,
+                    "title": title,
+                    "platform": platform,
+                    "due_at": due_at,
+                }
+            )
             if channel_id == "channel-x":
                 raise BufferPublishError("x rejected the video")
             return BufferPostResult(post_id="post-youtube", text=text, due_at=due_at)
@@ -329,9 +393,16 @@ async def test_publish_manager_records_each_platform_independently(tmp_path):
         task_id=task_id,
         platforms=["youtube", "x"],
         caption="caption",
+        title="My video",
     )
 
     assert record["public_video_url"] == f"https://media.example.com/pixlle/{task_id}/final.mp4"
+    assert record["title"] == "My video"
+    assert record["caption"] == "caption"
+    assert manager.publisher.calls[0]["title"] == "My video"
+    assert manager.publisher.calls[0]["platform"] == "youtube"
+    assert manager.publisher.calls[1]["title"] == "My video"
+    assert manager.publisher.calls[1]["platform"] == "x"
     assert record["jobs"][0]["platform"] == "youtube"
     assert record["jobs"][0]["status"] == "scheduled"
     assert record["jobs"][0]["buffer_post_id"] == "post-youtube"
@@ -339,6 +410,76 @@ async def test_publish_manager_records_each_platform_independently(tmp_path):
     assert record["jobs"][1]["status"] == "failed"
     assert record["jobs"][1]["error"] == "x rejected the video"
     assert (task_dir / "publish.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_publish_manager_supports_instagram_x_and_pinterest_aliases(tmp_path):
+    persistence = PersistenceService(output_dir=str(tmp_path))
+    task_id = "20260515_social_platforms"
+    task_dir = tmp_path / task_id
+    task_dir.mkdir()
+    video_path = task_dir / "final.mp4"
+    video_path.write_bytes(b"mp4")
+    await persistence.save_task_metadata(
+        task_id,
+        {
+            "task_id": task_id,
+            "created_at": "2026-05-15T10:00:00",
+            "completed_at": "2026-05-15T10:05:00",
+            "status": "completed",
+            "input": {"title": "My video"},
+            "result": {"video_path": str(video_path)},
+        },
+    )
+
+    class FakeStorage:
+        def upload_video(self, local_path, task_id):
+            return f"https://media.example.com/pixlle/{task_id}/final.mp4"
+
+    class FakePublisher:
+        def __init__(self):
+            self.calls = []
+
+        async def create_video_post(self, *, channel_id, text, video_url, title=None, platform=None, due_at=None):
+            self.calls.append(
+                {
+                    "channel_id": channel_id,
+                    "text": text,
+                    "video_url": video_url,
+                    "title": title,
+                    "platform": platform,
+                    "due_at": due_at,
+                }
+            )
+            return BufferPostResult(post_id=f"post-{platform}", text=text, due_at=due_at)
+
+    publisher = FakePublisher()
+    manager = PublishManager(
+        persistence=persistence,
+        storage=FakeStorage(),
+        publisher=publisher,
+        channel_ids={
+            "instagram": "channel-instagram",
+            "x": "channel-x",
+            "pinterest": "channel-pinterest",
+        },
+    )
+
+    record = await manager.publish_task(
+        task_id=task_id,
+        platforms=["ins", "X", "pintrest"],
+        caption="caption",
+        title="My video",
+    )
+
+    assert [call["platform"] for call in publisher.calls] == ["instagram", "x", "pinterest"]
+    assert [call["channel_id"] for call in publisher.calls] == [
+        "channel-instagram",
+        "channel-x",
+        "channel-pinterest",
+    ]
+    assert [job["platform"] for job in record["jobs"]] == ["instagram", "x", "pinterest"]
+    assert {job["status"] for job in record["jobs"]} == {"scheduled"}
 
 
 @pytest.mark.asyncio

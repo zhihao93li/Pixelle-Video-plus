@@ -20,12 +20,26 @@ from pixelle_video.config import config_manager
 from pixelle_video.services.buffer_publisher import BufferPublisher
 from web.i18n import get_language, tr
 from web.utils.async_helpers import run_async
+from web.utils.runninghub_workflows import (
+    create_runninghub_workflow_file,
+    list_custom_runninghub_workflows,
+)
 from web.utils.streamlit_helpers import safe_rerun
 
 BUFFER_CHANNEL_WIDGET_KEYS = {
     "youtube": "publish_buffer_channel_youtube_input",
     "tiktok": "publish_buffer_channel_tiktok_input",
+    "instagram": "publish_buffer_channel_instagram_input",
     "x": "publish_buffer_channel_x_input",
+    "pinterest": "publish_buffer_channel_pinterest_input",
+}
+
+BUFFER_CHANNEL_LABELS = {
+    "instagram": "Instagram Channel ID",
+    "pinterest": "Pinterest Channel ID",
+    "tiktok": "TikTok Channel ID",
+    "youtube": "YouTube Channel ID",
+    "x": "X Channel ID",
 }
 
 
@@ -34,6 +48,17 @@ def _format_buffer_channel(channel: dict) -> str:
     service = channel.get("service") or "unknown"
     display_name = channel.get("displayName") or channel.get("name") or channel_id
     return f"{service}: {display_name} ({channel_id})"
+
+
+def _clear_workflow_caches():
+    pixelle_video = st.session_state.get("pixelle_video")
+    if pixelle_video is None:
+        return
+
+    for service_name in ("media", "tts", "image_analysis", "video_analysis"):
+        service = getattr(pixelle_video, service_name, None)
+        if service is not None and hasattr(service, "_workflows_cache"):
+            service._workflows_cache = None
 
 
 def render_advanced_settings():
@@ -310,6 +335,111 @@ def render_advanced_settings():
                     runninghub_48g_enabled = runninghub_instance_type_display == tr("settings.comfyui.runninghub_instance_48g")
 
                 st.markdown("---")
+                st.markdown(
+                    f"**{tr('settings.comfyui.runninghub_workflows_title', fallback='RunningHub Workflows')}**"
+                )
+                st.caption(
+                    tr(
+                        "settings.comfyui.runninghub_workflows_hint",
+                        fallback=(
+                            "Add a workflow that already exists in RunningHub. "
+                            "The app saves a local wrapper file and it will appear in workflow selectors."
+                        ),
+                    )
+                )
+
+                workflow_kind_labels = {
+                    "video": tr("settings.comfyui.runninghub_workflow_type_video", fallback="Video"),
+                    "image": tr("settings.comfyui.runninghub_workflow_type_image", fallback="Image"),
+                    "tts": tr("settings.comfyui.runninghub_workflow_type_tts", fallback="TTS"),
+                }
+                workflow_kind = st.selectbox(
+                    tr("settings.comfyui.runninghub_workflow_type", fallback="Type"),
+                    options=["video", "image", "tts"],
+                    format_func=lambda value: workflow_kind_labels[value],
+                    key="runninghub_workflow_kind_input",
+                )
+                workflow_name_col, workflow_id_col = st.columns(2)
+                with workflow_name_col:
+                    runninghub_workflow_name = st.text_input(
+                        tr("settings.comfyui.runninghub_workflow_name", fallback="Local Name"),
+                        placeholder=tr(
+                            "settings.comfyui.runninghub_workflow_name_placeholder",
+                            fallback="wan2_2_custom",
+                        ),
+                        help=tr(
+                            "settings.comfyui.runninghub_workflow_name_help",
+                            fallback=(
+                                "Used only for the local filename. The selected type controls "
+                                "whether the filename starts with image_, video_, or tts_."
+                            ),
+                        ),
+                        key="runninghub_workflow_name_input",
+                    )
+                with workflow_id_col:
+                    runninghub_workflow_id = st.text_input(
+                        tr("settings.comfyui.runninghub_workflow_id", fallback="RunningHub Workflow ID"),
+                        placeholder="1985909483975188481",
+                        help=tr(
+                            "settings.comfyui.runninghub_workflow_id_help",
+                            fallback="Numeric workflow_id from a workflow that already exists in RunningHub.",
+                        ),
+                        key="runninghub_workflow_id_input",
+                    )
+
+                overwrite_runninghub_workflow = st.checkbox(
+                    tr("settings.comfyui.runninghub_workflow_overwrite", fallback="Overwrite same local name"),
+                    value=False,
+                    key="runninghub_workflow_overwrite_input",
+                )
+
+                if st.button(
+                    tr("settings.comfyui.runninghub_workflow_add", fallback="Add RunningHub Workflow"),
+                    key="add_runninghub_workflow_btn",
+                    use_container_width=True,
+                ):
+                    try:
+                        workflow = create_runninghub_workflow_file(
+                            kind=workflow_kind,
+                            name=runninghub_workflow_name,
+                            workflow_id=runninghub_workflow_id,
+                            overwrite=overwrite_runninghub_workflow,
+                        )
+                        _clear_workflow_caches()
+                        st.success(
+                            tr(
+                                "settings.comfyui.runninghub_workflow_added",
+                                fallback="Added workflow: {key}",
+                                key=workflow["key"],
+                            )
+                        )
+                    except FileExistsError as e:
+                        st.error(
+                            tr(
+                                "settings.comfyui.runninghub_workflow_duplicate",
+                                fallback="A workflow with this local name already exists: {path}",
+                                path=str(e),
+                            )
+                        )
+                    except ValueError as e:
+                        st.error(
+                            tr(
+                                "settings.comfyui.runninghub_workflow_invalid",
+                                fallback="Cannot add workflow: {error}",
+                                error=str(e),
+                            )
+                        )
+
+                custom_workflows = list_custom_runninghub_workflows()
+                if custom_workflows:
+                    st.caption(tr("settings.comfyui.runninghub_workflow_existing", fallback="Added workflows:"))
+                    for workflow in custom_workflows:
+                        st.code(
+                            f"{workflow['key']}  ->  workflow_id={workflow['workflow_id']}",
+                            language=None,
+                        )
+
+                st.markdown("---")
 
                 # Fish Audio TTS configuration
                 st.markdown(f"**{tr('settings.fish_audio.title')}**")
@@ -446,18 +576,15 @@ def render_advanced_settings():
                         + "; ".join(_format_buffer_channel(channel) for channel in last_channels)
                     )
 
-                buffer_channel_youtube = st.text_input(
-                    tr("settings.publish.buffer_channel_youtube", fallback="YouTube Channel ID"),
-                    key=BUFFER_CHANNEL_WIDGET_KEYS["youtube"],
-                )
-                buffer_channel_tiktok = st.text_input(
-                    tr("settings.publish.buffer_channel_tiktok", fallback="TikTok Channel ID"),
-                    key=BUFFER_CHANNEL_WIDGET_KEYS["tiktok"],
-                )
-                buffer_channel_x = st.text_input(
-                    tr("settings.publish.buffer_channel_x", fallback="X Channel ID"),
-                    key=BUFFER_CHANNEL_WIDGET_KEYS["x"],
-                )
+                buffer_channel_values = {}
+                for platform, widget_key in BUFFER_CHANNEL_WIDGET_KEYS.items():
+                    buffer_channel_values[platform] = st.text_input(
+                        tr(
+                            f"settings.publish.buffer_channel_{platform}",
+                            fallback=BUFFER_CHANNEL_LABELS[platform],
+                        ),
+                        key=widget_key,
+                    )
 
             with cos_col:
                 st.markdown(f"**{tr('settings.publish.cos_title', fallback='Tencent COS')}**")
@@ -537,9 +664,11 @@ def render_advanced_settings():
                     )
                     config_manager.set_publish_config(
                         buffer_api_key=buffer_api_key or "",
-                        buffer_channel_tiktok=buffer_channel_tiktok or "",
-                        buffer_channel_youtube=buffer_channel_youtube or "",
-                        buffer_channel_x=buffer_channel_x or "",
+                        buffer_channel_instagram=buffer_channel_values["instagram"] or "",
+                        buffer_channel_pinterest=buffer_channel_values["pinterest"] or "",
+                        buffer_channel_tiktok=buffer_channel_values["tiktok"] or "",
+                        buffer_channel_youtube=buffer_channel_values["youtube"] or "",
+                        buffer_channel_x=buffer_channel_values["x"] or "",
                         cos_region=cos_region or "",
                         cos_bucket=cos_bucket or "",
                         cos_secret_id=cos_secret_id or "",

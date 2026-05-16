@@ -243,16 +243,15 @@ def render_content_input():
             st.markdown("---")
             
             # Title prefix (optional)
-            title_prefix_help = (
-                tr("batch.title_prefix_help_fixed")
-                if batch_content_mode == "fixed"
-                else tr("batch.title_prefix_help")
-            )
-            title_prefix = st.text_input(
-                tr("batch.title_prefix_label"),
-                placeholder=tr("batch.title_prefix_placeholder"),
-                help=title_prefix_help
-            )
+            if batch_content_mode == "fixed":
+                title_prefix = ""
+                st.caption(tr("batch.fixed_title_hint"))
+            else:
+                title_prefix = st.text_input(
+                    tr("batch.title_prefix_label"),
+                    placeholder=tr("batch.title_prefix_placeholder"),
+                    help=tr("batch.title_prefix_help")
+                )
             
             if batch_content_mode == "fixed":
                 split_mode_options = {
