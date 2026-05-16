@@ -1,3 +1,8 @@
+from datetime import date, time
+
+import pytest
+
+from web.utils import publish_helpers
 from web.utils.publish_helpers import (
     append_hashtags_to_caption,
     build_default_caption,
@@ -69,3 +74,26 @@ def test_append_hashtags_to_caption_normalizes_words_without_hash_prefix():
     assert append_hashtags_to_caption("Caption text", "ai, video\nshorts") == (
         "Caption text\n\n#ai #video #shorts"
     )
+
+
+def test_publish_timezone_options_include_default():
+    assert publish_helpers.DEFAULT_PUBLISH_TIMEZONE in publish_helpers.PUBLISH_TIMEZONE_OPTIONS
+
+
+def test_build_scheduled_due_at_uses_selected_timezone_offset():
+    assert (
+        publish_helpers.build_scheduled_due_at(date(2026, 5, 23), time(9, 45), "Asia/Shanghai")
+        == "2026-05-23T09:45:00+08:00"
+    )
+
+
+def test_build_scheduled_due_at_handles_daylight_saving_offsets():
+    assert (
+        publish_helpers.build_scheduled_due_at(date(2026, 5, 23), time(9, 45), "America/New_York")
+        == "2026-05-23T09:45:00-04:00"
+    )
+
+
+def test_build_scheduled_due_at_rejects_unknown_timezone():
+    with pytest.raises(ValueError, match="Unknown publish timezone"):
+        publish_helpers.build_scheduled_due_at(date(2026, 5, 23), time(9, 45), "Mars/Base")

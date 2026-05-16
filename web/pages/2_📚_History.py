@@ -32,9 +32,12 @@ from web.components.header import render_header
 from web.i18n import tr
 from web.utils.async_helpers import run_async
 from web.utils.publish_helpers import (
+    DEFAULT_PUBLISH_TIMEZONE,
+    PUBLISH_TIMEZONE_OPTIONS,
     append_hashtags_to_caption,
     build_default_caption,
     build_default_title,
+    build_scheduled_due_at,
 )
 
 # Page config
@@ -187,7 +190,7 @@ def render_publish_panel(task_id: str, pixelle_video, metadata: dict):
 
     due_at = None
     if schedule_mode == "Schedule at time":
-        col_date, col_time = st.columns(2)
+        col_date, col_time, col_timezone = st.columns(3)
         with col_date:
             due_date = st.date_input("Publish date", key=f"publish_due_date_{task_id}")
         with col_time:
@@ -196,7 +199,15 @@ def render_publish_panel(task_id: str, pixelle_video, metadata: dict):
                 value=datetime_time(hour=9, minute=0),
                 key=f"publish_due_time_{task_id}",
             )
-        due_at = datetime.combine(due_date, due_time).astimezone().isoformat()
+        with col_timezone:
+            timezone_name = st.selectbox(
+                "Timezone",
+                options=PUBLISH_TIMEZONE_OPTIONS,
+                index=PUBLISH_TIMEZONE_OPTIONS.index(DEFAULT_PUBLISH_TIMEZONE),
+                key=f"publish_timezone_{task_id}",
+            )
+        due_at = build_scheduled_due_at(due_date, due_time, timezone_name)
+        st.caption(f"Scheduled time sent to Buffer: `{due_at}`")
 
     col_publish, col_check = st.columns(2)
     with col_publish:
