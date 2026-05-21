@@ -11,7 +11,7 @@
 # limitations under the License.
 
 """
-Home Page - Main video generation interface
+Create Page - Main video generation interface
 """
 
 import sys
@@ -30,12 +30,13 @@ from web.state.session import init_session_state, init_i18n, get_pixelle_video
 
 # Import components
 from web.components.header import render_header
-from web.components.settings import render_advanced_settings
-from web.components.faq import render_faq_sidebar
+from web.components.pipeline_selector import render_pipeline_selector
+from web.components.settings import render_config_status_bar
+from web.i18n import tr
 
 # Page config
 st.set_page_config(
-    page_title="Home - Pixelle-Video",
+    page_title="Create - Pixelle-Video",
     page_icon="🎬",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -51,14 +52,11 @@ def main():
     # Render header (title + language selector)
     render_header()
     
-    # Render FAQ in sidebar
-    render_faq_sidebar()
-    
     # Initialize Pixelle-Video
     pixelle_video = get_pixelle_video()
-    
-    # Render system configuration (LLM + ComfyUI)
-    render_advanced_settings()
+
+    st.markdown(f"### {tr('create.title', fallback='Create Video')}")
+    render_config_status_bar()
     
     # ========================================================================
     # Pipeline Selection & Delegation
@@ -67,23 +65,11 @@ def main():
     
     # Get all registered pipelines
     pipelines = get_all_pipeline_uis()
-    
-    # Use Tabs for pipeline selection
-    # Note: st.tabs returns a list of containers, one for each tab
-    tab_labels = [f"{p.icon} {p.display_name}" for p in pipelines]
-    tabs = st.tabs(tab_labels)
-    
-    # Render each pipeline in its corresponding tab
-    for i, pipeline in enumerate(pipelines):
-        with tabs[i]:
-            # Show description if available
-            if pipeline.description:
-                st.caption(pipeline.description)
-            
-            # Delegate rendering
-            pipeline.render(pixelle_video)
+
+    selected_pipeline = render_pipeline_selector(pipelines)
+    if selected_pipeline is not None:
+        selected_pipeline.render(pixelle_video)
 
 
 if __name__ == "__main__":
     main()
-

@@ -5,16 +5,20 @@ from pixelle_video.models.progress import ProgressEvent
 from pixelle_video.services.llm_service import LLMService, build_completion_token_kwargs
 from web.components.script_review_workflow import _overall_video_progress, _video_event_label
 from web.utils.script_review import (
+    DraftParseError,
     DraftTranslationCountError,
     SOURCE_LANGUAGE_KEY,
     build_generation_jobs,
     draft_titles,
+    generate_independent_language_drafts,
     generate_multilingual_script_draft,
     parse_narrations_response,
     parse_script_response,
     parse_translation_payload,
     parse_translations_response,
+    render_language_script_prompt,
     render_prompt_template,
+    validate_language_tts_overrides,
 )
 
 
@@ -26,6 +30,14 @@ class FakeLLM:
         self.calls.append({"prompt": prompt, **kwargs})
         if "Translate" in prompt:
             return '{"title": "Translated title", "translations": ["Translated one.", "Translated two."]}'
+        if "Split this Chinese script" in prompt:
+            return '{"narrations": ["中文一。", "中文二。", "中文三。"]}'
+        if "Split this English script" in prompt:
+            return '{"narrations": ["English one.", "English two."]}'
+        if "Write Chinese script" in prompt:
+            return '{"title": "中文标题", "script": "中文一。中文二。中文三。"}'
+        if "Write English script" in prompt:
+            return '{"title": "English Title", "script": "English one. English two."}'
         if "Split" in prompt:
             return '```json\n{"narrations": ["Scene one.", "Scene two."]}\n```'
         return '{"script": "Scene one. Scene two."}'
@@ -65,6 +77,18 @@ def test_render_prompt_template_replaces_supported_variables():
     )
 
     assert rendered == 'Topic=Money patterns; Count=2; Script=A\nB; JSON={"script":"x"}'
+
+
+def test_render_language_script_prompt_wraps_templates_without_language_variable():
+    prompt = render_language_script_prompt(
+        "Write a short script for {topic}.",
+        topic="Money patterns",
+        language="English",
+    )
+
+    assert "Create this version directly in English" in prompt
+    assert "Do not answer in Chinese unless the target language is Chinese" in prompt
+    assert "Write a short script for Money patterns." in prompt
 
 
 def test_llm_service_defaults_to_aihubmix_relay_base_url():
@@ -138,6 +162,155 @@ async def test_generate_multilingual_script_draft_uses_model_overrides_and_templ
         ("splitting_script", "Money patterns"),
         ("translating", "English"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_generate_independent_language_drafts_creates_each_language_without_translation():
+    fake_llm = FakeLLM()
+    statuses = []
+
+    draft = await generate_independent_language_drafts(
+        llm_service=fake_llm,
+        topic="Money patterns",
+        script_template="Write {language} script for {topic}.",
+        script_model="script-model",
+        split_template="Split this {language} script: {script}",
+        split_model="split-model",
+        languages=["Chinese", "English"],
+        language_script_templates={
+            "English": "Write English script for {topic}.",
+        },
+        status_callback=lambda stage, detail: statuses.append((stage, detail)),
+    )
+
+    assert draft["language_drafts"] == {
+        "Chinese": {
+            "title": "中文标题",
+            "script": "中文一。中文二。中文三。",
+            "narrations": ["中文一。", "中文二。", "中文三。"],
+        },
+        "English": {
+            "title": "English Title",
+            "script": "English one. English two.",
+            "narrations": ["English one.", "English two."],
+        },
+    }
+    assert draft["selected_languages"] == ["Chinese", "English"]
+    assert "translations" not in draft
+    assert [call["model"] for call in fake_llm.calls] == [
+        "script-model",
+        "split-model",
+        "script-model",
+        "split-model",
+    ]
+    assert not any("Translate" in call["prompt"] for call in fake_llm.calls)
+    assert "Write Chinese script for Money patterns." in fake_llm.calls[0]["prompt"]
+    assert "Write English script for Money patterns." in fake_llm.calls[2]["prompt"]
+    assert "Create this version directly in English" in fake_llm.calls[2]["prompt"]
+    assert "Every narration item in the JSON output must remain in English" in fake_llm.calls[3]["prompt"]
+    assert statuses == [
+        ("generating_script", "Chinese"),
+        ("splitting_script", "Chinese"),
+        ("generating_script", "English"),
+        ("splitting_script", "English"),
+    ]
+
+
+def test_build_generation_jobs_uses_independent_language_fish_tts_params():
+    drafts = [
+        {
+            "topic": "Money patterns",
+            "language_drafts": {
+                "Chinese": {
+                    "title": "中文标题",
+                    "script": "中文一。中文二。中文三。",
+                    "narrations": ["中文一。", "中文二。", "中文三。"],
+                },
+                "English": {
+                    "title": "English Title",
+                    "script": "English one. English two.",
+                    "narrations": ["English one.", "English two."],
+                },
+            },
+            "script_model": "script-model",
+            "split_model": "split-model",
+            "selected_languages": ["Chinese", "English"],
+            "workflow_mode": "independent_language_drafts",
+        }
+    ]
+
+    jobs = build_generation_jobs(
+        drafts,
+        base_config={"frame_template": "1080x1920/image_default.html", "tts_inference_mode": "fish"},
+        language_tts_overrides={
+            "Chinese": {"tts_inference_mode": "fish", "tts_voice": "cn-ref", "tts_speed": 1.0},
+            "English": {"tts_inference_mode": "fish", "tts_voice": "en-ref", "tts_speed": 0.9},
+        },
+    )
+
+    assert jobs[0]["language"] == "Chinese"
+    assert jobs[0]["params"]["text"] == "中文一。\n中文二。\n中文三。"
+    assert jobs[0]["params"]["title"] == "中文标题"
+    assert jobs[0]["params"]["tts_inference_mode"] == "fish"
+    assert jobs[0]["params"]["tts_voice"] == "cn-ref"
+    assert jobs[0]["params"]["tts_speed"] == 1.0
+    assert jobs[0]["params"]["review_language"] == "Chinese"
+    assert jobs[0]["params"]["review_language_narrations"] == ["中文一。", "中文二。", "中文三。"]
+
+    assert jobs[1]["language"] == "English"
+    assert jobs[1]["params"]["text"] == "English one.\nEnglish two."
+    assert jobs[1]["params"]["title"] == "English Title"
+    assert jobs[1]["params"]["tts_voice"] == "en-ref"
+    assert jobs[1]["params"]["tts_speed"] == 0.9
+    assert jobs[1]["params"]["review_language_script"] == "English one. English two."
+
+
+def test_validate_language_tts_overrides_blocks_missing_fish_reference_id():
+    drafts = [
+        {
+            "topic": "Money patterns",
+            "language_drafts": {
+                "Chinese": {"title": "中文标题", "script": "中文一。", "narrations": ["中文一。"]},
+                "English": {"title": "English Title", "script": "English one.", "narrations": ["English one."]},
+            },
+            "selected_languages": ["Chinese", "English"],
+        }
+    ]
+
+    errors = validate_language_tts_overrides(
+        drafts,
+        {
+            "Chinese": {"tts_inference_mode": "fish", "tts_voice": "cn-ref", "tts_speed": 1.0},
+            "English": {"tts_inference_mode": "fish", "tts_voice": "", "tts_speed": 1.0},
+        },
+    )
+
+    assert errors == ["Money patterns / English: Fish reference_id is required"]
+
+
+def test_build_generation_jobs_blocks_english_draft_with_chinese_text():
+    drafts = [
+        {
+            "topic": "Money patterns",
+            "language_drafts": {
+                "English": {
+                    "title": "中文标题",
+                    "script": "这还是中文。",
+                    "narrations": ["这还是中文。"],
+                },
+            },
+            "selected_languages": ["English"],
+        }
+    ]
+
+    with pytest.raises(DraftParseError, match="expected English text"):
+        build_generation_jobs(
+            drafts,
+            base_config={"tts_inference_mode": "fish"},
+            language_tts_overrides={
+                "English": {"tts_inference_mode": "fish", "tts_voice": "en-ref", "tts_speed": 1.0},
+            },
+        )
 
 
 def test_build_generation_jobs_uses_edited_translation_as_fixed_line_script():

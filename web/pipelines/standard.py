@@ -30,6 +30,7 @@ from web.components.output_preview import render_output_preview
 from web.components.script_review_workflow import (
     render_script_review_generation,
     render_script_review_input,
+    render_script_review_tts_settings,
 )
 from web.components.style_config import render_style_config
 from web.i18n import tr
@@ -68,61 +69,47 @@ class StandardPipelineUI(PipelineUI):
             self.render_script_review(pixelle_video)
             return
 
-        # Three-column layout
-        left_col, middle_col, right_col = st.columns([1, 1, 1])
-        
-        # ====================================================================
-        # Left Column: Content Input & BGM
-        # ====================================================================
-        with left_col:
-            # Content input (mode, text, title, n_scenes)
-            content_params = render_content_input()
-            
-            # BGM selection (bgm_path, bgm_volume)
-            bgm_params = render_bgm_section()
-            
-            # Version info & GitHub link
-            render_version_info()
-        
-        # ====================================================================
-        # Middle Column: Style Configuration
-        # ====================================================================
-        with middle_col:
-            # Style configuration (TTS, template, workflow, etc.)
-            style_params = render_style_config(pixelle_video)
-        
-        # ====================================================================
-        # Right Column: Output Preview
-        # ====================================================================
-        with right_col:
-            # Combine all parameters
-            video_params = {
-                "pipeline": self.name,
-                **content_params,
-                **bgm_params,
-                **style_params
-            }
-            
-            # Render output preview (generate button, progress, video preview)
-            render_output_preview(pixelle_video, video_params)
+        st.markdown(f"#### {tr('create.step.content', fallback='1. Content')}")
+        content_params = render_content_input()
+        bgm_params = render_bgm_section()
+
+        st.markdown(f"#### {tr('create.step.style', fallback='2. Output Style')}")
+        style_params = render_style_config(pixelle_video)
+
+        st.markdown(f"#### {tr('create.step.generate', fallback='3. Generate and Preview')}")
+        video_params = {
+            "pipeline": self.name,
+            **content_params,
+            **bgm_params,
+            **style_params
+        }
+        render_output_preview(pixelle_video, video_params)
+        render_version_info()
 
     def render_script_review(self, pixelle_video: Any):
-        left_col, middle_col, right_col = st.columns([1, 1, 1])
+        st.markdown(f"#### {tr('create.step.content', fallback='1. Content')}")
+        render_script_review_input(pixelle_video)
 
-        with left_col:
-            render_script_review_input(pixelle_video)
+        st.markdown(f"#### {tr('script_review.tts_step', fallback='Voice by Language')}")
+        render_script_review_tts_settings()
 
-        with middle_col:
-            bgm_params = render_bgm_section(key_prefix="review_")
-            style_params = render_style_config(pixelle_video)
+        bgm_params = render_bgm_section(key_prefix="review_")
 
-        with right_col:
-            video_params = {
-                "pipeline": self.name,
-                **bgm_params,
-                **style_params,
-            }
-            render_script_review_generation(pixelle_video, video_params)
+        st.markdown(f"#### {tr('create.step.style', fallback='2. Output Style')}")
+        st.info(tr(
+            "script_review.per_language_tts_notice",
+            fallback="This multilingual flow uses per-language Fish TTS settings in the generation step.",
+        ))
+        style_params = render_style_config(pixelle_video, include_tts=False)
+
+        st.markdown(f"#### {tr('create.step.generate', fallback='3. Generate and Preview')}")
+        video_params = {
+            "pipeline": self.name,
+            **bgm_params,
+            **style_params,
+        }
+        render_script_review_generation(pixelle_video, video_params)
+        render_version_info()
 
 
 # Register self

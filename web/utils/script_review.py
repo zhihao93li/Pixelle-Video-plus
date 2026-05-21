@@ -11,23 +11,27 @@ from typing import Any
 
 from pixelle_video.utils.os_util import get_data_path
 
+DEFAULT_REVIEW_LANGUAGES = ["Chinese", "English"]
 DEFAULT_TARGET_LANGUAGES = ["English", "Japanese", "Korean", "Spanish", "Traditional Chinese"]
 SOURCE_LANGUAGE_KEY = "__source__"
+CJK_PATTERN = re.compile(r"[\u3400-\u9fff]")
 
 BUILTIN_SCRIPT_TEMPLATES = {
     "Short Oral Script": """You are a short-form video script writer.
-Create a concise oral narration script for this topic:
+Create a concise oral narration script in {language} for this topic:
 
 {topic}
 
 Return ONLY valid JSON in this format:
 {{
+  "title": "short video title in {language}",
   "script": "complete oral narration script"
 }}
 
 Requirements:
 - Write one complete script, not storyboard scenes.
 - Keep the script logical, direct, and suitable for voiceover.
+- Use natural, native {language} expression. Do not translate from another language.
 - Do not add markdown or explanations.""",
 }
 
@@ -195,6 +199,22 @@ def parse_script_response(response_text: str) -> str:
     raise DraftParseError("Invalid script response: missing 'script'")
 
 
+def parse_language_script_payload(response_text: str) -> dict[str, str]:
+    payload = _extract_json_object(response_text)
+    if "script" not in payload:
+        raise DraftParseError("Invalid script response: missing 'script'")
+
+    script = str(payload["script"]).strip()
+    if not script:
+        raise DraftParseError("Expected 'script' to contain text")
+
+    title = str(payload.get("title") or "").strip()
+    return {
+        "title": title or _default_script_title(script),
+        "script": script,
+    }
+
+
 def parse_translation_payload(response_text: str, expected_count: int, language: str) -> dict[str, Any]:
     payload = _extract_json_object(response_text)
     if "translations" not in payload:
@@ -221,6 +241,39 @@ def render_prompt_template(template: str, variables: dict[str, Any]) -> str:
     if missing_fields:
         raise KeyError(f"Missing prompt template variable: {sorted(missing_fields)[0]}")
     return template.format(**variables)
+
+
+def render_language_script_prompt(template: str, topic: str, language: str) -> str:
+    rendered_template = render_prompt_template(template, {"topic": topic, "language": language})
+    return f"""Target language hard rule:
+- Create this version directly in {language}.
+- The JSON title and script field values MUST be written in {language}.
+- Do not answer in Chinese unless the target language is Chinese.
+- If the writing brief below contains examples or style notes in another language, treat them only as structural guidance.
+
+Writing brief:
+{rendered_template}"""
+
+
+def render_language_split_prompt(template: str, topic: str, language: str, script: str) -> str:
+    rendered_template = render_prompt_template(
+        template,
+        {
+            "topic": topic,
+            "language": language,
+            "script": script,
+            "content": script,
+            "Content": script,
+            "content2": script,
+        },
+    )
+    return f"""Target language hard rule:
+- The input script is the {language} version.
+- Split the script only. Do not translate, rewrite, summarize, or change the language.
+- Every narration item in the JSON output must remain in {language}.
+
+Split brief:
+{rendered_template}"""
 
 
 def _load_templates_from_dir(directory: Path) -> list[PromptTemplate]:
@@ -280,7 +333,7 @@ async def generate_multilingual_script_draft(
     if status_callback:
         status_callback("generating_script", clean_topic)
 
-    script_prompt = render_prompt_template(script_template, {"topic": clean_topic})
+    script_prompt = render_prompt_template(script_template, {"topic": clean_topic, "language": "Chinese"})
     script_response = await llm_service(
         prompt=script_prompt,
         model=(script_model or None),
@@ -360,8 +413,87 @@ async def generate_multilingual_script_draft(
     }
 
 
+async def generate_independent_language_drafts(
+    llm_service,
+    topic: str,
+    script_template: str,
+    script_model: str | None,
+    split_template: str,
+    split_model: str | None,
+    languages: list[str],
+    language_script_templates: dict[str, str] | None = None,
+    status_callback=None,
+) -> dict[str, Any]:
+    clean_topic = (topic or "").strip()
+    if not clean_topic:
+        raise ValueError("Topic is required")
+
+    selected_languages = _clean_language_selection(languages)
+    if not selected_languages:
+        raise ValueError("At least one language is required")
+
+    language_drafts = {}
+    for language in selected_languages:
+        if status_callback:
+            status_callback("generating_script", language)
+
+        selected_script_template = (language_script_templates or {}).get(language, script_template)
+        script_prompt = render_language_script_prompt(selected_script_template, clean_topic, language)
+        script_response = await llm_service(
+            prompt=script_prompt,
+            model=(script_model or None),
+            temperature=0.8,
+            max_tokens=2000,
+        )
+        script_payload = parse_language_script_payload(script_response)
+        language_script = script_payload["script"]
+
+        if status_callback:
+            status_callback("splitting_script", language)
+
+        split_prompt = render_language_split_prompt(split_template, clean_topic, language, language_script)
+        split_response = await llm_service(
+            prompt=split_prompt,
+            model=(split_model or None),
+            temperature=0.1,
+            max_tokens=2000,
+        )
+        language_drafts[language] = {
+            "title": script_payload["title"],
+            "script": language_script,
+            "narrations": parse_narrations_response(split_response),
+        }
+
+    return {
+        "topic": clean_topic,
+        "title": clean_topic,
+        "language_drafts": language_drafts,
+        "script_model": script_model or "",
+        "split_model": split_model or "",
+        "selected_languages": selected_languages,
+        "workflow_mode": "independent_language_drafts",
+    }
+
+
 def split_review_lines(text: str) -> list[str]:
     return [line.strip() for line in (text or "").splitlines() if line.strip()]
+
+
+def _clean_language_selection(languages: list[str]) -> list[str]:
+    seen = set()
+    selected = []
+    for language in languages:
+        clean = str(language or "").strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            selected.append(clean)
+    return selected
+
+
+def _default_script_title(script: str) -> str:
+    for line in split_review_lines(script):
+        return line[:80]
+    return ""
 
 
 def _default_translated_title(translations: list[str]) -> str:
@@ -372,7 +504,38 @@ def _default_translated_title(translations: list[str]) -> str:
     return ""
 
 
+def _contains_cjk(text: str) -> bool:
+    return bool(CJK_PATTERN.search(text or ""))
+
+
+def validate_language_draft_content(draft: dict[str, Any]) -> list[str]:
+    errors = []
+    if not draft.get("language_drafts"):
+        return errors
+
+    for language in draft.get("selected_languages") or []:
+        if language != "English":
+            continue
+        language_draft = (draft.get("language_drafts") or {}).get(language) or {}
+        title = language_draft.get("title") or ""
+        script = language_draft.get("script") or ""
+        narrations = "\n".join(language_draft.get("narrations") or [])
+        if _contains_cjk("\n".join([title, script, narrations])):
+            errors.append(
+                f"{draft.get('topic', 'Untitled')} / English: expected English text, but detected Chinese characters"
+            )
+    return errors
+
+
 def draft_titles(draft: dict[str, Any]) -> dict[str, str]:
+    if draft.get("language_drafts"):
+        titles = dict(draft.get("titles") or {})
+        for language, language_draft in (draft.get("language_drafts") or {}).items():
+            title = titles.get(language) or language_draft.get("title") or _default_script_title(language_draft.get("script") or "")
+            if title:
+                titles[language] = str(title).strip()
+        return titles
+
     titles = dict(draft.get("titles") or {})
     source_title = titles.get(SOURCE_LANGUAGE_KEY) or draft.get("title") or draft.get("topic") or ""
     titles[SOURCE_LANGUAGE_KEY] = str(source_title).strip()
@@ -384,6 +547,15 @@ def draft_titles(draft: dict[str, Any]) -> dict[str, str]:
 
 
 def validate_draft_translation_counts(draft: dict[str, Any]) -> list[str]:
+    if draft.get("language_drafts"):
+        errors = []
+        for language in draft.get("selected_languages") or []:
+            narrations = draft.get("language_drafts", {}).get(language, {}).get("narrations") or []
+            if not narrations:
+                errors.append(f"{draft.get('topic', 'Untitled')} / {language}: no scene narrations")
+        errors.extend(validate_language_draft_content(draft))
+        return errors
+
     source_count = len(draft.get("source_narrations") or [])
     errors = []
     for language in draft.get("selected_languages") or []:
@@ -395,9 +567,63 @@ def validate_draft_translation_counts(draft: dict[str, Any]) -> list[str]:
     return errors
 
 
-def build_generation_jobs(drafts: list[dict[str, Any]], base_config: dict[str, Any]) -> list[dict[str, Any]]:
+def validate_language_tts_overrides(
+    drafts: list[dict[str, Any]],
+    language_tts_overrides: dict[str, dict[str, Any]] | None,
+) -> list[str]:
+    errors = []
+    for draft in drafts:
+        if not draft.get("language_drafts"):
+            continue
+        for language in draft.get("selected_languages") or []:
+            override = (language_tts_overrides or {}).get(language) or {}
+            if override.get("tts_inference_mode") == "fish" and not (override.get("tts_voice") or "").strip():
+                errors.append(f"{draft.get('topic', 'Untitled')} / {language}: Fish reference_id is required")
+    return errors
+
+
+def build_generation_jobs(
+    drafts: list[dict[str, Any]],
+    base_config: dict[str, Any],
+    language_tts_overrides: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     jobs = []
     for draft in drafts:
+        if draft.get("language_drafts"):
+            content_errors = validate_language_draft_content(draft)
+            if content_errors:
+                raise DraftParseError(content_errors[0])
+
+            tts_errors = validate_language_tts_overrides([draft], language_tts_overrides)
+            if tts_errors:
+                raise ValueError(tts_errors[0])
+
+            for language in draft.get("selected_languages") or []:
+                language_draft = (draft.get("language_drafts") or {}).get(language) or {}
+                narrations = language_draft.get("narrations") or []
+                if not narrations:
+                    raise DraftParseError(f"{draft.get('topic', 'Untitled')} / {language}: no scene narrations")
+
+                params = dict(base_config)
+                params.update(language_tts_overrides.get(language, {}) if language_tts_overrides else {})
+                params.update(
+                    {
+                        "text": "\n".join(narrations),
+                        "mode": "fixed",
+                        "split_mode": "line",
+                        "title": (language_draft.get("title") or draft.get("topic") or "").strip(),
+                        "review_topic": draft.get("topic"),
+                        "review_language": language,
+                        "review_language_script": language_draft.get("script") or "",
+                        "review_language_narrations": narrations,
+                        "review_script_model": draft.get("script_model") or "",
+                        "review_split_model": draft.get("split_model") or "",
+                        "review_workflow_mode": draft.get("workflow_mode") or "independent_language_drafts",
+                    }
+                )
+                jobs.append({"topic": draft.get("topic"), "language": language, "params": params})
+            continue
+
         source_narrations = draft.get("source_narrations") or []
         titles = draft_titles(draft)
         for language in draft.get("selected_languages") or []:

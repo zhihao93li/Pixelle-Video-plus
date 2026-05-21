@@ -110,35 +110,34 @@ def render_faq_sidebar():
     allowing users to quickly find answers without leaving the main interface.
     """
     with st.sidebar:
-        # FAQ header with icon
-        # st.markdown(f"### 🙋‍♀️ {tr('faq.title', fallback='FAQ')}")
-        
-        # Get current language
-        current_language = get_language()
-        
-        # Load FAQ content
-        faq_content = load_faq_content(current_language)
-        
-        if faq_content:
-            # Display FAQ in an expander, expanded by default
-            with st.expander(tr('faq.expand_to_view', fallback='FAQ'), expanded=True):
-                # Parse FAQ into sections
-                sections = parse_faq_sections(faq_content)
-                
-                # Display each question in its own collapsible expander
+        render_faq_content(expanded=True, nested=True)
+
+
+def render_faq_content(expanded: bool = False, nested: bool = False):
+    """Render FAQ markdown as collapsible sections."""
+    current_language = get_language()
+    faq_content = load_faq_content(current_language)
+
+    if faq_content:
+        sections = parse_faq_sections(faq_content)
+        if nested:
+            with st.expander(tr("faq.expand_to_view", fallback="FAQ"), expanded=expanded):
                 for question, answer in sections:
                     with st.expander(question, expanded=False):
                         st.markdown(answer, unsafe_allow_html=True)
-            
-            # Add a link to GitHub issues for more help
-            st.markdown(
-                f"💡 {tr('faq.more_help', fallback='Need more help?')} "
-                f"[GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues)"
-            )
         else:
-            # If FAQ cannot be loaded, only show the GitHub link
-            st.markdown(f"### 💡 {tr('faq.more_help', fallback='Need help?')}")
-            st.markdown(
-                f"[GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues) | "
-                f"[Documentation](https://aidc-ai.github.io/Pixelle-Video)"
-            )
+            for index, (question, answer) in enumerate(sections):
+                with st.expander(question, expanded=expanded and index == 0):
+                    st.markdown(answer, unsafe_allow_html=True)
+
+        st.markdown(
+            f"💡 {tr('faq.more_help', fallback='Need more help?')} "
+            f"[GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues)"
+        )
+        return
+
+    st.warning(tr("faq.load_error", fallback="Failed to load FAQ content"))
+    st.markdown(
+        f"[GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues) | "
+        f"[Documentation](https://aidc-ai.github.io/Pixelle-Video)"
+    )

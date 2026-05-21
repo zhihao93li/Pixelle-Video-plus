@@ -15,19 +15,23 @@ from web.components.content_input import parse_batch_text_input
 from web.i18n import tr
 from web.utils.async_helpers import run_async
 from web.utils.script_review import (
+    DEFAULT_REVIEW_LANGUAGES,
     DEFAULT_TARGET_LANGUAGES,
+    PromptTemplate,
     SOURCE_LANGUAGE_KEY,
     build_generation_jobs,
     draft_titles,
-    generate_multilingual_script_draft,
+    generate_independent_language_drafts,
     load_prompt_templates,
     split_review_lines,
     validate_draft_translation_counts,
+    validate_language_tts_overrides,
 )
 
 DRAFTS_KEY = "script_review_drafts"
 RESULTS_KEY = "script_review_generation_results"
 ERRORS_KEY = "script_review_generation_errors"
+LANGUAGE_TTS_KEY = "script_review_language_tts_overrides"
 
 STAGE_LABEL_KEYS = {
     "generating_script": "script_review.stage.generating_script",
@@ -37,6 +41,7 @@ STAGE_LABEL_KEYS = {
 
 LANGUAGE_LABEL_KEYS = {
     SOURCE_LANGUAGE_KEY: "script_review.language.source",
+    "Chinese": "script_review.language.chinese",
     "English": "script_review.language.english",
     "Japanese": "script_review.language.japanese",
     "Korean": "script_review.language.korean",
@@ -47,6 +52,7 @@ LANGUAGE_LABEL_KEYS = {
 TEMPLATE_LABEL_KEYS = {
     "Short Oral Script": "script_review.template.script_short_oral",
     "Bazi Storyboard Oral Script": "script_review.template.bazi_oral_script",
+    "Bazi Storyboard Oral Script English": "script_review.template.bazi_oral_script_english",
     "Copy-Safe Scene Split": "script_review.template.copy_safe_scene_split",
     "Scene-Aligned Translation": "script_review.template.translate_scene_aligned",
 }
@@ -124,6 +130,10 @@ def _dedupe(items: list[str]) -> list[str]:
     return result
 
 
+def _safe_widget_key(value: str) -> str:
+    return "".join(char.lower() if char.isalnum() else "_" for char in value).strip("_") or "value"
+
+
 def _current_model_options() -> list[str]:
     current_model = (config_manager.get_llm_config().get("model") or "").strip()
     loaded_models = st.session_state.get("llm_loaded_models", [])
@@ -145,18 +155,47 @@ def _render_model_selector(label: str, key: str) -> str:
     return selected.strip()
 
 
-def _render_template_selector(kind: str, label: str, key: str) -> str:
-    templates = load_prompt_templates(kind)
+def _render_template_selector(
+    kind: str,
+    label: str,
+    key: str,
+    preferred_template_name: str | None = None,
+    exclude_template_names: set[str] | None = None,
+    return_template: bool = False,
+) -> str | PromptTemplate:
+    loaded_templates = load_prompt_templates(kind)
+    templates = [
+        template
+        for template in loaded_templates
+        if template.name not in (exclude_template_names or set())
+    ] or loaded_templates
+    preferred_index = 0
+    if preferred_template_name:
+        for index, template in enumerate(templates):
+            if template.name == preferred_template_name:
+                preferred_index = index
+                break
     selected_index = st.selectbox(
         label,
         options=list(range(len(templates))),
         format_func=lambda index: _template_label(templates[index].name),
+        index=preferred_index,
         key=key,
     )
     selected_template = templates[selected_index]
     source = _sr("template_source_builtin", "builtin") if selected_template.source == "builtin" else selected_template.source
     st.caption(_sr("template_source", "Template source: {source}", source=source))
-    return selected_template.content
+    return selected_template if return_template else selected_template.content
+
+
+def _language_script_template_overrides(selected_template: PromptTemplate) -> dict[str, str]:
+    if selected_template.name != "Bazi Storyboard Oral Script":
+        return {}
+
+    for template in load_prompt_templates("script"):
+        if template.name == "Bazi Storyboard Oral Script English":
+            return {"English": template.content}
+    return {}
 
 
 def _parse_custom_languages(text: str) -> list[str]:
@@ -174,6 +213,141 @@ def _collect_topics(batch_mode: bool, topic_input: str) -> list[str]:
     return [clean] if clean else []
 
 
+def _render_independent_language_draft_editor(draft: dict[str, Any], draft_index: int) -> dict[str, Any]:
+    language_drafts = dict(draft.get("language_drafts") or {})
+    titles = draft_titles(draft)
+    selected_defaults = set(draft.get("selected_languages") or language_drafts.keys())
+    selected_languages = []
+
+    for language, language_draft in language_drafts.items():
+        language_label = _language_label(language)
+        safe_language = _safe_widget_key(language)
+        use_language = st.checkbox(
+            _sr("generate_language_video", "Generate {language} video", language=language_label),
+            value=language in selected_defaults,
+            key=f"script_review_language_{draft_index}_{safe_language}",
+        )
+        if use_language:
+            selected_languages.append(language)
+
+        language_draft["title"] = st.text_input(
+            _sr("language_title_field", "{language} title", language=language_label),
+            value=titles.get(language) or language_draft.get("title") or "",
+            key=f"script_review_title_{draft_index}_{safe_language}",
+        )
+        language_draft["script"] = st.text_area(
+            _sr("language_script", "{language} complete script", language=language_label),
+            value=language_draft.get("script") or "",
+            height=180,
+            key=f"script_review_full_language_{draft_index}_{safe_language}",
+        )
+        narrations_text = st.text_area(
+            _sr("language_scenes", "{language} scenes", language=language_label),
+            value="\n".join(language_draft.get("narrations") or []),
+            height=140,
+            key=f"script_review_scenes_{draft_index}_{safe_language}",
+        )
+        language_draft["narrations"] = split_review_lines(narrations_text)
+        language_drafts[language] = language_draft
+
+    draft["language_drafts"] = language_drafts
+    draft["selected_languages"] = selected_languages
+    draft["titles"] = {
+        language: (language_draft.get("title") or "").strip()
+        for language, language_draft in language_drafts.items()
+    }
+
+    errors = validate_draft_translation_counts(draft)
+    if errors:
+        for error in errors:
+            st.error(error)
+    else:
+        st.success(_sr("language_drafts_ready", "Language drafts are ready"))
+
+    return draft
+
+
+def _default_fish_reference_id() -> str:
+    fish_config = config_manager.get_comfyui_config().get("tts", {}).get("fish_audio", {})
+    return str(fish_config.get("reference_id") or "").strip()
+
+
+def _independent_review_mode(drafts: list[dict[str, Any]]) -> bool:
+    return any(bool(draft.get("language_drafts")) for draft in drafts)
+
+
+def _selected_generation_languages(drafts: list[dict[str, Any]]) -> list[str]:
+    languages = []
+    for draft in drafts:
+        if not draft.get("language_drafts"):
+            continue
+        languages.extend(draft.get("selected_languages") or [])
+    return _dedupe(languages)
+
+
+def _render_language_fish_tts_overrides(drafts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    languages = _selected_generation_languages(drafts)
+    if not languages:
+        return {}
+
+    st.markdown(f"**{_sr('fish_tts_settings', 'Fish TTS by language')}**")
+    st.caption(
+        _sr(
+            "fish_tts_settings_help",
+            "This multilingual review flow always uses Fish TTS. Each selected language needs its own reference_id.",
+        )
+    )
+
+    default_chinese_reference_id = _default_fish_reference_id()
+    overrides = {}
+    for language in languages:
+        language_label = _language_label(language)
+        key_suffix = _safe_widget_key(language)
+        default_reference_id = default_chinese_reference_id if language == "Chinese" else ""
+        reference_id = st.text_input(
+            _sr("fish_reference_id", "{language} Fish reference_id", language=language_label),
+            value=default_reference_id,
+            help=_sr("fish_reference_id_help", "Fish Audio voice model ID used for this language."),
+            key=f"script_review_fish_reference_{key_suffix}",
+        ).strip()
+        speed = st.slider(
+            _sr("fish_speed", "{language} speed", language=language_label),
+            min_value=0.5,
+            max_value=2.0,
+            value=1.0,
+            step=0.1,
+            key=f"script_review_fish_speed_{key_suffix}",
+        )
+        overrides[language] = {
+            "tts_inference_mode": "fish",
+            "tts_voice": reference_id,
+            "tts_speed": speed,
+        }
+    return overrides
+
+
+def render_script_review_tts_settings():
+    drafts = [
+        draft
+        for draft in st.session_state.get(DRAFTS_KEY, [])
+        if draft.get("selected_for_generation", True)
+    ]
+    if not drafts or not _independent_review_mode(drafts):
+        st.session_state[LANGUAGE_TTS_KEY] = {}
+        with st.container(border=True):
+            st.info(_sr(
+                "tts_after_drafts_short",
+                "Generate and approve multilingual drafts first, then configure each language voice here.",
+            ))
+        return
+
+    with st.container(border=True):
+        overrides = _render_language_fish_tts_overrides(drafts)
+        st.session_state[LANGUAGE_TTS_KEY] = overrides
+        for error in validate_language_tts_overrides(drafts, overrides):
+            st.error(_sr("fish_reference_required", "{error}", error=error))
+
+
 def _render_draft_editor():
     drafts = st.session_state.get(DRAFTS_KEY, [])
     if not drafts:
@@ -188,6 +362,10 @@ def _render_draft_editor():
                 value=draft.get("selected_for_generation", True),
                 key=f"script_review_approve_{draft_index}",
             )
+
+            if draft.get("language_drafts"):
+                drafts[draft_index] = _render_independent_language_draft_editor(draft, draft_index)
+                continue
 
             titles = draft_titles(draft)
             existing_selection = draft.get("selected_languages")
@@ -284,11 +462,16 @@ def render_script_review_input(pixelle_video):
         else:
             topic_input = st.text_input(_sr("topic", "Topic"), key="script_review_topic")
 
-        script_template = _render_template_selector(
+        script_template_config = _render_template_selector(
             "script",
-            _sr("script_prompt_template", "Script prompt template"),
-            "script_review_script_template",
+            _sr("script_prompt_template", "Script type"),
+            "script_review_native_script_template",
+            preferred_template_name="Bazi Storyboard Oral Script",
+            exclude_template_names={"Bazi Storyboard Oral Script English"},
+            return_template=True,
         )
+        script_template = script_template_config.content
+        language_script_templates = _language_script_template_overrides(script_template_config)
         script_model = _render_model_selector(_sr("script_generation_model", "Script generation model"), "script_review_script_model")
 
         split_template = _render_template_selector(
@@ -298,17 +481,10 @@ def render_script_review_input(pixelle_video):
         )
         split_model = _render_model_selector(_sr("split_model", "Script split model"), "script_review_split_model")
 
-        translation_template = _render_template_selector(
-            "translate",
-            _sr("translation_prompt_template", "Translation prompt template"),
-            "script_review_translation_template",
-        )
-        translation_model = _render_model_selector(_sr("translation_model", "Translation model"), "script_review_translation_model")
-
         selected_languages = st.multiselect(
-            _sr("target_languages", "Target languages"),
-            options=DEFAULT_TARGET_LANGUAGES,
-            default=["English"],
+            _sr("target_languages", "Languages"),
+            options=_dedupe([*DEFAULT_REVIEW_LANGUAGES, *DEFAULT_TARGET_LANGUAGES]),
+            default=DEFAULT_REVIEW_LANGUAGES,
             format_func=_language_label,
             key="script_review_target_languages",
         )
@@ -320,6 +496,15 @@ def render_script_review_input(pixelle_video):
             )
         )
         target_languages = _dedupe([*selected_languages, *custom_languages])
+        if "English" in target_languages and language_script_templates.get("English"):
+            st.caption(
+                _sr(
+                    "language_prompt_mapping",
+                    "Language prompts are mapped automatically: Chinese uses {base}; English uses {english}.",
+                    base=_template_label(script_template_config.name),
+                    english=_template_label("Bazi Storyboard Oral Script English"),
+                )
+            )
         topics = _collect_topics(batch_mode, topic_input)
 
         generate_disabled = not topics or not target_languages or not config_manager.validate()
@@ -351,16 +536,15 @@ def render_script_review_input(pixelle_video):
                 status.text(_sr("generating_draft", "Generating draft {index}/{total}: {topic}", index=index, total=len(topics), topic=topic))
                 try:
                     draft = run_async(
-                        generate_multilingual_script_draft(
+                        generate_independent_language_drafts(
                             llm_service=pixelle_video.llm,
                             topic=topic,
                             script_template=script_template,
                             script_model=script_model,
                             split_template=split_template,
                             split_model=split_model,
-                            translation_template=translation_template,
-                            translation_model=translation_model,
-                            target_languages=target_languages,
+                            languages=target_languages,
+                            language_script_templates=language_script_templates,
                             status_callback=update_draft_status,
                         )
                     )
@@ -449,6 +633,10 @@ def render_script_review_generation(pixelle_video, video_params: dict[str, Any])
         ]
         if not drafts:
             st.info(_sr("generate_drafts_first", "Generate and approve review drafts first."))
+            st.info(_sr(
+                "per_language_tts_after_drafts",
+                "After drafts are ready, each selected language will show its own Fish reference_id and speed here.",
+            ))
             _render_results()
             return
 
@@ -459,10 +647,28 @@ def render_script_review_generation(pixelle_video, video_params: dict[str, Any])
         for error in validation_errors:
             st.error(error)
 
+        independent_review = _independent_review_mode(drafts)
         base_config = _video_base_config(video_params)
+        language_tts_overrides = None
+        if independent_review:
+            base_config["tts_inference_mode"] = "fish"
+            base_config.pop("tts_workflow", None)
+            base_config.pop("ref_audio", None)
+            base_config.pop("tts_voice", None)
+            base_config.pop("tts_speed", None)
+            language_tts_overrides = st.session_state.get(LANGUAGE_TTS_KEY) or {}
+            tts_errors = validate_language_tts_overrides(drafts, language_tts_overrides)
+            for error in tts_errors:
+                st.error(_sr("fish_reference_required", "{error}", error=error))
+            validation_errors.extend(tts_errors)
+
         jobs = []
         if not validation_errors:
-            jobs = build_generation_jobs(drafts, base_config=base_config)
+            jobs = build_generation_jobs(
+                drafts,
+                base_config=base_config,
+                language_tts_overrides=language_tts_overrides,
+            )
 
         st.caption(_sr("ready_to_generate", "Ready to generate {count} video(s)", count=len(jobs)))
         if st.button(

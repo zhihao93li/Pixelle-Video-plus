@@ -28,6 +28,9 @@ if str(_project_root) not in sys.path:
 
 import streamlit as st
 
+from web.i18n import tr
+from web.state.session import init_i18n, init_session_state
+
 # Setup page config (must be first Streamlit command)
 st.set_page_config(
     page_title="Pixelle-Video - AI Video Generator",
@@ -39,22 +42,37 @@ st.set_page_config(
 
 def main():
     """Main entry point with navigation"""
+    init_session_state()
+    init_i18n()
+
     # Define pages using st.Page
-    home_page = st.Page(
+    create_page = st.Page(
         "pages/1_🎬_Home.py",
-        title="Home",
+        title=tr("nav.create", fallback="Create"),
         icon="🎬",
         default=True
     )
     
     history_page = st.Page(
         "pages/2_📚_History.py",
-        title="History",
+        title=tr("nav.history", fallback="History"),
         icon="📚"
+    )
+
+    settings_page = st.Page(
+        "pages/3_⚙️_Settings.py",
+        title=tr("nav.settings", fallback="Settings"),
+        icon="⚙️"
+    )
+
+    help_page = st.Page(
+        "pages/4_❓_Help.py",
+        title=tr("nav.help", fallback="Help"),
+        icon="❓"
     )
     
     # Set up navigation and run
-    pg = st.navigation([home_page, history_page])
+    pg = st.navigation([create_page, history_page, settings_page, help_page])
     pg.run()
 
 

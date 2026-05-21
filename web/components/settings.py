@@ -61,13 +61,41 @@ def _clear_workflow_caches():
             service._workflows_cache = None
 
 
-def render_advanced_settings():
+def render_config_status_bar():
+    """Render a compact configuration status for the creation page."""
+    is_configured = config_manager.validate()
+
+    with st.container(border=True):
+        status_col, action_col = st.columns([4, 1])
+        with status_col:
+            st.markdown(f"**{tr('create.config_status.title', fallback='Configuration Status')}**")
+            if is_configured:
+                st.success(tr("create.config_status.ready", fallback="System configuration is ready."))
+            else:
+                st.warning(
+                    tr(
+                        "create.config_status.missing",
+                        fallback="Complete system configuration before generating videos.",
+                    )
+                )
+        with action_col:
+            st.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
+            st.page_link(
+                "pages/3_⚙️_Settings.py",
+                label=tr("create.config_status.open_settings", fallback="Settings"),
+                icon="⚙️",
+                width="stretch",
+            )
+
+
+def render_advanced_settings(default_expanded: bool | None = None):
     """Render system configuration (required) with 2-column layout"""
     # Check if system is configured
     is_configured = config_manager.validate()
+    expanded = not is_configured if default_expanded is None else default_expanded
     
     # Expand if not configured, collapse if configured
-    with st.expander(tr("settings.title"), expanded=not is_configured):
+    with st.expander(tr("settings.title"), expanded=expanded):
         # 2-column layout: LLM | ComfyUI
         llm_col, comfyui_col = st.columns(2)
         

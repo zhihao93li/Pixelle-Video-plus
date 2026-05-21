@@ -28,43 +28,50 @@ from web.utils.async_helpers import run_async
 from web.utils.streamlit_helpers import check_and_warn_selfhost_workflow
 
 
-def render_style_config(pixelle_video):
+def render_style_config(pixelle_video, include_tts: bool = True):
     """Render style configuration section (middle column)"""
+    tts_mode = None
+    selected_voice = None
+    tts_speed = None
+    tts_workflow_key = None
+    ref_audio_path = None
+
     # TTS Section (moved from left column)
     # ====================================================================
-    with st.container(border=True):
-        st.markdown(f"**{tr('section.tts')}**")
+    if include_tts:
+        with st.container(border=True):
+            st.markdown(f"**{tr('section.tts')}**")
 
-        with st.expander(tr("help.feature_description"), expanded=False):
-            st.markdown(f"**{tr('help.what')}**")
-            st.markdown(tr("tts.what"))
-            st.markdown(f"**{tr('help.how')}**")
-            st.markdown(tr("tts.how"))
+            with st.expander(tr("help.feature_description"), expanded=False):
+                st.markdown(f"**{tr('help.what')}**")
+                st.markdown(tr("tts.what"))
+                st.markdown(f"**{tr('help.how')}**")
+                st.markdown(tr("tts.how"))
 
-        # Get TTS config
-        comfyui_config = config_manager.get_comfyui_config()
-        tts_config = comfyui_config["tts"]
+            # Get TTS config
+            comfyui_config = config_manager.get_comfyui_config()
+            tts_config = comfyui_config["tts"]
 
-        # Inference mode selection
-        tts_modes = ["local", "comfyui", "fish"]
-        saved_tts_mode = tts_config.get("inference_mode", "local")
-        default_tts_mode_index = tts_modes.index(saved_tts_mode) if saved_tts_mode in tts_modes else 0
-        tts_mode = st.radio(
-            tr("tts.inference_mode"),
-            tts_modes,
-            horizontal=True,
-            format_func=lambda x: tr(f"tts.mode.{x}"),
-            index=default_tts_mode_index,
-            key="tts_inference_mode"
-        )
+            # Inference mode selection
+            tts_modes = ["local", "comfyui", "fish"]
+            saved_tts_mode = tts_config.get("inference_mode", "local")
+            default_tts_mode_index = tts_modes.index(saved_tts_mode) if saved_tts_mode in tts_modes else 0
+            tts_mode = st.radio(
+                tr("tts.inference_mode"),
+                tts_modes,
+                horizontal=True,
+                format_func=lambda x: tr(f"tts.mode.{x}"),
+                index=default_tts_mode_index,
+                key="tts_inference_mode"
+            )
 
-        # Show hint based on mode
-        if tts_mode == "local":
-            st.caption(tr("tts.mode.local_hint"))
-        elif tts_mode == "fish":
-            st.caption(tr("tts.mode.fish_hint"))
-        else:
-            st.caption(tr("tts.mode.comfyui_hint"))
+            # Show hint based on mode
+            if tts_mode == "local":
+                st.caption(tr("tts.mode.local_hint"))
+            elif tts_mode == "fish":
+                st.caption(tr("tts.mode.fish_hint"))
+            else:
+                st.caption(tr("tts.mode.comfyui_hint"))
 
         # ================================================================
         # Local Mode UI
