@@ -20,12 +20,20 @@ import json
 import re
 from typing import Optional, Type, TypeVar, Union
 
+from loguru import logger
 from openai import AsyncOpenAI
 from pydantic import BaseModel
-from loguru import logger
 
+from pixelle_video.config.schema import AIHUBMIX_BASE_URL
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def build_completion_token_kwargs(model: str, max_tokens: int) -> dict[str, int]:
+    model_name = (model or "").lower()
+    if model_name.startswith(("gpt-5", "o1", "o3", "o4")):
+        return {"max_completion_tokens": max_tokens}
+    return {"max_tokens": max_tokens}
 
 
 class LLMService:
@@ -102,10 +110,12 @@ class LLMService:
             or "dummy-key"  # Ollama doesn't need real key
         )
         
-        # Get base URL (priority: parameter > config)
+        # AiHubMix is the fixed relay endpoint. Keep the parameter escape hatch
+        # for tests and low-level callers, but do not inherit stale provider
+        # URLs from older config files.
         final_base_url = (
             base_url
-            or self._get_config_value("base_url")
+            or AIHUBMIX_BASE_URL
         )
         
         # Create client
@@ -189,7 +199,7 @@ class LLMService:
                     model=final_model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=temperature,
-                    max_tokens=max_tokens,
+                    **build_completion_token_kwargs(final_model, max_tokens),
                     **kwargs
                 )
                 
@@ -239,7 +249,7 @@ class LLMService:
             model=model,
             messages=[{"role": "user", "content": enhanced_prompt}],
             temperature=temperature,
-            max_tokens=max_tokens,
+            **build_completion_token_kwargs(model, max_tokens),
             **kwargs
         )
         content = response.choices[0].message.content
@@ -335,6 +345,5 @@ You MUST respond with ONLY a valid JSON object (no markdown, no extra text)."""
     def __repr__(self) -> str:
         """String representation"""
         model = self.active
-        base_url = self._get_config_value("base_url", "default")
+        base_url = AIHUBMIX_BASE_URL
         return f"<LLMService model={model!r} base_url={base_url!r}>"
-

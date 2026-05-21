@@ -19,11 +19,13 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+AIHUBMIX_BASE_URL = "https://aihubmix.com/v1"
+
 
 class LLMConfig(BaseModel):
     """LLM configuration"""
     api_key: str = Field(default="", description="LLM API Key")
-    base_url: str = Field(default="", description="LLM API Base URL")
+    base_url: str = Field(default=AIHUBMIX_BASE_URL, description="LLM API Base URL")
     model: str = Field(default="", description="LLM Model Name")
 
 

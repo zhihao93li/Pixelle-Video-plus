@@ -5,17 +5,13 @@
 project_name: Pixelle-Video
 
 # ==================== LLM Configuration ====================
-# Supports any OpenAI SDK compatible API
+# AiHubMix relay integration (OpenAI SDK compatible API)
 llm:
   api_key: ""
-  base_url: ""
+  base_url: "https://aihubmix.com/v1"
   model: ""
 
-# Popular presets:
-# Qwen Max:        base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"  model: "qwen-max"
-# OpenAI GPT-4o:   base_url: "https://api.openai.com/v1"                          model: "gpt-4o"
-# DeepSeek:        base_url: "https://api.deepseek.com"                           model: "deepseek-chat"
-# Ollama (Local):  base_url: "http://localhost:11434/v1"                          model: "llama3.2"
+# Set the default model here. Individual creation workflows may override it.
 
 # ==================== ComfyUI Configuration ====================
 comfyui:

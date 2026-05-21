@@ -77,115 +77,56 @@ def render_advanced_settings():
         with llm_col:
             with st.container(border=True):
                 st.markdown(f"**{tr('settings.llm.title')}**")
-                
-                # Quick preset selection
-                from pixelle_video.llm_presets import (
-                    find_preset_by_base_url_and_model,
-                    get_preset,
-                    get_preset_names,
-                )
-                
-                # Custom at the end
-                preset_names = get_preset_names() + ["Custom"]
-                
-                # Get current config
+                st.caption("AiHubMix relay integration")
+
+                from pixelle_video.config.schema import AIHUBMIX_BASE_URL
+
                 current_llm = config_manager.get_llm_config()
-                
-                # Auto-detect which preset matches current config
-                current_preset = find_preset_by_base_url_and_model(
-                    current_llm["base_url"], 
-                    current_llm["model"]
-                )
-                
-                # Determine default index based on current config
-                if current_preset:
-                    # Current config matches a preset
-                    default_index = preset_names.index(current_preset)
-                else:
-                    # Current config doesn't match any preset -> Custom
-                    default_index = len(preset_names) - 1
-                
-                selected_preset = st.selectbox(
-                    tr("settings.llm.quick_select"),
-                    options=preset_names,
-                    index=default_index,
-                    help=tr("settings.llm.quick_select_help"),
-                    key="llm_preset_select"
-                )
-                
-                # Auto-fill based on selected preset
-                if selected_preset != "Custom":
-                    # Preset selected
-                    preset_config = get_preset(selected_preset)
-                    
-                    # If user switched to a different preset (not current one), clear API key
-                    # If it's the same as current config, keep API key
-                    if selected_preset == current_preset:
-                        # Same preset as saved config: keep API key
-                        default_api_key = current_llm["api_key"]
-                    else:
-                        # Different preset: use default_api_key if provided (e.g., Ollama), otherwise clear
-                        default_api_key = preset_config.get("default_api_key", "")
-                    
-                    default_base_url = preset_config.get("base_url", "")
-                    default_model = preset_config.get("model", "")
-                    
-                    # Show API key URL if available
-                    if preset_config.get("api_key_url"):
-                        st.markdown(f"🔑 [{tr('settings.llm.get_api_key')}]({preset_config['api_key_url']})")
-                else:
-                    # Custom: show current saved config (if any)
-                    default_api_key = current_llm["api_key"]
-                    default_base_url = current_llm["base_url"]
-                    default_model = current_llm["model"]
-                
+                default_api_key = current_llm["api_key"]
+                default_base_url = AIHUBMIX_BASE_URL
+                default_model = current_llm["model"]
+                st.markdown("[Get AiHubMix API Key](https://aihubmix.com/token)")
                 st.markdown("---")
-                
-                # API Key (use unique key to force refresh when switching preset)
+
                 llm_api_key = st.text_input(
-                    f"{tr('settings.llm.api_key')} *",
+                    "AiHubMix API Key *",
                     value=default_api_key,
                     type="password",
                     help=tr("settings.llm.api_key_help"),
-                    key=f"llm_api_key_input_{selected_preset}"
+                    key="llm_api_key_input_aihubmix"
                 )
-                
-                # Base URL (use unique key based on preset to force refresh)
+
                 llm_base_url = st.text_input(
                     f"{tr('settings.llm.base_url')} *",
                     value=default_base_url,
-                    help=tr("settings.llm.base_url_help"),
-                    key=f"llm_base_url_input_{selected_preset}"
+                    disabled=True,
+                    help="Fixed AiHubMix OpenAI-compatible endpoint",
+                    key="llm_base_url_input_aihubmix"
                 )
-                
-                # Model selection with dropdown and load button
-                # Initialize session state for loaded models
+
                 if "llm_loaded_models" not in st.session_state:
                     st.session_state.llm_loaded_models = []
-                
-                # Build model options: Custom option + loaded models
+
                 CUSTOM_MODEL_OPTION = f"✏️ {tr('settings.llm.custom_model')}"
-                model_options = [CUSTOM_MODEL_OPTION] + st.session_state.llm_loaded_models
-                
-                # Determine default selection
+                loaded_models = st.session_state.llm_loaded_models
+                model_options = [CUSTOM_MODEL_OPTION] + loaded_models
+
                 if default_model in st.session_state.llm_loaded_models:
                     default_model_index = model_options.index(default_model)
                 else:
-                    # Default model not in loaded list, use custom
                     default_model_index = 0
-                
-                # Model dropdown with load button on the right
+
                 model_col, load_col, test_col = st.columns([3, 1, 1])
-                
+
                 with model_col:
                     selected_model_option = st.selectbox(
-                        f"{tr('settings.llm.model')} *",
+                        "Default Model *",
                         options=model_options,
                         index=default_model_index,
                         help=tr("settings.llm.model_help"),
-                        key=f"llm_model_select_{selected_preset}"
+                        key="llm_model_select_aihubmix"
                     )
-                
+
                 with load_col:
                     st.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
                     load_clicked = st.button(
@@ -194,7 +135,7 @@ def render_advanced_settings():
                         key="load_models_btn",
                         use_container_width=True
                     )
-                
+
                 with test_col:
                     st.markdown("<div style='height: 28px'></div>", unsafe_allow_html=True)
                     test_clicked = st.button(
@@ -203,8 +144,7 @@ def render_advanced_settings():
                         key="test_llm_connection_btn",
                         use_container_width=True
                     )
-                
-                # Handle load models button click
+
                 if load_clicked:
                     if llm_api_key and llm_base_url:
                         try:
@@ -218,8 +158,7 @@ def render_advanced_settings():
                             st.error(tr("settings.llm.models_load_failed").replace("{error}", str(e)))
                     else:
                         st.warning(tr("status.llm_config_incomplete"))
-                
-                # Handle test connection button click
+
                 if test_clicked:
                     if llm_api_key and llm_base_url:
                         try:
@@ -234,14 +173,13 @@ def render_advanced_settings():
                             st.error(tr("settings.llm.connection_failed").replace("{error}", str(e)))
                     else:
                         st.warning(tr("status.llm_config_incomplete"))
-                
-                # If custom option selected, show text input for custom model name
+
                 if selected_model_option == CUSTOM_MODEL_OPTION:
                     llm_model = st.text_input(
-                        tr("settings.llm.custom_model_input"),
+                        "Default model name",
                         value=default_model,
                         help=tr("settings.llm.model_help"),
-                        key=f"llm_custom_model_input_{selected_preset}"
+                        key="llm_custom_model_input_aihubmix"
                     )
                 else:
                     llm_model = selected_model_option
