@@ -33,9 +33,18 @@ RESULTS_KEY = "script_review_generation_results"
 ERRORS_KEY = "script_review_generation_errors"
 LANGUAGE_TTS_KEY = "script_review_language_tts_overrides"
 
+BAZI_TEMPLATE_NAME = "Bazi Storyboard Oral Script"
+BAZI_DEFAULT_SCRIPT_MODEL = "doubao-seed-2-0-lite-260428"
+BAZI_DEFAULT_SPLIT_MODEL = "deepseek-v4-flash"
+BAZI_DEFAULT_LANGUAGE_SCRIPT_MODELS = {
+    "Chinese": "doubao-seed-2-0-lite-260428",
+    "English": "gemini-3.5-flash",
+}
+
 STAGE_LABEL_KEYS = {
     "generating_script": "script_review.stage.generating_script",
     "splitting_script": "script_review.stage.splitting_script",
+    "generating_title": "script_review.stage.generating_title",
     "translating": "script_review.stage.translating",
 }
 
@@ -140,19 +149,38 @@ def _current_model_options() -> list[str]:
     return _dedupe([current_model, *loaded_models])
 
 
-def _render_model_selector(label: str, key: str) -> str:
-    options = _current_model_options()
+def _render_model_selector(label: str, key: str, default_value: str | None = None) -> str:
+    options = _dedupe([default_value or "", *_current_model_options()])
     custom_option = _sr("custom_model_option", "Custom...")
-    default_model = options[0] if options else ""
+    default_model = (default_value or (options[0] if options else "")).strip()
+    preferred_index = options.index(default_model) if default_model in options else 0
     selected = st.selectbox(
         label,
         options=[*options, custom_option],
-        index=0 if options else 0,
+        index=preferred_index if options else 0,
         key=f"{key}_select",
     )
     if selected == custom_option:
         return st.text_input(_sr("model_name", "Model name"), value=default_model, key=f"{key}_custom").strip()
     return selected.strip()
+
+
+def _script_model_default_for_template(template_name: str) -> str | None:
+    if template_name == BAZI_TEMPLATE_NAME:
+        return BAZI_DEFAULT_SCRIPT_MODEL
+    return None
+
+
+def _split_model_default_for_template(template_name: str) -> str | None:
+    if template_name == BAZI_TEMPLATE_NAME:
+        return BAZI_DEFAULT_SPLIT_MODEL
+    return None
+
+
+def _language_script_model_defaults_for_template(template_name: str, default_model: str) -> dict[str, str]:
+    if template_name == BAZI_TEMPLATE_NAME:
+        return dict(BAZI_DEFAULT_LANGUAGE_SCRIPT_MODELS)
+    return {}
 
 
 def _render_template_selector(
@@ -189,7 +217,7 @@ def _render_template_selector(
 
 
 def _language_script_template_overrides(selected_template: PromptTemplate) -> dict[str, str]:
-    if selected_template.name != "Bazi Storyboard Oral Script":
+    if selected_template.name != BAZI_TEMPLATE_NAME:
         return {}
 
     for template in load_prompt_templates("script"):
@@ -213,6 +241,34 @@ def _collect_topics(batch_mode: bool, topic_input: str) -> list[str]:
     return [clean] if clean else []
 
 
+def _render_language_script_model_overrides(
+    languages: list[str],
+    default_model: str,
+    language_default_models: dict[str, str] | None = None,
+    key_prefix: str = "script_review_language_script_model",
+) -> dict[str, str]:
+    if not languages:
+        return {}
+
+    overrides = {}
+    with st.expander(_sr("language_script_models", "Script models by language"), expanded=True):
+        st.caption(
+            _sr(
+                "language_script_models_help",
+                "Only script and title generation use these models. Scene splitting still uses the global split model.",
+            )
+        )
+        for language in languages:
+            language_label = _language_label(language)
+            safe_language = _safe_widget_key(language)
+            overrides[language] = _render_model_selector(
+                _sr("language_script_model", "{language} script model", language=language_label),
+                f"{key_prefix}_{safe_language}",
+                default_value=(language_default_models or {}).get(language) or default_model,
+            )
+    return overrides
+
+
 def _render_independent_language_draft_editor(draft: dict[str, Any], draft_index: int) -> dict[str, Any]:
     language_drafts = dict(draft.get("language_drafts") or {})
     titles = draft_titles(draft)
@@ -233,6 +289,7 @@ def _render_independent_language_draft_editor(draft: dict[str, Any], draft_index
         language_draft["title"] = st.text_input(
             _sr("language_title_field", "{language} title", language=language_label),
             value=titles.get(language) or language_draft.get("title") or "",
+            placeholder=_sr("language_title_placeholder", "Optional. Leave blank to use the topic."),
             key=f"script_review_title_{draft_index}_{safe_language}",
         )
         language_draft["script"] = st.text_area(
@@ -472,14 +529,23 @@ def render_script_review_input(pixelle_video):
         )
         script_template = script_template_config.content
         language_script_templates = _language_script_template_overrides(script_template_config)
-        script_model = _render_model_selector(_sr("script_generation_model", "Script generation model"), "script_review_script_model")
+        template_key_suffix = _safe_widget_key(script_template_config.name)
+        script_model = _render_model_selector(
+            _sr("script_generation_model", "Script generation model"),
+            f"script_review_script_model_{template_key_suffix}",
+            default_value=_script_model_default_for_template(script_template_config.name),
+        )
 
         split_template = _render_template_selector(
             "split",
             _sr("split_prompt_template", "Script split prompt template"),
             "script_review_split_template",
         )
-        split_model = _render_model_selector(_sr("split_model", "Script split model"), "script_review_split_model")
+        split_model = _render_model_selector(
+            _sr("split_model", "Script split model"),
+            f"script_review_split_model_{template_key_suffix}",
+            default_value=_split_model_default_for_template(script_template_config.name),
+        )
 
         selected_languages = st.multiselect(
             _sr("target_languages", "Languages"),
@@ -505,6 +571,15 @@ def render_script_review_input(pixelle_video):
                     english=_template_label("Bazi Storyboard Oral Script English"),
                 )
             )
+        language_script_models = _render_language_script_model_overrides(
+            target_languages,
+            script_model,
+            language_default_models=_language_script_model_defaults_for_template(
+                script_template_config.name,
+                default_model=script_model,
+            ),
+            key_prefix=f"script_review_language_script_model_{template_key_suffix}",
+        )
         topics = _collect_topics(batch_mode, topic_input)
 
         generate_disabled = not topics or not target_languages or not config_manager.validate()
@@ -545,6 +620,7 @@ def render_script_review_input(pixelle_video):
                             split_model=split_model,
                             languages=target_languages,
                             language_script_templates=language_script_templates,
+                            language_script_models=language_script_models,
                             status_callback=update_draft_status,
                         )
                     )

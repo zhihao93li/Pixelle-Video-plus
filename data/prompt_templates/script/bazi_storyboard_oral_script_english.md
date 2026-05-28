@@ -161,5 +161,6 @@ Do not explain anything outside the JSON.
 The JSON must exactly follow this format:
 
 {{
+  "title": "Short natural English video title",
   "script": "Full English spoken script here"
 }}

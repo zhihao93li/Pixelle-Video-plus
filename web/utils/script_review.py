@@ -210,9 +210,29 @@ def parse_language_script_payload(response_text: str) -> dict[str, str]:
 
     title = str(payload.get("title") or "").strip()
     return {
-        "title": title or _default_script_title(script),
+        "title": title,
         "script": script,
     }
+
+
+def parse_title_response(response_text: str) -> str:
+    payload = _extract_json_object(response_text)
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise DraftParseError("Invalid title response: missing 'title'")
+    return title
+
+
+def _draft_stage_error(language: str, stage: str, exc: Exception) -> DraftParseError:
+    return DraftParseError(f"{language} {stage} failed: {exc}")
+
+
+def _language_script_model(
+    language: str,
+    default_model: str | None,
+    language_script_models: dict[str, str] | None,
+) -> str:
+    return str((language_script_models or {}).get(language) or default_model or "").strip()
 
 
 def parse_translation_payload(response_text: str, expected_count: int, language: str) -> dict[str, Any]:
@@ -245,14 +265,26 @@ def render_prompt_template(template: str, variables: dict[str, Any]) -> str:
 
 def render_language_script_prompt(template: str, topic: str, language: str) -> str:
     rendered_template = render_prompt_template(template, {"topic": topic, "language": language})
-    return f"""Target language hard rule:
+    return f"""Output contract hard rule:
+- Return ONLY valid JSON.
+- The JSON object MUST include both "title" and "script".
+- Use this exact shape:
+{{
+  "title": "short native {language} video title",
+  "script": "complete {language} spoken script"
+}}
+
+Target language hard rule:
 - Create this version directly in {language}.
 - The JSON title and script field values MUST be written in {language}.
 - Do not answer in Chinese unless the target language is Chinese.
 - If the writing brief below contains examples or style notes in another language, treat them only as structural guidance.
 
 Writing brief:
-{rendered_template}"""
+{rendered_template}
+
+Final reminder:
+Return ONLY the JSON object. Do not add markdown, notes, explanations, or plain text outside JSON."""
 
 
 def render_language_split_prompt(template: str, topic: str, language: str, script: str) -> str:
@@ -274,6 +306,53 @@ def render_language_split_prompt(template: str, topic: str, language: str, scrip
 
 Split brief:
 {rendered_template}"""
+
+
+def render_language_title_prompt(topic: str, language: str, script: str) -> str:
+    return f"""Create a short native {language} title for a short-form video.
+
+Original topic:
+{topic}
+
+{language} script:
+{script}
+
+Return ONLY valid JSON in this format:
+{{
+  "title": "short native {language} title"
+}}
+
+Requirements:
+- Title must be written in {language}.
+- Use natural {language}, not a literal word-for-word translation if it sounds awkward.
+- Capture the core idea of the topic and this {language} script.
+- Keep it short, clear, and suitable as a video title.
+- Do not use Chinese characters unless the target language is Chinese.
+- Do not copy the whole opening sentence from the script.
+- Prefer 4 to 12 words for English, or a similarly short title in other languages.
+- Do not add markdown or explanations."""
+
+
+def render_language_script_repair_prompt(topic: str, language: str, raw_response: str) -> str:
+    return f"""Normalize this {language} script-generation response into the required JSON contract.
+
+Original topic:
+{topic}
+
+Raw response:
+{raw_response}
+
+Return ONLY valid JSON in this exact shape:
+{{
+  "title": "short native {language} video title",
+  "script": "complete {language} spoken script"
+}}
+
+Rules:
+- Preserve the meaning and tone of the raw response.
+- If the raw response contains only a script, create a short native {language} title from it.
+- The title and script must be written in {language}.
+- Do not add markdown, explanations, or text outside JSON."""
 
 
 def _load_templates_from_dir(directory: Path) -> list[PromptTemplate]:
@@ -422,6 +501,7 @@ async def generate_independent_language_drafts(
     split_model: str | None,
     languages: list[str],
     language_script_templates: dict[str, str] | None = None,
+    language_script_models: dict[str, str] | None = None,
     status_callback=None,
 ) -> dict[str, Any]:
     clean_topic = (topic or "").strip()
@@ -433,19 +513,44 @@ async def generate_independent_language_drafts(
         raise ValueError("At least one language is required")
 
     language_drafts = {}
+    resolved_language_script_models = {}
     for language in selected_languages:
         if status_callback:
             status_callback("generating_script", language)
 
+        selected_script_model = _language_script_model(language, script_model, language_script_models)
+        resolved_language_script_models[language] = selected_script_model
         selected_script_template = (language_script_templates or {}).get(language, script_template)
         script_prompt = render_language_script_prompt(selected_script_template, clean_topic, language)
         script_response = await llm_service(
             prompt=script_prompt,
-            model=(script_model or None),
+            model=(selected_script_model or None),
             temperature=0.8,
             max_tokens=2000,
         )
-        script_payload = parse_language_script_payload(script_response)
+        try:
+            script_payload = parse_language_script_payload(script_response)
+        except DraftParseError as exc:
+            if not (script_response or "").strip():
+                raise _draft_stage_error(language, "script generation", exc) from exc
+            repair_response = await llm_service(
+                prompt=render_language_script_repair_prompt(
+                    topic=clean_topic,
+                    language=language,
+                    raw_response=script_response,
+                ),
+                model=(selected_script_model or None),
+                temperature=0.0,
+                max_tokens=2500,
+            )
+            try:
+                script_payload = parse_language_script_payload(repair_response)
+            except DraftParseError as repair_exc:
+                raise _draft_stage_error(
+                    language,
+                    "script generation",
+                    DraftParseError(f"{exc}; JSON repair failed: {repair_exc}"),
+                ) from repair_exc
         language_script = script_payload["script"]
 
         if status_callback:
@@ -458,17 +563,42 @@ async def generate_independent_language_drafts(
             temperature=0.1,
             max_tokens=2000,
         )
+        try:
+            narrations = parse_narrations_response(split_response)
+        except DraftParseError as exc:
+            raise _draft_stage_error(language, "script split", exc) from exc
         language_drafts[language] = {
             "title": script_payload["title"],
             "script": language_script,
-            "narrations": parse_narrations_response(split_response),
+            "narrations": narrations,
         }
+
+    for language, language_draft in language_drafts.items():
+        if (language_draft.get("title") or "").strip():
+            continue
+        if status_callback:
+            status_callback("generating_title", language)
+        title_response = await llm_service(
+            prompt=render_language_title_prompt(
+                topic=clean_topic,
+                language=language,
+                script=language_draft.get("script") or "",
+            ),
+            model=(resolved_language_script_models.get(language) or script_model or None),
+            temperature=0.4,
+            max_tokens=300,
+        )
+        try:
+            language_draft["title"] = parse_title_response(title_response)
+        except DraftParseError as exc:
+            raise _draft_stage_error(language, "title generation", exc) from exc
 
     return {
         "topic": clean_topic,
         "title": clean_topic,
         "language_drafts": language_drafts,
         "script_model": script_model or "",
+        "language_script_models": resolved_language_script_models,
         "split_model": split_model or "",
         "selected_languages": selected_languages,
         "workflow_mode": "independent_language_drafts",
@@ -531,7 +661,7 @@ def draft_titles(draft: dict[str, Any]) -> dict[str, str]:
     if draft.get("language_drafts"):
         titles = dict(draft.get("titles") or {})
         for language, language_draft in (draft.get("language_drafts") or {}).items():
-            title = titles.get(language) or language_draft.get("title") or _default_script_title(language_draft.get("script") or "")
+            title = titles.get(language) or language_draft.get("title") or ""
             if title:
                 titles[language] = str(title).strip()
         return titles
@@ -598,6 +728,7 @@ def build_generation_jobs(
             if tts_errors:
                 raise ValueError(tts_errors[0])
 
+            language_script_models = draft.get("language_script_models") or {}
             for language in draft.get("selected_languages") or []:
                 language_draft = (draft.get("language_drafts") or {}).get(language) or {}
                 narrations = language_draft.get("narrations") or []
@@ -616,7 +747,8 @@ def build_generation_jobs(
                         "review_language": language,
                         "review_language_script": language_draft.get("script") or "",
                         "review_language_narrations": narrations,
-                        "review_script_model": draft.get("script_model") or "",
+                        "review_script_model": language_script_models.get(language) or draft.get("script_model") or "",
+                        "review_language_script_model": language_script_models.get(language) or draft.get("script_model") or "",
                         "review_split_model": draft.get("split_model") or "",
                         "review_workflow_mode": draft.get("workflow_mode") or "independent_language_drafts",
                     }
