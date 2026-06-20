@@ -100,6 +100,34 @@ async def test_request_generation_records_context_and_completed_item(tmp_path):
     assert "generation_completed" in event_types
 
 
+@pytest.mark.asyncio
+async def test_generation_failure_records_event_without_content_item(tmp_path):
+    async def failing_generation_runner(**kwargs):
+        raise RuntimeError("tts unavailable")
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=failing_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+
+    with pytest.raises(OpsError, match="generation_failed"):
+        await service.request_generation(
+            experiment_id=experiment["id"],
+            text="Generate a video",
+            source=_source(),
+        )
+
+    events = store.list_events_for_experiment(experiment["id"])
+
+    assert [event["event_type"] for event in events][-1] == "generation_failed"
+    assert store.list_content_items_for_experiment(experiment["id"]) == []
+
+
 def test_publish_requires_real_evidence(service):
     _, _, experiment = _seed_experiment(service)
 
@@ -120,6 +148,50 @@ def test_metrics_require_published_content(service):
             metrics={"views": 100},
             source=_source(),
         )
+
+
+@pytest.mark.asyncio
+async def test_metrics_must_reference_the_published_content_item(tmp_path):
+    async def fake_generation_runner(**kwargs):
+        return {"path": "output/petwoods.mp4"}
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    generation = await service.request_generation(
+        experiment_id=experiment["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+    service.record_publish(
+        experiment_id=experiment["id"],
+        content_item_id=generation["content_item"]["id"],
+        evidence={"platform_url": "https://example.com/post/1"},
+        source=_source(),
+    )
+
+    with pytest.raises(OpsError, match="published_content_required"):
+        service.record_metrics(
+            experiment_id=experiment["id"],
+            content_item_id="item_missing",
+            metrics={"views": 100},
+            source=_source(),
+        )
+
+    result = service.record_metrics(
+        experiment_id=experiment["id"],
+        content_item_id=generation["content_item"]["id"],
+        metrics={"views": 100},
+        source=_source(),
+    )
+
+    assert result["event"]["content_item_id"] == generation["content_item"]["id"]
 
 
 def test_retro_without_prediction_is_observation(service):

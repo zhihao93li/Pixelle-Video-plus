@@ -197,6 +197,7 @@ P0 支持：
 prediction_locked
 generation_requested
 generation_completed
+generation_failed
 publish_recorded
 metrics_recorded
 retro_written
@@ -386,7 +387,7 @@ uv run pytest tests/test_ops_store.py -q
 2. 记录 `generation_requested` event。
 3. 调用现有 `pixelle_video.generate_video`。
 4. 成功后记录 `generation_completed` event。
-5. 失败时保留失败信息，不推进状态。
+5. 失败时记录 `generation_failed` event，保留失败信息，不生成 content item，不伪成功。
 
 注意：
 
@@ -525,9 +526,10 @@ docs/zh/product/assets
 2. cycle 必须属于 project。
 3. experiment 必须属于 cycle。
 4. prediction locked 后才能 request generation。
-5. publish evidence 不能只有 note。
-6. metrics 必须挂在已发布内容上。
-7. 没 prediction 的 retro 只能 observation。
+5. generation runner 失败时必须写 `generation_failed`，不能生成 content item。
+6. publish evidence 不能只有 note。
+7. metrics 必须挂在已发布 content item 上。
+8. 没 prediction 的 retro 只能 observation。
 
 ### 10.3 `tests/test_ops_api.py`
 

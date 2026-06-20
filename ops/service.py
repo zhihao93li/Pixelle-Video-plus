@@ -151,12 +151,29 @@ class OpsService:
         )
         self.store.update_experiment_stage(experiment_id, ExperimentStage.GENERATION_REQUESTED.value)
 
-        asset_ref = await self._run_generation(
-            text=text,
-            pipeline=pipeline,
-            operation_context=operation_context,
-            **(generation_params or {}),
-        )
+        try:
+            asset_ref = await self._run_generation(
+                text=text,
+                pipeline=pipeline,
+                operation_context=operation_context,
+                **(generation_params or {}),
+            )
+        except Exception as exc:
+            self.store.append_event(
+                project_id=experiment["project_id"],
+                cycle_id=experiment["cycle_id"],
+                experiment_id=experiment_id,
+                event_type=OpsEventType.GENERATION_FAILED.value,
+                payload={
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                    "operation_context": operation_context,
+                },
+                source=source,
+            )
+            self.store.update_experiment_stage(experiment_id, ExperimentStage.GENERATION_FAILED.value)
+            raise OpsError("generation_failed", str(exc)) from exc
+
         content_item = self.store.create_content_item(
             project_id=experiment["project_id"],
             cycle_id=experiment["cycle_id"],
@@ -218,6 +235,11 @@ class OpsService:
         events = self.store.list_events_for_experiment(experiment_id)
         if not _has_event(events, OpsEventType.PUBLISH_RECORDED):
             raise OpsError("publish_required", "Metrics require publish evidence first.")
+        if not content_item_id or not _has_published_content(events, content_item_id):
+            raise OpsError(
+                "published_content_required",
+                "Metrics must reference the content item that has publish evidence.",
+            )
         event = self.store.append_event(
             project_id=experiment["project_id"],
             cycle_id=experiment["cycle_id"],
@@ -320,6 +342,14 @@ def _require_confirmed_source(source: dict[str, Any]) -> None:
 def _has_event(events: list[dict[str, Any]], *event_types: OpsEventType) -> bool:
     values = {event_type.value for event_type in event_types}
     return any(event["event_type"] in values for event in events)
+
+
+def _has_published_content(events: list[dict[str, Any]], content_item_id: str) -> bool:
+    return any(
+        event["event_type"] == OpsEventType.PUBLISH_RECORDED.value
+        and event.get("content_item_id") == content_item_id
+        for event in events
+    )
 
 
 def _has_publish_evidence(evidence: dict[str, Any]) -> bool:

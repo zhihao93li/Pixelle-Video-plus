@@ -614,6 +614,7 @@ draft
   -> candidate_confirmed
   -> prediction_locked
   -> generation_requested
+  -> generation_failed
   -> asset_ready
   -> publish_ready
   -> published
