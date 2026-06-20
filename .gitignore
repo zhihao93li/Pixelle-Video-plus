@@ -55,6 +55,10 @@ test_outputs/
 *.wav
 *.bak
 test_*.py
+!tests/test_ops_store.py
+!tests/test_ops_service.py
+!tests/test_codex_plugin.py
+!tests/test_ops_api.py
 
 !bgm/default.mp3
 

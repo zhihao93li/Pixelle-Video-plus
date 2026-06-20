@@ -31,6 +31,7 @@ from api.schemas.video import (
     VideoGenerateResponse,
     VideoGenerateAsyncResponse,
 )
+from api.schemas.ops import OpsCurrentResponse, OpsExperimentResponse
 
 __all__ = [
     # Base
@@ -56,5 +57,7 @@ __all__ = [
     "VideoGenerateRequest",
     "VideoGenerateResponse",
     "VideoGenerateAsyncResponse",
+    # Ops
+    "OpsCurrentResponse",
+    "OpsExperimentResponse",
 ]
-
