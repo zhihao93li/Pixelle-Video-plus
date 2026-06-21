@@ -86,8 +86,9 @@ Codex 来源必须满足：
 4. UI/API 不提供写入口。
 5. 没有 locked prediction 不能生成。
 6. 生成失败必须写 `generation_failed`，不能伪成功。
-7. 发布证据不能只有 confirmation note。
-8. metrics 必须挂到已发布 content item。
+7. 生成成功必须能提取出 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 之一作为资产引用。
+8. 发布证据不能只有 confirmation note。
+9. metrics 必须挂到已发布 content item。
 
 ## 7. 错误返回
 

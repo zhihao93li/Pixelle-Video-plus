@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from ops.service import OpsError, OpsService
@@ -126,6 +128,62 @@ async def test_generation_failure_records_event_without_content_item(tmp_path):
 
     assert [event["event_type"] for event in events][-1] == "generation_failed"
     assert store.list_content_items_for_experiment(experiment["id"]) == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_generation_result_is_not_treated_as_success(tmp_path):
+    async def invalid_generation_runner(**kwargs):
+        return None
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=invalid_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+
+    with pytest.raises(OpsError, match="generation_failed"):
+        await service.request_generation(
+            experiment_id=experiment["id"],
+            text="Generate a video",
+            source=_source(),
+        )
+
+    events = store.list_events_for_experiment(experiment["id"])
+
+    assert events[-1]["payload"]["error_type"] == "OpsError"
+    assert store.list_content_items_for_experiment(experiment["id"]) == []
+
+
+@pytest.mark.asyncio
+async def test_video_generation_result_like_object_is_normalized(tmp_path):
+    async def object_generation_runner(**kwargs):
+        return SimpleNamespace(video_path="output/final.mp4", duration=12.5, file_size=2048)
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=object_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+
+    result = await service.request_generation(
+        experiment_id=experiment["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+
+    assert result["content_item"]["asset_ref"] == {
+        "video_path": "output/final.mp4",
+        "duration": 12.5,
+        "file_size": 2048,
+    }
 
 
 def test_publish_requires_real_evidence(service):

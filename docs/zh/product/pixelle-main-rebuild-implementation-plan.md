@@ -388,6 +388,7 @@ uv run pytest tests/test_ops_store.py -q
 3. 调用现有 `pixelle_video.generate_video`。
 4. 成功后记录 `generation_completed` event。
 5. 失败时记录 `generation_failed` event，保留失败信息，不生成 content item，不伪成功。
+6. 生成成功必须能提取资产引用；没有 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 时仍按失败处理。
 
 注意：
 
@@ -529,9 +530,10 @@ docs/zh/product/assets
 3. experiment 必须属于 cycle。
 4. prediction locked 后才能 request generation。
 5. generation runner 失败时必须写 `generation_failed`，不能生成 content item。
-6. publish evidence 不能只有 note。
-7. metrics 必须挂在已发布 content item 上。
-8. 没 prediction 的 retro 只能 observation。
+6. generation runner 返回无资产引用时必须写 `generation_failed`。
+7. publish evidence 不能只有 note。
+8. metrics 必须挂在已发布 content item 上。
+9. 没 prediction 的 retro 只能 observation。
 
 ### 10.3 `tests/test_ops_api.py`
 

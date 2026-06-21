@@ -323,9 +323,7 @@ class OpsService:
             result = self.generation_runner(**kwargs)
         if inspect.isawaitable(result):
             result = await result
-        if isinstance(result, dict):
-            return result
-        return {"result": repr(result)}
+        return _normalize_asset_ref(result)
 
     def _get_experiment_or_raise(self, experiment_id: str) -> dict[str, Any]:
         experiment = self.store.get_experiment(experiment_id)
@@ -342,6 +340,26 @@ def _require_confirmed_source(source: dict[str, Any]) -> None:
 def _has_event(events: list[dict[str, Any]], *event_types: OpsEventType) -> bool:
     values = {event_type.value for event_type in event_types}
     return any(event["event_type"] in values for event in events)
+
+
+def _normalize_asset_ref(result: Any) -> dict[str, Any]:
+    asset_fields = ("path", "video_path", "url", "asset_url", "output_path")
+    metadata_fields = ("duration", "file_size", "media_type", "task_id")
+    if isinstance(result, dict):
+        asset_ref = {
+            key: result[key]
+            for key in (*asset_fields, *metadata_fields)
+            if result.get(key) is not None
+        }
+    else:
+        asset_ref = {
+            key: getattr(result, key)
+            for key in (*asset_fields, *metadata_fields)
+            if getattr(result, key, None) is not None
+        }
+    if not any(asset_ref.get(key) for key in asset_fields):
+        raise OpsError("invalid_generation_result", "Generation completed without an asset reference.")
+    return asset_ref
 
 
 def _has_published_content(events: list[dict[str, Any]], content_item_id: str) -> bool:

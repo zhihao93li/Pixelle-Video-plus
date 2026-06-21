@@ -941,7 +941,7 @@ tests/ops/test_codex_writeback.py
 覆盖：
 
 1. `operation_context` 被传给生成请求。
-2. 生成失败不推进状态。
+2. 生成失败或无资产引用不推进状态。
 3. cheat workspace summary 是只读。
 4. URL 形式的 workspace path 被拒绝。
 5. Codex draft 未 apply 前不改变产品状态。
