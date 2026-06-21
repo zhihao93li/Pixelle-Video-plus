@@ -237,6 +237,7 @@ created_at
 P0 的写入口是 Codex 插件工具：
 
 ```text
+pixelle_get_capabilities
 pixelle_get_current
 pixelle_create_project
 pixelle_create_cycle
@@ -253,6 +254,8 @@ pixelle_record_metrics
 pixelle_write_retro
 pixelle_write_memory
 ```
+
+新线程、P0 验证、状态查看、续跑和恢复必须先调用 `pixelle_get_capabilities`。当前期望协议版本是 `p0.6.20260621`，并且内容形态选择、已有成片处理、pipeline 选择、文案审批、异步生成状态、资产检查这些 conversation gates 必须全部可用；否则停止，不走旧的直接生成流程。
 
 所有写工具都必须接收 `source` 字段。
 

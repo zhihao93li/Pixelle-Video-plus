@@ -47,6 +47,15 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
     server._build_service = lambda: service
 
     async with Client(server.mcp) as client:
+        capabilities = await client.call_tool("pixelle_get_capabilities", {})
+        assert capabilities.data["status"] == "ok"
+        assert capabilities.data["plugin"] == "pixelle-ops"
+        assert capabilities.data["protocol_version"] == server.PIXELLE_OPS_PROTOCOL_VERSION
+        assert capabilities.data["conversation_gates"]["content_shape_gate"] is True
+        assert capabilities.data["conversation_gates"]["existing_generation_gate"] is True
+        assert "pixelle_submit_generation_draft" in capabilities.data["required_tools"]
+        assert "pixelle_approve_generation_draft" in capabilities.data["required_tools"]
+
         unconfirmed = await client.call_tool(
             "pixelle_create_project",
             {

@@ -12,10 +12,56 @@ from ops.service import OpsError, OpsService
 
 mcp = FastMCP("pixelle-ops")
 _BACKGROUND_GENERATION_TASKS: set[asyncio.Task] = set()
+PIXELLE_OPS_PROTOCOL_VERSION = "p0.6.20260621"
+PIXELLE_OPS_REQUIRED_TOOLS = (
+    "pixelle_get_capabilities",
+    "pixelle_get_current",
+    "pixelle_create_project",
+    "pixelle_create_cycle",
+    "pixelle_create_experiment",
+    "pixelle_lock_prediction",
+    "pixelle_list_generation_pipelines",
+    "pixelle_submit_generation_draft",
+    "pixelle_approve_generation_draft",
+    "pixelle_request_generation",
+    "pixelle_get_generation_status",
+    "pixelle_check_generation_asset",
+    "pixelle_record_publish",
+    "pixelle_record_metrics",
+    "pixelle_write_retro",
+    "pixelle_write_memory",
+)
+PIXELLE_OPS_CONVERSATION_GATES = {
+    "content_shape_gate": True,
+    "existing_generation_gate": True,
+    "pipeline_selection_gate": True,
+    "draft_approval_gate": True,
+    "async_generation_status": True,
+    "asset_check_gate": True,
+}
 
 
 def _build_service() -> OpsService:
     return OpsService()
+
+
+async def pixelle_get_capabilities() -> dict[str, Any]:
+    """Return the loaded Pixelle Ops plugin protocol and required flow gates."""
+    return {
+        "status": "ok",
+        "plugin": "pixelle-ops",
+        "protocol_version": PIXELLE_OPS_PROTOCOL_VERSION,
+        "required_tools": list(PIXELLE_OPS_REQUIRED_TOOLS),
+        "conversation_gates": dict(PIXELLE_OPS_CONVERSATION_GATES),
+        "content_shape_options": [
+            "xiaohongshu_short_video_subtitles",
+            "xiaohongshu_image_text_note",
+            "topic_and_hook_only",
+            "full_operations_experiment",
+        ],
+        "default_pipeline": "standard",
+        "next_action": {"kind": "route_user_request", "blocked": False},
+    }
 
 
 async def pixelle_get_current() -> dict[str, Any]:
@@ -307,6 +353,7 @@ def _ops_error(exc: OpsError) -> dict[str, Any]:
 
 
 for tool in (
+    pixelle_get_capabilities,
     pixelle_get_current,
     pixelle_create_project,
     pixelle_create_cycle,

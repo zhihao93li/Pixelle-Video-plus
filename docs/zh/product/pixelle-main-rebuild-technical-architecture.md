@@ -149,6 +149,7 @@ codex_plugin/
 P0 暴露工具：
 
 ```text
+pixelle_get_capabilities
 pixelle_get_current
 pixelle_create_project
 pixelle_create_cycle
@@ -169,10 +170,11 @@ pixelle_write_memory
 职责：
 
 1. 把 Codex 的结构化工具调用转成 Pixelle Ops service 调用。
-2. 为每次写入附带 `source`、`skill`、`workspace_path`、`confirmed_by_user`。
-3. 返回下一步动作和阻断原因。
-4. 不直接写 SQLite。
-5. 不读取或修改 `pixelle_video` 内部状态。
+2. 通过 `pixelle_get_capabilities` 暴露当前插件协议版本、必备工具和对话门禁，便于新线程先判断是否加载了正确插件。
+3. 为每次写入附带 `source`、`skill`、`workspace_path`、`confirmed_by_user`。
+4. 返回下一步动作和阻断原因。
+5. 不直接写 SQLite。
+6. 不读取或修改 `pixelle_video` 内部状态。
 
 本地启动方式见 `docs/zh/product/pixelle-codex-plugin-p0-usage.md`。P0 固定为 stdio MCP server，不提供远程插件发布包。
 
@@ -859,6 +861,7 @@ GET /api/ops/experiments/{experiment_id}
 Codex 的写入口是 Pixelle Codex Plugin。P0 使用本地 MCP/FastMCP server 形式承载工具；API 只保留查询、调试和展示用途。
 
 ```text
+pixelle_get_capabilities
 pixelle_create_project
 pixelle_create_cycle
 pixelle_create_experiment
@@ -874,6 +877,8 @@ pixelle_record_metrics
 pixelle_write_retro
 pixelle_write_memory
 ```
+
+`pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑和恢复必须先读取它；如果缺失、`protocol_version` 不是 `p0.6.20260621`，或必需 conversation gates 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
 
 `pixelle_request_generation` 只能从已批准的 generation draft 生成内容，不能直接接收 Codex 临时拼出的自由文案。生成前必须先写入 `generation_drafted`，用户审核通过后再写入 `generation_draft_approved`。
 

@@ -117,6 +117,22 @@ async def test_plugin_rejects_unconfirmed_codex_write(plugin_service):
 
 
 @pytest.mark.asyncio
+async def test_plugin_reports_capabilities(plugin_service):
+    result = await server.pixelle_get_capabilities()
+
+    assert result["status"] == "ok"
+    assert result["plugin"] == "pixelle-ops"
+    assert result["protocol_version"] == "p0.6.20260621"
+    assert "pixelle_get_capabilities" in result["required_tools"]
+    assert "pixelle_submit_generation_draft" in result["required_tools"]
+    assert "pixelle_approve_generation_draft" in result["required_tools"]
+    assert result["conversation_gates"]["content_shape_gate"] is True
+    assert result["conversation_gates"]["existing_generation_gate"] is True
+    assert result["conversation_gates"]["pipeline_selection_gate"] is True
+    assert result["next_action"]["kind"] == "route_user_request"
+
+
+@pytest.mark.asyncio
 async def test_plugin_lists_generation_pipelines(plugin_service):
     result = await server.pixelle_list_generation_pipelines()
 
@@ -334,6 +350,7 @@ async def test_fastmcp_client_can_call_pixelle_tools(plugin_service):
         )
 
     assert "pixelle_create_project" in tool_names
+    assert "pixelle_get_capabilities" in tool_names
     assert "pixelle_list_generation_pipelines" in tool_names
     assert "pixelle_submit_generation_draft" in tool_names
     assert "pixelle_approve_generation_draft" in tool_names

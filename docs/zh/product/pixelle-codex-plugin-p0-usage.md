@@ -63,6 +63,7 @@ PIXELLE_OPS_DB_PATH=/tmp/pixelle-ops.db uv run python -m codex_plugin.server
 ## 5. 工具清单
 
 ```text
+pixelle_get_capabilities
 pixelle_get_current
 pixelle_create_project
 pixelle_create_cycle
@@ -83,6 +84,7 @@ pixelle_write_memory
 ## 6. 最小闭环顺序
 
 ```text
+pixelle_get_capabilities
 pixelle_create_project
 pixelle_create_cycle
 pixelle_create_experiment
@@ -99,6 +101,8 @@ pixelle_write_retro
 pixelle_write_memory
 pixelle_get_current
 ```
+
+`pixelle_get_capabilities` 必须作为新线程、P0 验证、状态查看、续跑和恢复的第一步。当前期望 `protocol_version = p0.6.20260621`，并且 `content_shape_gate`、`existing_generation_gate`、`pipeline_selection_gate`、`draft_approval_gate`、`async_generation_status`、`asset_check_gate` 都为 true。缺失或不匹配时，说明当前 Codex 线程加载的是旧插件，必须停止并重新加载插件/新开线程。
 
 每个写工具都必须带 `source`。
 
@@ -118,27 +122,28 @@ Codex 来源必须满足：
 2. 插件不直接写 SQLite。
 3. 插件不调用 `web`。
 4. UI/API 不提供写入口。
-5. 没有 locked prediction 不能生成。
-6. 用户没有明确内容形态时，Codex 必须先问“短视频字幕稿 / 图文笔记 / 只做 hook / 完整运营实验”，不能擅自生成图文长文。
-7. 进入生成前必须调用 `pixelle_list_generation_pipelines`，让用户选择已注册 pipeline；默认推荐 `standard`。
-8. Codex 必须先提交 `generation_drafted` 文案草稿。
-9. 用户审核后必须记录 `generation_draft_approved`。
-10. `pixelle_request_generation` 只接受已批准 draft 的 approval event id，不能直接传任意文案。
-11. 草稿文本只能是最终上屏字幕或口播稿，不能包含 `【视频目标】`、`【内容形式】`、`【发布标题】`、`【发布正文】`、`【标签】` 等生成说明或发布字段。
-12. 如果同主题或当前实验已有成片，不能把旧成片静默当作本次生成结果。必须先问用户：复用已有成片、用当前审核稿重新生成、还是新建干净实验重新生成。
-13. 只有用户明确选择复用已有成片时，才允许对旧 content item 调用 `pixelle_check_generation_asset` 并返回旧资产。
-14. 用户选择重新生成时，必须新建实验或使用未完成生成的干净实验，不能复用已有 `generation_completed` 的实验。
-15. 同一实验有生成进行中时不能重复请求生成，必须返回 `generation_in_progress`。
-16. 同一实验已经生成完成时不能静默重生成，必须返回 `generation_already_completed`。
-17. 不能自造 pipeline 名称；必须使用 PixelleVideoCore 已注册 pipeline。
-18. 未知 pipeline 必须在写入 `generation_requested` 前返回 `unknown_generation_pipeline`。
-19. `pixelle_request_generation` 默认返回 `generation_requested`，后续必须用 `pixelle_get_generation_status` 查询异步生成结果，避免 Codex 工具调用长时间等待超时。
-20. 生成失败必须写 `generation_failed`，不能伪成功。
-21. 生成成功必须能提取出 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 之一作为资产引用。
-22. 生成完成后必须调用 `pixelle_check_generation_asset`，确认资产引用存在、本地文件可读且 draft 文本没有污染。
-23. 资产检查通过后才进入发布记录；检查失败时必须停在 `resolve_asset_issue`。
-24. 发布证据不能只有 confirmation note。
-25. metrics 必须挂到已发布 content item。
+5. 新线程必须先通过 `pixelle_get_capabilities` 自检插件协议和对话门禁。
+6. 没有 locked prediction 不能生成。
+7. 用户没有明确内容形态时，Codex 必须先问“短视频字幕稿 / 图文笔记 / 只做 hook / 完整运营实验”，不能擅自生成图文长文。
+8. 进入生成前必须调用 `pixelle_list_generation_pipelines`，让用户选择已注册 pipeline；默认推荐 `standard`。
+9. Codex 必须先提交 `generation_drafted` 文案草稿。
+10. 用户审核后必须记录 `generation_draft_approved`。
+11. `pixelle_request_generation` 只接受已批准 draft 的 approval event id，不能直接传任意文案。
+12. 草稿文本只能是最终上屏字幕或口播稿，不能包含 `【视频目标】`、`【内容形式】`、`【发布标题】`、`【发布正文】`、`【标签】` 等生成说明或发布字段。
+13. 如果同主题或当前实验已有成片，不能把旧成片静默当作本次生成结果。必须先问用户：复用已有成片、用当前审核稿重新生成、还是新建干净实验重新生成。
+14. 只有用户明确选择复用已有成片时，才允许对旧 content item 调用 `pixelle_check_generation_asset` 并返回旧资产。
+15. 用户选择重新生成时，必须新建实验或使用未完成生成的干净实验，不能复用已有 `generation_completed` 的实验。
+16. 同一实验有生成进行中时不能重复请求生成，必须返回 `generation_in_progress`。
+17. 同一实验已经生成完成时不能静默重生成，必须返回 `generation_already_completed`。
+18. 不能自造 pipeline 名称；必须使用 PixelleVideoCore 已注册 pipeline。
+19. 未知 pipeline 必须在写入 `generation_requested` 前返回 `unknown_generation_pipeline`。
+20. `pixelle_request_generation` 默认返回 `generation_requested`，后续必须用 `pixelle_get_generation_status` 查询异步生成结果，避免 Codex 工具调用长时间等待超时。
+21. 生成失败必须写 `generation_failed`，不能伪成功。
+22. 生成成功必须能提取出 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 之一作为资产引用。
+23. 生成完成后必须调用 `pixelle_check_generation_asset`，确认资产引用存在、本地文件可读且 draft 文本没有污染。
+24. 资产检查通过后才进入发布记录；检查失败时必须停在 `resolve_asset_issue`。
+25. 发布证据不能只有 confirmation note。
+26. metrics 必须挂到已发布 content item。
 
 当前已注册 pipeline：
 
