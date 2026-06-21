@@ -452,7 +452,7 @@ Codex 不可以：
 
 ### 10.3 必须丢弃或移出主线
 
-1. `.superpowers` demo 产物。
+1. 临时 demo 产物。
 2. audit 截图。
 3. 临时 HTML demo。
 4. 重复 PRD 和过期实现计划。

@@ -1117,7 +1117,7 @@ P0 推荐规模：
 
 禁止进入 P0 PR：
 
-1. `.superpowers/` 运行产物。
+1. 临时实验运行产物。
 2. `audits/` 截图。
 3. demo HTML。
 4. 大量静态 assets。

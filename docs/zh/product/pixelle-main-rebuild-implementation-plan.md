@@ -20,7 +20,7 @@ Codex 通过 Pixelle 插件工具发起运营动作，Pixelle Ops 负责保存�
 
 ## 2. 对上一版计划的处理
 
-废弃 `docs/superpowers/plans/2026-06-20-pixelle-codex-first-ops-p0.md`。
+废弃上一轮复杂实施计划，相关临时计划文档不进入主线。
 
 废弃原因：
 
@@ -30,7 +30,7 @@ Codex 通过 Pixelle 插件工具发起运营动作，Pixelle Ops 负责保存�
 4. 过早设计 12 张规范化表。
 5. 没有解决 PRD 里的开放问题，反而默认做了复杂选择。
 
-后续不以 `docs/superpowers/plans/` 作为本项目实施计划来源。
+后续只以本目录下这组中文产品文档作为本项目实施计划来源。
 
 ## 3. P0 明确取舍
 
@@ -313,7 +313,7 @@ docs/zh/product/pixelle-main-rebuild-implementation-plan.md
 marketing/
 apps/console/
 audits/
-.superpowers/
+临时实验运行产物/
 docs/zh/product/assets/
 demo HTML
 screenshots
@@ -502,7 +502,7 @@ git diff --stat main..HEAD
 apps/console
 marketing
 audits
-.superpowers
+临时实验运行产物
 docs/zh/product/assets
 *.html demo
 *.png screenshot
