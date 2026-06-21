@@ -883,6 +883,8 @@ pixelle_write_memory
 
 进入视频生成前，Codex 必须调用 `pixelle_list_generation_pipelines` 读取当前注册 pipeline，并让用户选择；默认推荐 `standard`，但不能自造 pipeline 名称。
 
+如果同主题或当前实验已经存在 `generation_completed`，Codex 不能直接调用 `pixelle_check_generation_asset` 把旧成片作为本次生成结果。必须先让用户选择：复用已有成片、用当前审核稿重新生成、或新建干净实验重新生成。选择重新生成时，必须创建新实验或绑定到尚未完成生成的干净实验，再提交当前审核稿。
+
 生成请求默认采用异步状态流：`pixelle_request_generation` 写入 `generation_requested` 后立即返回，由插件后台继续执行生成；Codex 通过 `pixelle_get_generation_status` 查询 `running / completed / failed`。生成完成后必须调用 `pixelle_check_generation_asset`，检查真实资产引用、本地文件可读性和 draft 文本污染；只有 `asset_checked.status = passed` 时，下一步才是 `pixelle_record_publish`。
 
 ### 9.3 State transition result

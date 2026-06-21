@@ -266,6 +266,8 @@ source.confirmed_by_user == true
 
 生成链路还必须额外满足：用户没有明确内容形态时，Codex 先问短视频字幕稿、图文笔记、只做 hook、还是完整运营实验；进入视频生成前调用 `pixelle_list_generation_pipelines` 让用户选择已注册 pipeline；Codex 先提交 `pixelle_submit_generation_draft`，把实际文案给用户审核；用户确认后再调用 `pixelle_approve_generation_draft`；最后 `pixelle_request_generation` 只能使用已批准草稿对应的 approval event，不能直接传入自由文案。
 
+如果同主题或当前实验已经有 `generation_completed`，Codex 必须先问用户是复用旧成片、用当前审核稿重新生成、还是新建干净实验重新生成。只有选择复用时才能检查并返回旧资产；选择重新生成时必须新建实验或使用未完成生成的干净实验。
+
 `pixelle_request_generation` 默认使用异步状态流：先写入 `generation_requested` 并返回，后台继续生成；Codex 用 `pixelle_get_generation_status` 查询结果。生成完成后必须调用 `pixelle_check_generation_asset`，资产检查通过后才进入发布记录。
 
 `pixelle_submit_generation_draft` 的 `text` 必须是最终上屏字幕或口播稿，不允许包含 `【视频目标】`、`【内容形式】`、`【发布标题】`、`【发布正文】`、`【标签】` 等生成说明或发布字段。
