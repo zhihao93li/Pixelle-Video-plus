@@ -886,6 +886,25 @@ pixelle_write_memory
 
 UI 展示状态转换结果，但不能直接发起写工具。
 
+业务错误也必须是结构化结果，而不是 Python exception 文本：
+
+```json
+{
+  "status": "error",
+  "error": {
+    "code": "prediction_required",
+    "message": "Content generation requires a locked prediction."
+  },
+  "next_action": {
+    "kind": "resolve_error",
+    "blocked": true,
+    "reason": "prediction_required"
+  }
+}
+```
+
+HTTP API 的业务错误使用同一套 `error.code`，放在 `detail.error.code`。
+
 ## 10. 测试边界
 
 测试重点不是页面数量，而是不变量。

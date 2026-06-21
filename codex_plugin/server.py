@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from fastmcp import FastMCP
 
-from ops.service import OpsService
+from ops.service import OpsError, OpsService
 
 mcp = FastMCP("pixelle-ops")
 
@@ -27,14 +28,21 @@ async def pixelle_create_project(
     source: dict[str, Any],
     description: str | None = None,
 ) -> dict[str, Any]:
-    project = _build_service().create_project(
-        name=name,
-        product=product,
-        channel=channel,
-        description=description,
-        source=source,
-    )
-    return {"status": "ok", "entity": {"kind": "operating_project", **project}, "next_action": {"kind": "create_cycle", "blocked": False}}
+    def action():
+        project = _build_service().create_project(
+            name=name,
+            product=product,
+            channel=channel,
+            description=description,
+            source=source,
+        )
+        return {
+            "status": "ok",
+            "entity": {"kind": "operating_project", **project},
+            "next_action": {"kind": "create_cycle", "blocked": False},
+        }
+
+    return await _run_tool(action)
 
 
 async def pixelle_create_cycle(
@@ -45,15 +53,22 @@ async def pixelle_create_cycle(
     starts_on: str | None = None,
     ends_on: str | None = None,
 ) -> dict[str, Any]:
-    cycle = _build_service().create_cycle(
-        project_id=project_id,
-        name=name,
-        goal=goal,
-        starts_on=starts_on,
-        ends_on=ends_on,
-        source=source,
-    )
-    return {"status": "ok", "entity": {"kind": "operation_cycle", **cycle}, "next_action": {"kind": "create_experiment", "blocked": False}}
+    def action():
+        cycle = _build_service().create_cycle(
+            project_id=project_id,
+            name=name,
+            goal=goal,
+            starts_on=starts_on,
+            ends_on=ends_on,
+            source=source,
+        )
+        return {
+            "status": "ok",
+            "entity": {"kind": "operation_cycle", **cycle},
+            "next_action": {"kind": "create_experiment", "blocked": False},
+        }
+
+    return await _run_tool(action)
 
 
 async def pixelle_create_experiment(
@@ -63,14 +78,21 @@ async def pixelle_create_experiment(
     hypothesis: str,
     source: dict[str, Any],
 ) -> dict[str, Any]:
-    experiment = _build_service().create_experiment(
-        project_id=project_id,
-        cycle_id=cycle_id,
-        title=title,
-        hypothesis=hypothesis,
-        source=source,
-    )
-    return {"status": "ok", "entity": {"kind": "content_experiment", **experiment}, "next_action": {"kind": "lock_prediction", "blocked": False}}
+    def action():
+        experiment = _build_service().create_experiment(
+            project_id=project_id,
+            cycle_id=cycle_id,
+            title=title,
+            hypothesis=hypothesis,
+            source=source,
+        )
+        return {
+            "status": "ok",
+            "entity": {"kind": "content_experiment", **experiment},
+            "next_action": {"kind": "lock_prediction", "blocked": False},
+        }
+
+    return await _run_tool(action)
 
 
 async def pixelle_lock_prediction(
@@ -78,10 +100,12 @@ async def pixelle_lock_prediction(
     prediction: dict[str, Any],
     source: dict[str, Any],
 ) -> dict[str, Any]:
-    return _build_service().lock_prediction(
-        experiment_id=experiment_id,
-        prediction=prediction,
-        source=source,
+    return await _run_tool(
+        lambda: _build_service().lock_prediction(
+            experiment_id=experiment_id,
+            prediction=prediction,
+            source=source,
+        )
     )
 
 
@@ -94,14 +118,16 @@ async def pixelle_request_generation(
     title: str | None = None,
     generation_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return await _build_service().request_generation(
-        experiment_id=experiment_id,
-        text=text,
-        source=source,
-        pipeline=pipeline,
-        kind=kind,
-        title=title,
-        generation_params=generation_params,
+    return await _run_tool(
+        lambda: _build_service().request_generation(
+            experiment_id=experiment_id,
+            text=text,
+            source=source,
+            pipeline=pipeline,
+            kind=kind,
+            title=title,
+            generation_params=generation_params,
+        )
     )
 
 
@@ -111,11 +137,13 @@ async def pixelle_record_publish(
     source: dict[str, Any],
     content_item_id: str | None = None,
 ) -> dict[str, Any]:
-    return _build_service().record_publish(
-        experiment_id=experiment_id,
-        content_item_id=content_item_id,
-        evidence=evidence,
-        source=source,
+    return await _run_tool(
+        lambda: _build_service().record_publish(
+            experiment_id=experiment_id,
+            content_item_id=content_item_id,
+            evidence=evidence,
+            source=source,
+        )
     )
 
 
@@ -125,11 +153,13 @@ async def pixelle_record_metrics(
     source: dict[str, Any],
     content_item_id: str | None = None,
 ) -> dict[str, Any]:
-    return _build_service().record_metrics(
-        experiment_id=experiment_id,
-        content_item_id=content_item_id,
-        metrics=metrics,
-        source=source,
+    return await _run_tool(
+        lambda: _build_service().record_metrics(
+            experiment_id=experiment_id,
+            content_item_id=content_item_id,
+            metrics=metrics,
+            source=source,
+        )
     )
 
 
@@ -138,10 +168,12 @@ async def pixelle_write_retro(
     retro: dict[str, Any],
     source: dict[str, Any],
 ) -> dict[str, Any]:
-    return _build_service().write_retro(
-        experiment_id=experiment_id,
-        retro=retro,
-        source=source,
+    return await _run_tool(
+        lambda: _build_service().write_retro(
+            experiment_id=experiment_id,
+            retro=retro,
+            source=source,
+        )
     )
 
 
@@ -150,11 +182,31 @@ async def pixelle_write_memory(
     memory: dict[str, Any],
     source: dict[str, Any],
 ) -> dict[str, Any]:
-    return _build_service().write_memory(
-        experiment_id=experiment_id,
-        memory=memory,
-        source=source,
+    return await _run_tool(
+        lambda: _build_service().write_memory(
+            experiment_id=experiment_id,
+            memory=memory,
+            source=source,
+        )
     )
+
+
+async def _run_tool(action):
+    try:
+        result = action()
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+    except OpsError as exc:
+        return _ops_error(exc)
+
+
+def _ops_error(exc: OpsError) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "error": {"code": exc.code, "message": exc.message},
+        "next_action": {"kind": "resolve_error", "blocked": True, "reason": exc.code},
+    }
 
 
 for tool in (

@@ -89,7 +89,28 @@ Codex 来源必须满足：
 7. 发布证据不能只有 confirmation note。
 8. metrics 必须挂到已发布 content item。
 
-## 7. 本地验证
+## 7. 错误返回
+
+插件工具遇到业务错误时，不把 Python exception 暴露给 Codex，而是返回稳定结构：
+
+```json
+{
+  "status": "error",
+  "error": {
+    "code": "source_not_confirmed",
+    "message": "Codex writes require explicit user confirmation."
+  },
+  "next_action": {
+    "kind": "resolve_error",
+    "blocked": true,
+    "reason": "source_not_confirmed"
+  }
+}
+```
+
+API 遇到业务错误时，HTTP status code 反映请求结果，`detail.error.code` 保留同一套业务错误码。
+
+## 8. 本地验证
 
 ```bash
 uv run pytest tests/test_codex_plugin.py -q

@@ -2,7 +2,7 @@ import pytest
 from fastmcp import Client
 
 from codex_plugin import server
-from ops.service import OpsError, OpsService
+from ops.service import OpsService
 from ops.store import OpsStore
 
 
@@ -78,13 +78,16 @@ async def test_plugin_tools_run_complete_loop(plugin_service):
 
 @pytest.mark.asyncio
 async def test_plugin_rejects_unconfirmed_codex_write(plugin_service):
-    with pytest.raises(OpsError, match="source_not_confirmed"):
-        await server.pixelle_create_project(
-            name="PetWoods",
-            product="PetWoods",
-            channel="xiaohongshu",
-            source=_source(confirmed=False),
-        )
+    result = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(confirmed=False),
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "source_not_confirmed"
+    assert result["next_action"]["blocked"] is True
 
 
 @pytest.mark.asyncio
@@ -106,6 +109,24 @@ async def test_fastmcp_client_can_call_pixelle_tools(plugin_service):
     assert "pixelle_create_project" in tool_names
     assert result.data["entity"]["kind"] == "operating_project"
     assert result.data["next_action"]["kind"] == "create_cycle"
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_client_gets_structured_business_error(plugin_service):
+    async with Client(server.mcp) as client:
+        result = await client.call_tool(
+            "pixelle_create_project",
+            {
+                "name": "PetWoods",
+                "product": "PetWoods",
+                "channel": "xiaohongshu",
+                "source": _source(confirmed=False),
+            },
+        )
+
+    assert result.data["status"] == "error"
+    assert result.data["error"]["code"] == "source_not_confirmed"
+    assert "Traceback" not in result.data["error"]["message"]
 
 
 def test_plugin_main_runs_stdio_transport(monkeypatch):

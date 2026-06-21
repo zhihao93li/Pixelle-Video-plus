@@ -52,4 +52,5 @@ def test_ops_api_returns_404_for_missing_experiment(tmp_path, monkeypatch):
     response = client.get("/api/ops/experiments/missing")
 
     assert response.status_code == 404
-    assert response.json()["detail"]["code"] == "experiment_not_found"
+    assert response.json()["detail"]["error"]["code"] == "experiment_not_found"
+    assert "Traceback" not in response.json()["detail"]["error"]["message"]
