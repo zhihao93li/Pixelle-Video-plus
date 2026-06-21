@@ -33,6 +33,12 @@ BLOCKED_GENERATION_DRAFT_MARKERS = (
     "【字幕文案】",
 )
 
+PIPELINE_DESCRIPTIONS = {
+    "standard": "Default Pixelle generation pipeline.",
+    "custom": "Custom generation pipeline for explicit generation parameters.",
+    "asset_based": "Generation pipeline that starts from existing source assets.",
+}
+
 
 class OpsService:
     def __init__(
@@ -517,6 +523,27 @@ class OpsService:
             "content_items": self.store.list_content_items_for_experiment(experiment_id),
             "events": self.store.list_events_for_experiment(experiment_id),
             "next_action": _next_action_for_events(self.store.list_events_for_experiment(experiment_id)),
+        }
+
+    async def list_generation_pipelines(self) -> dict[str, Any]:
+        pipelines = await self._list_available_pipelines()
+        if pipelines is None:
+            raise OpsError("pipelines_unavailable", "Generation pipelines are not available from this service instance.")
+        pipeline_names = list(pipelines)
+        default_pipeline = "standard" if "standard" in pipeline_names else (pipeline_names[0] if pipeline_names else None)
+        return {
+            "status": "ok",
+            "pipeline_names": pipeline_names,
+            "default_pipeline": default_pipeline,
+            "pipelines": [
+                {
+                    "name": name,
+                    "recommended": name == default_pipeline,
+                    "description": PIPELINE_DESCRIPTIONS.get(name, "Registered Pixelle generation pipeline."),
+                }
+                for name in pipeline_names
+            ],
+            "next_action": {"kind": "select_generation_pipeline", "blocked": False},
         }
 
     async def _require_known_pipeline(self, pipeline: str) -> None:

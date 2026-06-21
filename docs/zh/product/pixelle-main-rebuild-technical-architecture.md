@@ -154,6 +154,7 @@ pixelle_create_project
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
+pixelle_list_generation_pipelines
 pixelle_submit_generation_draft
 pixelle_approve_generation_draft
 pixelle_request_generation
@@ -862,6 +863,7 @@ pixelle_create_project
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
+pixelle_list_generation_pipelines
 pixelle_submit_generation_draft
 pixelle_approve_generation_draft
 pixelle_request_generation
@@ -876,6 +878,10 @@ pixelle_write_memory
 `pixelle_request_generation` 只能从已批准的 generation draft 生成内容，不能直接接收 Codex 临时拼出的自由文案。生成前必须先写入 `generation_drafted`，用户审核通过后再写入 `generation_draft_approved`。
 
 `generation_drafted.payload.text` 只能保存最终上屏字幕或口播稿。生成说明、发布标题、发布正文、标签等辅助字段必须放在其他结构化字段或后续发布证据里，不能混入生成正文。
+
+当用户只说“下一条”“写文案”“做这个主题”而没有明确内容形态时，Pixelle Codex Plugin 对话层必须先让用户选择：短视频字幕稿、图文笔记、只做 hook、或完整运营实验。不能擅自把自然语言请求解释成图文长文，也不能在用户只要审稿时提前写入实验状态。
+
+进入视频生成前，Codex 必须调用 `pixelle_list_generation_pipelines` 读取当前注册 pipeline，并让用户选择；默认推荐 `standard`，但不能自造 pipeline 名称。
 
 生成请求默认采用异步状态流：`pixelle_request_generation` 写入 `generation_requested` 后立即返回，由插件后台继续执行生成；Codex 通过 `pixelle_get_generation_status` 查询 `running / completed / failed`。生成完成后必须调用 `pixelle_check_generation_asset`，检查真实资产引用、本地文件可读性和 draft 文本污染；只有 `asset_checked.status = passed` 时，下一步才是 `pixelle_record_publish`。
 

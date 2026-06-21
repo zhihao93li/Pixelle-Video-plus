@@ -111,6 +111,11 @@ async def pixelle_lock_prediction(
     )
 
 
+async def pixelle_list_generation_pipelines() -> dict[str, Any]:
+    """Return available Pixelle generation pipelines for user selection."""
+    return await _run_tool(lambda: _build_service().list_generation_pipelines())
+
+
 async def pixelle_submit_generation_draft(
     experiment_id: str,
     text: str,
@@ -307,6 +312,7 @@ for tool in (
     pixelle_create_cycle,
     pixelle_create_experiment,
     pixelle_lock_prediction,
+    pixelle_list_generation_pipelines,
     pixelle_submit_generation_draft,
     pixelle_approve_generation_draft,
     pixelle_request_generation,

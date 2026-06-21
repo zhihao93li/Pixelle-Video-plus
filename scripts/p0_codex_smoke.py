@@ -63,6 +63,10 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
         assert unconfirmed.data["status"] == "error"
         assert unconfirmed.data["error"]["code"] == "source_not_confirmed"
 
+        pipelines = await client.call_tool("pixelle_list_generation_pipelines", {})
+        assert pipelines.data["pipeline_names"] == ["standard", "custom", "asset_based"]
+        assert pipelines.data["default_pipeline"] == "standard"
+
         project = await client.call_tool(
             "pixelle_create_project",
             {

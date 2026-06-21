@@ -168,6 +168,28 @@ async def test_unknown_generation_pipeline_is_rejected_before_request_event(tmp_
 
 
 @pytest.mark.asyncio
+async def test_list_generation_pipelines_returns_selectable_options(tmp_path):
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(
+        store,
+        available_pipelines=("standard", "custom", "asset_based"),
+    )
+
+    result = await service.list_generation_pipelines()
+
+    assert result["status"] == "ok"
+    assert result["pipeline_names"] == ["standard", "custom", "asset_based"]
+    assert result["default_pipeline"] == "standard"
+    assert result["pipelines"][0] == {
+        "name": "standard",
+        "recommended": True,
+        "description": "Default Pixelle generation pipeline.",
+    }
+    assert result["next_action"]["kind"] == "select_generation_pipeline"
+
+
+@pytest.mark.asyncio
 async def test_request_generation_records_context_and_completed_item(tmp_path):
     async def fake_generation_runner(**kwargs):
         return {"path": "output/petwoods.mp4", "input_text": kwargs["text"]}

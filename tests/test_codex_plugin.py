@@ -117,6 +117,16 @@ async def test_plugin_rejects_unconfirmed_codex_write(plugin_service):
 
 
 @pytest.mark.asyncio
+async def test_plugin_lists_generation_pipelines(plugin_service):
+    result = await server.pixelle_list_generation_pipelines()
+
+    assert result["status"] == "ok"
+    assert result["pipeline_names"] == ["standard", "custom", "asset_based"]
+    assert result["default_pipeline"] == "standard"
+    assert result["next_action"]["kind"] == "select_generation_pipeline"
+
+
+@pytest.mark.asyncio
 async def test_plugin_rejects_unknown_generation_pipeline(plugin_service):
     project = await server.pixelle_create_project(
         name="PetWoods",
@@ -324,6 +334,7 @@ async def test_fastmcp_client_can_call_pixelle_tools(plugin_service):
         )
 
     assert "pixelle_create_project" in tool_names
+    assert "pixelle_list_generation_pipelines" in tool_names
     assert "pixelle_submit_generation_draft" in tool_names
     assert "pixelle_approve_generation_draft" in tool_names
     assert "pixelle_get_generation_status" in tool_names
