@@ -157,6 +157,8 @@ pixelle_lock_prediction
 pixelle_submit_generation_draft
 pixelle_approve_generation_draft
 pixelle_request_generation
+pixelle_get_generation_status
+pixelle_check_generation_asset
 pixelle_record_publish
 pixelle_record_metrics
 pixelle_write_retro
@@ -863,6 +865,8 @@ pixelle_lock_prediction
 pixelle_submit_generation_draft
 pixelle_approve_generation_draft
 pixelle_request_generation
+pixelle_get_generation_status
+pixelle_check_generation_asset
 pixelle_record_publish
 pixelle_record_metrics
 pixelle_write_retro
@@ -872,6 +876,8 @@ pixelle_write_memory
 `pixelle_request_generation` 只能从已批准的 generation draft 生成内容，不能直接接收 Codex 临时拼出的自由文案。生成前必须先写入 `generation_drafted`，用户审核通过后再写入 `generation_draft_approved`。
 
 `generation_drafted.payload.text` 只能保存最终上屏字幕或口播稿。生成说明、发布标题、发布正文、标签等辅助字段必须放在其他结构化字段或后续发布证据里，不能混入生成正文。
+
+生成请求默认采用异步状态流：`pixelle_request_generation` 写入 `generation_requested` 后立即返回，由插件后台继续执行生成；Codex 通过 `pixelle_get_generation_status` 查询 `running / completed / failed`。生成完成后必须调用 `pixelle_check_generation_asset`，检查真实资产引用、本地文件可读性和 draft 文本污染；只有 `asset_checked.status = passed` 时，下一步才是 `pixelle_record_publish`。
 
 ### 9.3 State transition result
 

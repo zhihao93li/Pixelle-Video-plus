@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from fastmcp import Client
 
@@ -12,8 +14,11 @@ def _source(confirmed=True):
 
 @pytest.fixture
 def plugin_service(tmp_path, monkeypatch):
+    video_path = tmp_path / "plugin.mp4"
+
     async def fake_generation_runner(**kwargs):
-        return {"path": "output/plugin.mp4", "text": kwargs["text"]}
+        video_path.write_bytes(b"fake video bytes")
+        return {"path": str(video_path), "file_size": video_path.stat().st_size, "text": kwargs["text"]}
 
     store = OpsStore(tmp_path / "ops.db")
     store.init_db()
@@ -65,6 +70,12 @@ async def test_plugin_tools_run_complete_loop(plugin_service):
     generation = await server.pixelle_request_generation(
         experiment_id=experiment["entity"]["id"],
         approved_draft_id=approval["event"]["id"],
+        wait_for_completion=True,
+        source=_source(),
+    )
+    asset_check = await server.pixelle_check_generation_asset(
+        experiment_id=experiment["entity"]["id"],
+        content_item_id=generation["content_item"]["id"],
         source=_source(),
     )
     publish = await server.pixelle_record_publish(
@@ -86,6 +97,7 @@ async def test_plugin_tools_run_complete_loop(plugin_service):
     )
     current = await server.pixelle_get_current()
 
+    assert asset_check["next_action"]["kind"] == "record_publish"
     assert publish["next_action"]["kind"] == "record_metrics"
     assert current["experiment"]["id"] == experiment["entity"]["id"]
 
@@ -145,6 +157,7 @@ async def test_plugin_rejects_unknown_generation_pipeline(plugin_service):
     result = await server.pixelle_request_generation(
         experiment_id=experiment["entity"]["id"],
         approved_draft_id=approval["event"]["id"],
+        wait_for_completion=True,
         source=_source(),
     )
 
@@ -239,6 +252,62 @@ async def test_plugin_rejects_instruction_wrapped_generation_draft(plugin_servic
 
 
 @pytest.mark.asyncio
+async def test_plugin_request_generation_defaults_to_async_status_flow(plugin_service):
+    project = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = await server.pixelle_create_cycle(
+        project_id=project["entity"]["id"],
+        name="Launch week",
+        goal="Validate demand",
+        source=_source(),
+    )
+    experiment = await server.pixelle_create_experiment(
+        project_id=project["entity"]["id"],
+        cycle_id=cycle["entity"]["id"],
+        title="Hook test",
+        hypothesis="Pain hook wins.",
+        source=_source(),
+    )
+    await server.pixelle_lock_prediction(
+        experiment_id=experiment["entity"]["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = await server.pixelle_submit_generation_draft(
+        experiment_id=experiment["entity"]["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+    approval = await server.pixelle_approve_generation_draft(
+        experiment_id=experiment["entity"]["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+
+    requested = await server.pixelle_request_generation(
+        experiment_id=experiment["entity"]["id"],
+        approved_draft_id=approval["event"]["id"],
+        source=_source(),
+    )
+    await asyncio.sleep(0)
+    status = await server.pixelle_get_generation_status(experiment_id=experiment["entity"]["id"])
+    asset_check = await server.pixelle_check_generation_asset(
+        experiment_id=experiment["entity"]["id"],
+        content_item_id=status["content_item"]["id"],
+        source=_source(),
+    )
+
+    assert requested["entity"]["stage"] == "generation_requested"
+    assert requested["next_action"]["kind"] == "check_generation_status"
+    assert status["status"] == "completed"
+    assert asset_check["event"]["payload"]["status"] in {"passed", "failed"}
+
+
+@pytest.mark.asyncio
 async def test_fastmcp_client_can_call_pixelle_tools(plugin_service):
     async with Client(server.mcp) as client:
         tools = await client.list_tools()
@@ -257,6 +326,8 @@ async def test_fastmcp_client_can_call_pixelle_tools(plugin_service):
     assert "pixelle_create_project" in tool_names
     assert "pixelle_submit_generation_draft" in tool_names
     assert "pixelle_approve_generation_draft" in tool_names
+    assert "pixelle_get_generation_status" in tool_names
+    assert "pixelle_check_generation_asset" in tool_names
     assert result.data["entity"]["kind"] == "operating_project"
     assert result.data["next_action"]["kind"] == "create_cycle"
 

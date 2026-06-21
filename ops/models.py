@@ -22,6 +22,7 @@ class OpsEventType(StrEnum):
     GENERATION_REQUESTED = "generation_requested"
     GENERATION_COMPLETED = "generation_completed"
     GENERATION_FAILED = "generation_failed"
+    ASSET_CHECKED = "asset_checked"
     PUBLISH_RECORDED = "publish_recorded"
     METRICS_RECORDED = "metrics_recorded"
     RETRO_WRITTEN = "retro_written"

@@ -202,11 +202,143 @@ async def test_request_generation_records_context_and_completed_item(tmp_path):
     event_types = [event["event_type"] for event in events]
 
     assert result["content_item"]["status"] == "generated"
-    assert result["next_action"]["kind"] == "record_publish"
+    assert result["next_action"]["kind"] == "check_generation_asset"
     assert "generation_drafted" in event_types
     assert "generation_draft_approved" in event_types
     assert "generation_requested" in event_types
     assert "generation_completed" in event_types
+
+
+@pytest.mark.asyncio
+async def test_request_generation_can_start_without_waiting_for_completion(tmp_path):
+    async def fake_generation_runner(**kwargs):
+        raise AssertionError("generation runner should not be called when wait_for_completion is false")
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+
+    result = await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=approval["event"]["id"],
+        source=_source(),
+        wait_for_completion=False,
+    )
+    status = service.get_generation_status(experiment["id"])
+
+    assert result["entity"]["stage"] == "generation_requested"
+    assert result["next_action"]["kind"] == "check_generation_status"
+    assert status["status"] == "running"
+    assert status["next_action"]["kind"] == "check_generation_status"
+    assert store.list_content_items_for_experiment(experiment["id"]) == []
+
+
+@pytest.mark.asyncio
+async def test_complete_generation_request_records_asset_and_status(tmp_path):
+    async def fake_generation_runner(**kwargs):
+        return {"video_path": "output/petwoods.mp4", "duration": 12.5, "file_size": 2048}
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+    requested = await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=approval["event"]["id"],
+        source=_source(),
+        wait_for_completion=False,
+    )
+
+    completed = await service.complete_generation_request(
+        experiment_id=experiment["id"],
+        generation_event_id=requested["event"]["id"],
+        source=_source(),
+    )
+    status = service.get_generation_status(experiment["id"])
+
+    assert completed["content_item"]["asset_ref"]["video_path"] == "output/petwoods.mp4"
+    assert completed["next_action"]["kind"] == "check_generation_asset"
+    assert status["status"] == "completed"
+    assert status["content_item"]["id"] == completed["content_item"]["id"]
+
+
+@pytest.mark.asyncio
+async def test_check_generation_asset_records_passed_result(tmp_path):
+    video_path = tmp_path / "final.mp4"
+    video_path.write_bytes(b"fake video bytes")
+
+    async def fake_generation_runner(**kwargs):
+        return {"video_path": str(video_path), "duration": 12.5, "file_size": video_path.stat().st_size}
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+    generation = await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=approval["event"]["id"],
+        source=_source(),
+    )
+
+    result = service.check_generation_asset(
+        experiment_id=experiment["id"],
+        content_item_id=generation["content_item"]["id"],
+        source=_source(),
+    )
+    view = service.get_experiment_view(experiment["id"])
+
+    assert result["event"]["event_type"] == "asset_checked"
+    assert result["event"]["payload"]["status"] == "passed"
+    assert result["event"]["payload"]["checks"]["local_file_exists"] is True
+    assert result["event"]["payload"]["checks"]["draft_text_clean"] is True
+    assert result["next_action"]["kind"] == "record_publish"
+    assert view["next_action"]["kind"] == "record_publish"
 
 
 @pytest.mark.asyncio
@@ -454,21 +586,13 @@ def test_publish_requires_real_evidence(service):
         )
 
 
-def test_metrics_require_published_content(service):
-    _, _, experiment = _seed_experiment(service)
-
-    with pytest.raises(OpsError, match="publish_required"):
-        service.record_metrics(
-            experiment_id=experiment["id"],
-            metrics={"views": 100},
-            source=_source(),
-        )
-
-
 @pytest.mark.asyncio
-async def test_metrics_must_reference_the_published_content_item(tmp_path):
+async def test_publish_requires_passed_asset_check_for_new_generation(tmp_path):
+    video_path = tmp_path / "final.mp4"
+    video_path.write_bytes(b"fake video bytes")
+
     async def fake_generation_runner(**kwargs):
-        return {"path": "output/petwoods.mp4"}
+        return {"path": str(video_path), "file_size": video_path.stat().st_size}
 
     store = OpsStore(tmp_path / "ops.db")
     store.init_db()
@@ -492,6 +616,78 @@ async def test_metrics_must_reference_the_published_content_item(tmp_path):
     generation = await service.request_generation(
         experiment_id=experiment["id"],
         approved_draft_id=approval["event"]["id"],
+        source=_source(),
+    )
+
+    with pytest.raises(OpsError, match="asset_check_required"):
+        service.record_publish(
+            experiment_id=experiment["id"],
+            content_item_id=generation["content_item"]["id"],
+            evidence={"platform_url": "https://example.com/post/1"},
+            source=_source(),
+        )
+
+    service.check_generation_asset(
+        experiment_id=experiment["id"],
+        content_item_id=generation["content_item"]["id"],
+        source=_source(),
+    )
+    result = service.record_publish(
+        experiment_id=experiment["id"],
+        content_item_id=generation["content_item"]["id"],
+        evidence={"platform_url": "https://example.com/post/1"},
+        source=_source(),
+    )
+
+    assert result["next_action"]["kind"] == "record_metrics"
+
+
+def test_metrics_require_published_content(service):
+    _, _, experiment = _seed_experiment(service)
+
+    with pytest.raises(OpsError, match="publish_required"):
+        service.record_metrics(
+            experiment_id=experiment["id"],
+            metrics={"views": 100},
+            source=_source(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_metrics_must_reference_the_published_content_item(tmp_path):
+    video_path = tmp_path / "petwoods.mp4"
+
+    async def fake_generation_runner(**kwargs):
+        video_path.write_bytes(b"fake video bytes")
+        return {"path": str(video_path), "file_size": video_path.stat().st_size}
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+    generation = await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=approval["event"]["id"],
+        source=_source(),
+    )
+    service.check_generation_asset(
+        experiment_id=experiment["id"],
+        content_item_id=generation["content_item"]["id"],
         source=_source(),
     )
     service.record_publish(

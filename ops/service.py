@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, Callable
 
 from ops.models import ExperimentStage, OpsEventType
@@ -18,6 +19,19 @@ class OpsError(Exception):
 
 
 GenerationRunner = Callable[..., Any]
+
+BLOCKED_GENERATION_DRAFT_MARKERS = (
+    "【视频目标】",
+    "【内容形式】",
+    "【屏幕字幕版】",
+    "【发布标题】",
+    "【发布正文】",
+    "【标签】",
+    "【时长】",
+    "【安全边界】",
+    "【成片结构】",
+    "【字幕文案】",
+)
 
 
 class OpsService:
@@ -182,6 +196,7 @@ class OpsService:
         source: dict[str, Any],
         approved_draft_id: str | None = None,
         kind: str = "video",
+        wait_for_completion: bool = True,
     ) -> dict[str, Any]:
         _require_confirmed_source(source)
         experiment = self._get_experiment_or_raise(experiment_id)
@@ -203,7 +218,7 @@ class OpsService:
             "cycle_id": experiment["cycle_id"],
             "experiment_id": experiment_id,
         }
-        self.store.append_event(
+        event = self.store.append_event(
             project_id=experiment["project_id"],
             cycle_id=experiment["cycle_id"],
             experiment_id=experiment_id,
@@ -213,12 +228,57 @@ class OpsService:
                 "pipeline": pipeline,
                 "approved_draft_id": approved_draft_id,
                 "draft_id": draft["id"],
+                "title": title,
                 "operation_context": operation_context,
                 "generation_params": generation_params,
             },
             source=source,
         )
         self.store.update_experiment_stage(experiment_id, ExperimentStage.GENERATION_REQUESTED.value)
+
+        if not wait_for_completion:
+            return {
+                **_transition("generation_requested", event, "check_generation_status"),
+                "generation": {
+                    "status": "running",
+                    "event_id": event["id"],
+                    "experiment_id": experiment_id,
+                },
+            }
+
+        return await self.complete_generation_request(
+            experiment_id=experiment_id,
+            generation_event_id=event["id"],
+            source=source,
+            kind=kind,
+        )
+
+    async def complete_generation_request(
+        self,
+        *,
+        experiment_id: str,
+        generation_event_id: str,
+        source: dict[str, Any],
+        kind: str = "video",
+    ) -> dict[str, Any]:
+        _require_confirmed_source(source)
+        experiment = self._get_experiment_or_raise(experiment_id)
+        events = self.store.list_events_for_experiment(experiment_id)
+        generation_event = _find_event(events, generation_event_id, OpsEventType.GENERATION_REQUESTED)
+        if generation_event is None:
+            raise OpsError("generation_request_not_found", "Generation completion requires an existing generation request.")
+        if _has_event(events, OpsEventType.GENERATION_COMPLETED):
+            raise OpsError("generation_already_completed", "Generation is already completed for this experiment.")
+
+        payload = generation_event["payload"]
+        text = payload["text"]
+        pipeline = payload.get("pipeline") or "standard"
+        generation_params = payload.get("generation_params") or {}
+        operation_context = payload.get("operation_context") or {
+            "project_id": experiment["project_id"],
+            "cycle_id": experiment["cycle_id"],
+            "experiment_id": experiment_id,
+        }
 
         try:
             asset_ref = await self._run_generation(
@@ -248,7 +308,7 @@ class OpsService:
             cycle_id=experiment["cycle_id"],
             experiment_id=experiment_id,
             kind=kind,
-            title=title or experiment["title"],
+            title=payload.get("title") or experiment["title"],
             status="generated",
             asset_ref=asset_ref,
         )
@@ -263,8 +323,84 @@ class OpsService:
         )
         self.store.update_experiment_stage(experiment_id, ExperimentStage.GENERATION_COMPLETED.value)
         return {
-            **_transition("generation_completed", event, "record_publish"),
+            **_transition("generation_completed", event, "check_generation_asset"),
             "content_item": content_item,
+        }
+
+    def get_generation_status(self, experiment_id: str) -> dict[str, Any]:
+        self._get_experiment_or_raise(experiment_id)
+        events = self.store.list_events_for_experiment(experiment_id)
+        content_items = self.store.list_content_items_for_experiment(experiment_id)
+        latest_generation_event = _latest_generation_event(events)
+        if latest_generation_event is None:
+            return {
+                "status": "not_requested",
+                "experiment_id": experiment_id,
+                "next_action": _next_action_for_events(events),
+            }
+        if latest_generation_event["event_type"] == OpsEventType.GENERATION_COMPLETED.value:
+            content_item = _content_item_for_event(content_items, latest_generation_event)
+            return {
+                "status": "completed",
+                "experiment_id": experiment_id,
+                "event": latest_generation_event,
+                "content_item": content_item,
+                "asset_check": _latest_asset_check(events, content_item["id"] if content_item else None),
+                "next_action": _next_action_for_events(events),
+            }
+        if latest_generation_event["event_type"] == OpsEventType.GENERATION_FAILED.value:
+            return {
+                "status": "failed",
+                "experiment_id": experiment_id,
+                "event": latest_generation_event,
+                "error": latest_generation_event["payload"],
+                "next_action": _next_action_for_events(events),
+            }
+        return {
+            "status": "running",
+            "experiment_id": experiment_id,
+            "event": latest_generation_event,
+            "next_action": {"kind": "check_generation_status", "blocked": False},
+        }
+
+    def check_generation_asset(
+        self,
+        *,
+        experiment_id: str,
+        source: dict[str, Any],
+        content_item_id: str | None = None,
+    ) -> dict[str, Any]:
+        _require_confirmed_source(source)
+        experiment = self._get_experiment_or_raise(experiment_id)
+        events = self.store.list_events_for_experiment(experiment_id)
+        if not _has_event(events, OpsEventType.GENERATION_COMPLETED):
+            raise OpsError("generation_required", "Asset check requires a completed generation.")
+        content_items = self.store.list_content_items_for_experiment(experiment_id)
+        content_item = _select_content_item(content_items, content_item_id)
+        if content_item is None:
+            raise OpsError("content_item_not_found", "Asset check requires a generated content item.")
+
+        payload = _build_asset_check_payload(events, content_item)
+        event = self.store.append_event(
+            project_id=experiment["project_id"],
+            cycle_id=experiment["cycle_id"],
+            experiment_id=experiment_id,
+            content_item_id=content_item["id"],
+            event_type=OpsEventType.ASSET_CHECKED.value,
+            payload=payload,
+            source=source,
+        )
+        next_action = (
+            {"kind": "record_publish", "blocked": False}
+            if payload["status"] == "passed"
+            else {"kind": "resolve_asset_issue", "blocked": True, "reason": "asset_check_failed"}
+        )
+        return {
+            "status": "ok",
+            "entity": {"kind": "ops_event", "id": event["id"], "stage": "asset_checked"},
+            "event": event,
+            "asset_check": payload,
+            "next_action": next_action,
         }
 
     def record_publish(
@@ -279,6 +415,8 @@ class OpsService:
         experiment = self._get_experiment_or_raise(experiment_id)
         if not _has_publish_evidence(evidence):
             raise OpsError("publish_evidence_required", "Publish evidence requires a URL, post id, Buffer id, or API response.")
+        events = self.store.list_events_for_experiment(experiment_id)
+        _require_passed_asset_check_before_publish(events, content_item_id)
         event = self.store.append_event(
             project_id=experiment["project_id"],
             cycle_id=experiment["cycle_id"],
@@ -437,19 +575,7 @@ def _require_clean_generation_draft_text(text: str) -> None:
     if not text.strip():
         raise OpsError("generation_draft_invalid", "Generation draft text cannot be empty.")
 
-    blocked_markers = (
-        "【视频目标】",
-        "【内容形式】",
-        "【屏幕字幕版】",
-        "【发布标题】",
-        "【发布正文】",
-        "【标签】",
-        "【时长】",
-        "【安全边界】",
-        "【成片结构】",
-        "【字幕文案】",
-    )
-    found = [marker for marker in blocked_markers if marker in text]
+    found = _blocked_generation_draft_markers(text)
     if found:
         markers = ", ".join(found)
         raise OpsError(
@@ -462,21 +588,22 @@ def _require_generation_request_window(events: list[dict[str, Any]]) -> None:
     if _has_event(events, OpsEventType.GENERATION_COMPLETED):
         raise OpsError("generation_already_completed", "Generation is already completed for this experiment.")
 
-    latest_generation_event = next(
-        (
-            event
-            for event in reversed(events)
-            if event["event_type"]
-            in {
-                OpsEventType.GENERATION_REQUESTED.value,
-                OpsEventType.GENERATION_COMPLETED.value,
-                OpsEventType.GENERATION_FAILED.value,
-            }
-        ),
-        None,
-    )
+    latest_generation_event = _latest_generation_event(events)
     if latest_generation_event and latest_generation_event["event_type"] == OpsEventType.GENERATION_REQUESTED.value:
         raise OpsError("generation_in_progress", "Generation is already requested and has not completed or failed.")
+
+
+def _latest_generation_event(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    generation_event_types = {
+        OpsEventType.GENERATION_REQUESTED.value,
+        OpsEventType.GENERATION_COMPLETED.value,
+        OpsEventType.GENERATION_FAILED.value,
+    }
+    return next((event for event in reversed(events) if event["event_type"] in generation_event_types), None)
+
+
+def _blocked_generation_draft_markers(text: str) -> list[str]:
+    return [marker for marker in BLOCKED_GENERATION_DRAFT_MARKERS if marker in text]
 
 
 def _find_event(
@@ -529,6 +656,98 @@ def _normalize_asset_ref(result: Any) -> dict[str, Any]:
     return asset_ref
 
 
+def _select_content_item(
+    content_items: list[dict[str, Any]],
+    content_item_id: str | None,
+) -> dict[str, Any] | None:
+    if content_item_id:
+        return next((item for item in content_items if item["id"] == content_item_id), None)
+    return content_items[-1] if content_items else None
+
+
+def _content_item_for_event(
+    content_items: list[dict[str, Any]],
+    event: dict[str, Any],
+) -> dict[str, Any] | None:
+    return _select_content_item(content_items, event.get("content_item_id"))
+
+
+def _latest_asset_check(
+    events: list[dict[str, Any]],
+    content_item_id: str | None,
+) -> dict[str, Any] | None:
+    return next(
+        (
+            event
+            for event in reversed(events)
+            if event["event_type"] == OpsEventType.ASSET_CHECKED.value
+            and (content_item_id is None or event.get("content_item_id") == content_item_id)
+        ),
+        None,
+    )
+
+
+def _build_asset_check_payload(
+    events: list[dict[str, Any]],
+    content_item: dict[str, Any],
+) -> dict[str, Any]:
+    asset_ref = content_item.get("asset_ref") or {}
+    asset_path = _asset_path_from_ref(asset_ref)
+    is_local_path = bool(asset_path and not _is_url(asset_path))
+    local_file_exists = False
+    local_file_size = None
+    if is_local_path:
+        path = Path(asset_path)
+        local_file_exists = path.is_file()
+        if local_file_exists:
+            local_file_size = path.stat().st_size
+
+    latest_requested = next(
+        (
+            event
+            for event in reversed(events)
+            if event["event_type"] == OpsEventType.GENERATION_REQUESTED.value
+        ),
+        None,
+    )
+    draft_markers = _blocked_generation_draft_markers((latest_requested or {}).get("payload", {}).get("text", ""))
+    checks = {
+        "generation_completed_event_present": _has_event(events, OpsEventType.GENERATION_COMPLETED),
+        "asset_reference_present": bool(asset_path),
+        "local_file_required": is_local_path,
+        "local_file_exists": local_file_exists,
+        "local_file_size": local_file_size,
+        "duration_seconds": asset_ref.get("duration"),
+        "draft_text_clean": not draft_markers,
+        "blocked_draft_markers": draft_markers,
+    }
+    passed = (
+        checks["generation_completed_event_present"]
+        and checks["asset_reference_present"]
+        and checks["draft_text_clean"]
+        and (not checks["local_file_required"] or (checks["local_file_exists"] and (local_file_size or 0) > 0))
+    )
+    return {
+        "status": "passed" if passed else "failed",
+        "content_item_id": content_item["id"],
+        "asset_ref": asset_ref,
+        "asset_path": asset_path,
+        "checks": checks,
+    }
+
+
+def _asset_path_from_ref(asset_ref: dict[str, Any]) -> str | None:
+    for key in ("video_path", "path", "output_path", "url", "asset_url"):
+        value = asset_ref.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _is_url(value: str) -> bool:
+    return value.startswith(("http://", "https://"))
+
+
 def _has_published_content(events: list[dict[str, Any]], content_item_id: str) -> bool:
     return any(
         event["event_type"] == OpsEventType.PUBLISH_RECORDED.value
@@ -542,6 +761,19 @@ def _has_publish_evidence(evidence: dict[str, Any]) -> bool:
         evidence.get(key)
         for key in ("platform_url", "platform_post_id", "buffer_post_id", "platform_response")
     )
+
+
+def _require_passed_asset_check_before_publish(
+    events: list[dict[str, Any]],
+    content_item_id: str | None,
+) -> None:
+    if not _has_event(events, OpsEventType.GENERATION_REQUESTED):
+        return
+    asset_check = _latest_asset_check(events, content_item_id)
+    if asset_check is None:
+        raise OpsError("asset_check_required", "Publish requires a passed generation asset check.")
+    if asset_check["payload"].get("status") != "passed":
+        raise OpsError("asset_check_failed", "Publish requires a passed generation asset check.")
 
 
 def _transition(status: str, event: dict[str, Any], next_kind: str) -> dict[str, Any]:
@@ -586,6 +818,13 @@ def _next_action_for_events(events: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _next_action_after_generation_completed(events: list[dict[str, Any]]) -> dict[str, Any]:
+    asset_check = _latest_asset_check(events, None)
+    if asset_check is None:
+        if not _has_event(events, OpsEventType.GENERATION_REQUESTED):
+            return {"kind": "record_publish", "blocked": False}
+        return {"kind": "check_generation_asset", "blocked": False}
+    if asset_check["payload"].get("status") != "passed":
+        return {"kind": "resolve_asset_issue", "blocked": True, "reason": "asset_check_failed"}
     if not _has_event(events, OpsEventType.PUBLISH_RECORDED):
         return {"kind": "record_publish", "blocked": False}
     if not _has_event(events, OpsEventType.METRICS_RECORDED):

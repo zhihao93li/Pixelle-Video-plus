@@ -245,6 +245,8 @@ pixelle_lock_prediction
 pixelle_submit_generation_draft
 pixelle_approve_generation_draft
 pixelle_request_generation
+pixelle_get_generation_status
+pixelle_check_generation_asset
 pixelle_record_publish
 pixelle_record_metrics
 pixelle_write_retro
@@ -262,6 +264,8 @@ source.confirmed_by_user == true
 这表示 Codex 是入口，但不是绕过用户确认的状态写入器。
 
 生成链路还必须额外满足：Codex 先提交 `pixelle_submit_generation_draft`，把实际文案给用户审核；用户确认后再调用 `pixelle_approve_generation_draft`；最后 `pixelle_request_generation` 只能使用已批准草稿对应的 approval event，不能直接传入自由文案。
+
+`pixelle_request_generation` 默认使用异步状态流：先写入 `generation_requested` 并返回，后台继续生成；Codex 用 `pixelle_get_generation_status` 查询结果。生成完成后必须调用 `pixelle_check_generation_asset`，资产检查通过后才进入发布记录。
 
 `pixelle_submit_generation_draft` 的 `text` 必须是最终上屏字幕或口播稿，不允许包含 `【视频目标】`、`【内容形式】`、`【发布标题】`、`【发布正文】`、`【标签】` 等生成说明或发布字段。
 
@@ -379,11 +383,13 @@ uv run pytest tests/test_ops_store.py -q
 3. `create_experiment`
 4. `lock_prediction`
 5. `request_generation`
-6. `record_publish`
-7. `record_metrics`
-8. `write_retro`
-9. `write_memory`
-10. `current_view`
+6. `get_generation_status`
+7. `check_generation_asset`
+8. `record_publish`
+9. `record_metrics`
+10. `write_retro`
+11. `write_memory`
+12. `current_view`
 
 这里写所有不变量。
 
@@ -391,12 +397,15 @@ uv run pytest tests/test_ops_store.py -q
 
 1. 先做 preflight。
 2. 记录 `generation_requested` event。
-3. 调用现有 `pixelle_video.generate_video`。
-4. 成功后记录 `generation_completed` event。
-5. 失败时记录 `generation_failed` event，保留失败信息，不生成 content item，不伪成功。
-6. 生成成功必须能提取资产引用；没有 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 时仍按失败处理。
-7. 如果已有未完成的 `generation_requested`，返回 `generation_in_progress`，不能重复发起生成。
-8. 如果已有 `generation_completed`，返回 `generation_already_completed`，不能在同一实验里静默重生成。
+3. 默认不等待生成完成，返回 `check_generation_status`。
+4. 后台或同步兼容路径调用现有 `pixelle_video.generate_video`。
+5. 成功后记录 `generation_completed` event。
+6. 失败时记录 `generation_failed` event，保留失败信息，不生成 content item，不伪成功。
+7. 生成成功必须能提取资产引用；没有 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 时仍按失败处理。
+8. 生成完成后下一步是 `check_generation_asset`，检查真实资产引用、本地文件可读性和 draft 文本污染。
+9. 资产检查失败时停在 `resolve_asset_issue`，不能记录发布。
+10. 如果已有未完成的 `generation_requested`，返回 `generation_in_progress`，不能重复发起生成。
+11. 如果已有 `generation_completed`，返回 `generation_already_completed`，不能在同一实验里静默重生成。
 
 注意：
 

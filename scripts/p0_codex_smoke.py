@@ -26,8 +26,11 @@ def _source() -> dict[str, Any]:
 
 
 async def _fake_generation_runner(**kwargs: Any) -> dict[str, Any]:
+    output_path = Path(os.environ["PIXELLE_OPS_DB_PATH"]).with_name("p0-codex-smoke.mp4")
+    output_path.write_bytes(b"fake video bytes")
     return {
-        "path": "output/p0-codex-smoke.mp4",
+        "path": str(output_path),
+        "file_size": output_path.stat().st_size,
         "media_type": "video",
         "task_id": "p0-codex-smoke",
     }
@@ -189,7 +192,30 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
                 "source": _source(),
             },
         )
-        content_item_id = generation.data["content_item"]["id"]
+        assert generation.data["entity"]["stage"] == "generation_requested"
+
+        generation_status = None
+        for _ in range(20):
+            generation_status = await client.call_tool(
+                "pixelle_get_generation_status",
+                {"experiment_id": experiment.data["entity"]["id"]},
+            )
+            if generation_status.data["status"] == "completed":
+                break
+            await asyncio.sleep(0.01)
+        assert generation_status is not None
+        assert generation_status.data["status"] == "completed"
+
+        content_item_id = generation_status.data["content_item"]["id"]
+        asset_check = await client.call_tool(
+            "pixelle_check_generation_asset",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "content_item_id": content_item_id,
+                "source": _source(),
+            },
+        )
+        assert asset_check.data["asset_check"]["status"] == "passed"
         publish = await client.call_tool(
             "pixelle_record_publish",
             {

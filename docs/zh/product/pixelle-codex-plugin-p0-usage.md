@@ -71,6 +71,8 @@ pixelle_lock_prediction
 pixelle_submit_generation_draft
 pixelle_approve_generation_draft
 pixelle_request_generation
+pixelle_get_generation_status
+pixelle_check_generation_asset
 pixelle_record_publish
 pixelle_record_metrics
 pixelle_write_retro
@@ -87,6 +89,8 @@ pixelle_lock_prediction
 pixelle_submit_generation_draft
 pixelle_approve_generation_draft
 pixelle_request_generation
+pixelle_get_generation_status
+pixelle_check_generation_asset
 pixelle_record_publish
 pixelle_record_metrics
 pixelle_write_retro
@@ -121,10 +125,13 @@ Codex 来源必须满足：
 11. 同一实验已经生成完成时不能静默重生成，必须返回 `generation_already_completed`。
 12. 不能自造 pipeline 名称；必须使用 PixelleVideoCore 已注册 pipeline。
 13. 未知 pipeline 必须在写入 `generation_requested` 前返回 `unknown_generation_pipeline`。
-14. 生成失败必须写 `generation_failed`，不能伪成功。
-15. 生成成功必须能提取出 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 之一作为资产引用。
-16. 发布证据不能只有 confirmation note。
-17. metrics 必须挂到已发布 content item。
+14. `pixelle_request_generation` 默认返回 `generation_requested`，后续必须用 `pixelle_get_generation_status` 查询异步生成结果，避免 Codex 工具调用长时间等待超时。
+15. 生成失败必须写 `generation_failed`，不能伪成功。
+16. 生成成功必须能提取出 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 之一作为资产引用。
+17. 生成完成后必须调用 `pixelle_check_generation_asset`，确认资产引用存在、本地文件可读且 draft 文本没有污染。
+18. 资产检查通过后才进入发布记录；检查失败时必须停在 `resolve_asset_issue`。
+19. 发布证据不能只有 confirmation note。
+20. metrics 必须挂到已发布 content item。
 
 当前已注册 pipeline：
 

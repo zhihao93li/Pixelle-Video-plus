@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from typing import Any
 
@@ -10,6 +11,7 @@ from fastmcp import FastMCP
 from ops.service import OpsError, OpsService
 
 mcp = FastMCP("pixelle-ops")
+_BACKGROUND_GENERATION_TASKS: set[asyncio.Task] = set()
 
 
 def _build_service() -> OpsService:
@@ -148,15 +150,77 @@ async def pixelle_request_generation(
     source: dict[str, Any],
     approved_draft_id: str | None = None,
     kind: str = "video",
+    wait_for_completion: bool = False,
 ) -> dict[str, Any]:
-    return await _run_tool(
-        lambda: _build_service().request_generation(
+    service = _build_service()
+    result = await _run_tool(
+        lambda: service.request_generation(
             experiment_id=experiment_id,
             source=source,
             approved_draft_id=approved_draft_id,
             kind=kind,
+            wait_for_completion=wait_for_completion,
         )
     )
+    if (
+        not wait_for_completion
+        and result.get("status") == "ok"
+        and result.get("entity", {}).get("stage") == "generation_requested"
+    ):
+        _schedule_generation_completion(
+            service=service,
+            experiment_id=experiment_id,
+            generation_event_id=result["event"]["id"],
+            kind=kind,
+            source=source,
+        )
+    return result
+
+
+async def pixelle_get_generation_status(experiment_id: str) -> dict[str, Any]:
+    return await _run_tool(lambda: _build_service().get_generation_status(experiment_id))
+
+
+async def pixelle_check_generation_asset(
+    experiment_id: str,
+    source: dict[str, Any],
+    content_item_id: str | None = None,
+) -> dict[str, Any]:
+    return await _run_tool(
+        lambda: _build_service().check_generation_asset(
+            experiment_id=experiment_id,
+            content_item_id=content_item_id,
+            source=source,
+        )
+    )
+
+
+def _schedule_generation_completion(
+    *,
+    service: OpsService,
+    experiment_id: str,
+    generation_event_id: str,
+    kind: str,
+    source: dict[str, Any],
+) -> None:
+    task = asyncio.create_task(
+        service.complete_generation_request(
+            experiment_id=experiment_id,
+            generation_event_id=generation_event_id,
+            kind=kind,
+            source=source,
+        )
+    )
+    _BACKGROUND_GENERATION_TASKS.add(task)
+
+    def _consume_result(done_task: asyncio.Task) -> None:
+        _BACKGROUND_GENERATION_TASKS.discard(done_task)
+        try:
+            done_task.result()
+        except Exception:
+            pass
+
+    task.add_done_callback(_consume_result)
 
 
 async def pixelle_record_publish(
@@ -246,6 +310,8 @@ for tool in (
     pixelle_submit_generation_draft,
     pixelle_approve_generation_draft,
     pixelle_request_generation,
+    pixelle_get_generation_status,
+    pixelle_check_generation_asset,
     pixelle_record_publish,
     pixelle_record_metrics,
     pixelle_write_retro,
