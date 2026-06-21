@@ -119,16 +119,15 @@ class OpsService:
             source=source,
         )
         self.store.update_experiment_stage(experiment_id, ExperimentStage.PREDICTION_LOCKED.value)
-        return _transition("prediction_locked", event, "request_generation")
+        return _transition("prediction_locked", event, "submit_generation_draft")
 
-    async def request_generation(
+    def submit_generation_draft(
         self,
         *,
         experiment_id: str,
         text: str,
         source: dict[str, Any],
         pipeline: str = "standard",
-        kind: str = "video",
         title: str | None = None,
         generation_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -136,7 +135,65 @@ class OpsService:
         experiment = self._get_experiment_or_raise(experiment_id)
         events = self.store.list_events_for_experiment(experiment_id)
         if not _has_event(events, OpsEventType.PREDICTION_LOCKED):
+            raise OpsError("prediction_required", "Generation draft requires a locked prediction.")
+        event = self.store.append_event(
+            project_id=experiment["project_id"],
+            cycle_id=experiment["cycle_id"],
+            experiment_id=experiment_id,
+            event_type=OpsEventType.GENERATION_DRAFTED.value,
+            payload={
+                "text": text,
+                "pipeline": pipeline,
+                "title": title,
+                "generation_params": generation_params or {},
+            },
+            source=source,
+        )
+        return _transition("generation_drafted", event, "approve_generation_draft")
+
+    def approve_generation_draft(
+        self,
+        *,
+        experiment_id: str,
+        draft_id: str,
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        _require_confirmed_source(source)
+        experiment = self._get_experiment_or_raise(experiment_id)
+        events = self.store.list_events_for_experiment(experiment_id)
+        draft = _find_event(events, draft_id, OpsEventType.GENERATION_DRAFTED)
+        if draft is None:
+            raise OpsError("generation_draft_not_found", "Approved generation draft must reference an existing draft.")
+        event = self.store.append_event(
+            project_id=experiment["project_id"],
+            cycle_id=experiment["cycle_id"],
+            experiment_id=experiment_id,
+            event_type=OpsEventType.GENERATION_DRAFT_APPROVED.value,
+            payload={"draft_id": draft_id},
+            source=source,
+        )
+        return _transition("generation_draft_approved", event, "request_generation")
+
+    async def request_generation(
+        self,
+        *,
+        experiment_id: str,
+        source: dict[str, Any],
+        approved_draft_id: str | None = None,
+        kind: str = "video",
+    ) -> dict[str, Any]:
+        _require_confirmed_source(source)
+        experiment = self._get_experiment_or_raise(experiment_id)
+        events = self.store.list_events_for_experiment(experiment_id)
+        if not _has_event(events, OpsEventType.PREDICTION_LOCKED):
             raise OpsError("prediction_required", "Content generation requires a locked prediction.")
+        draft = _approved_draft_for_generation(events, approved_draft_id)
+        if draft is None:
+            raise OpsError("approved_draft_required", "Content generation requires an approved generation draft.")
+        text = draft["payload"]["text"]
+        pipeline = draft["payload"].get("pipeline") or "standard"
+        title = draft["payload"].get("title")
+        generation_params = draft["payload"].get("generation_params") or {}
         await self._require_known_pipeline(pipeline)
 
         operation_context = {
@@ -152,8 +209,10 @@ class OpsService:
             payload={
                 "text": text,
                 "pipeline": pipeline,
+                "approved_draft_id": approved_draft_id,
+                "draft_id": draft["id"],
                 "operation_context": operation_context,
-                "generation_params": generation_params or {},
+                "generation_params": generation_params,
             },
             source=source,
         )
@@ -164,7 +223,7 @@ class OpsService:
                 text=text,
                 pipeline=pipeline,
                 operation_context=operation_context,
-                **(generation_params or {}),
+                **generation_params,
             )
         except Exception as exc:
             self.store.append_event(
@@ -372,6 +431,36 @@ def _has_event(events: list[dict[str, Any]], *event_types: OpsEventType) -> bool
     return any(event["event_type"] in values for event in events)
 
 
+def _find_event(
+    events: list[dict[str, Any]],
+    event_id: str,
+    event_type: OpsEventType,
+) -> dict[str, Any] | None:
+    return next(
+        (
+            event
+            for event in events
+            if event["id"] == event_id and event["event_type"] == event_type.value
+        ),
+        None,
+    )
+
+
+def _approved_draft_for_generation(
+    events: list[dict[str, Any]],
+    approved_draft_id: str | None,
+) -> dict[str, Any] | None:
+    if not approved_draft_id:
+        return None
+    approval = _find_event(events, approved_draft_id, OpsEventType.GENERATION_DRAFT_APPROVED)
+    if approval is None:
+        return None
+    draft_id = approval["payload"].get("draft_id")
+    if not draft_id:
+        return None
+    return _find_event(events, draft_id, OpsEventType.GENERATION_DRAFTED)
+
+
 def _normalize_asset_ref(result: Any) -> dict[str, Any]:
     asset_fields = ("path", "video_path", "url", "asset_url", "output_path")
     metadata_fields = ("duration", "file_size", "media_type", "task_id")
@@ -429,6 +518,10 @@ def _next_action_for_view(view: dict[str, Any]) -> dict[str, Any]:
 def _next_action_for_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     if not _has_event(events, OpsEventType.PREDICTION_LOCKED):
         return {"kind": "lock_prediction", "blocked": False}
+    if not _has_event(events, OpsEventType.GENERATION_DRAFTED):
+        return {"kind": "submit_generation_draft", "blocked": False}
+    if not _has_event(events, OpsEventType.GENERATION_DRAFT_APPROVED):
+        return {"kind": "approve_generation_draft", "blocked": False}
     if not _has_event(events, OpsEventType.GENERATION_COMPLETED):
         return {"kind": "request_generation", "blocked": False}
     if not _has_event(events, OpsEventType.PUBLISH_RECORDED):

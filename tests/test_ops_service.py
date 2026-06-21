@@ -67,7 +67,6 @@ async def test_generation_requires_locked_prediction(service):
     with pytest.raises(OpsError, match="prediction_required"):
         await service.request_generation(
             experiment_id=experiment["id"],
-            text="Generate a video",
             source=_source(),
         )
 
@@ -90,18 +89,28 @@ async def test_unknown_generation_pipeline_is_rejected_before_request_event(tmp_
         prediction={"expected_metric": "save_rate"},
         source=_source(),
     )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="Generate a video",
+        pipeline="xhs_short_video_v1",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
 
     with pytest.raises(OpsError, match="unknown_generation_pipeline"):
         await service.request_generation(
             experiment_id=experiment["id"],
-            text="Generate a video",
-            pipeline="xhs_short_video_v1",
+            approved_draft_id=approval["event"]["id"],
             source=_source(),
         )
 
     event_types = [event["event_type"] for event in store.list_events_for_experiment(experiment["id"])]
 
-    assert event_types == ["prediction_locked"]
+    assert event_types == ["prediction_locked", "generation_drafted", "generation_draft_approved"]
     assert store.get_experiment(experiment["id"])["stage"] == "prediction_locked"
     assert store.list_content_items_for_experiment(experiment["id"]) == []
 
@@ -121,9 +130,19 @@ async def test_request_generation_records_context_and_completed_item(tmp_path):
         prediction={"expected_metric": "save_rate", "expected_direction": "up"},
         source=_source(),
     )
-    result = await service.request_generation(
+    draft = service.submit_generation_draft(
         experiment_id=experiment["id"],
         text="Generate a video",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+    result = await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=approval["event"]["id"],
         source=_source(),
     )
 
@@ -132,8 +151,48 @@ async def test_request_generation_records_context_and_completed_item(tmp_path):
 
     assert result["content_item"]["status"] == "generated"
     assert result["next_action"]["kind"] == "record_publish"
+    assert "generation_drafted" in event_types
+    assert "generation_draft_approved" in event_types
     assert "generation_requested" in event_types
     assert "generation_completed" in event_types
+
+
+@pytest.mark.asyncio
+async def test_generation_requires_an_approved_draft(tmp_path):
+    async def fake_generation_runner(**kwargs):
+        raise AssertionError("generation runner should not be called before draft approval")
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+
+    with pytest.raises(OpsError, match="approved_draft_required"):
+        await service.request_generation(
+            experiment_id=experiment["id"],
+            source=_source(),
+        )
+    with pytest.raises(OpsError, match="approved_draft_required"):
+        await service.request_generation(
+            experiment_id=experiment["id"],
+            approved_draft_id=draft["event"]["id"],
+            source=_source(),
+        )
+
+    event_types = [event["event_type"] for event in store.list_events_for_experiment(experiment["id"])]
+
+    assert event_types == ["prediction_locked", "generation_drafted"]
+    assert store.list_content_items_for_experiment(experiment["id"]) == []
 
 
 @pytest.mark.asyncio
@@ -150,11 +209,21 @@ async def test_generation_failure_records_event_without_content_item(tmp_path):
         prediction={"expected_metric": "save_rate"},
         source=_source(),
     )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
 
     with pytest.raises(OpsError, match="generation_failed"):
         await service.request_generation(
             experiment_id=experiment["id"],
-            text="Generate a video",
+            approved_draft_id=approval["event"]["id"],
             source=_source(),
         )
 
@@ -178,11 +247,21 @@ async def test_invalid_generation_result_is_not_treated_as_success(tmp_path):
         prediction={"expected_metric": "save_rate"},
         source=_source(),
     )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
 
     with pytest.raises(OpsError, match="generation_failed"):
         await service.request_generation(
             experiment_id=experiment["id"],
-            text="Generate a video",
+            approved_draft_id=approval["event"]["id"],
             source=_source(),
         )
 
@@ -206,10 +285,20 @@ async def test_video_generation_result_like_object_is_normalized(tmp_path):
         prediction={"expected_metric": "save_rate"},
         source=_source(),
     )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
 
     result = await service.request_generation(
         experiment_id=experiment["id"],
-        text="Generate a video",
+        approved_draft_id=approval["event"]["id"],
         source=_source(),
     )
 
@@ -256,9 +345,19 @@ async def test_metrics_must_reference_the_published_content_item(tmp_path):
         prediction={"expected_metric": "save_rate"},
         source=_source(),
     )
-    generation = await service.request_generation(
+    draft = service.submit_generation_draft(
         experiment_id=experiment["id"],
         text="Generate a video",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+    generation = await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=approval["event"]["id"],
         source=_source(),
     )
     service.record_publish(

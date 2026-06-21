@@ -109,24 +109,52 @@ async def pixelle_lock_prediction(
     )
 
 
-async def pixelle_request_generation(
+async def pixelle_submit_generation_draft(
     experiment_id: str,
     text: str,
     source: dict[str, Any],
     pipeline: str = "standard",
-    kind: str = "video",
     title: str | None = None,
     generation_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return await _run_tool(
-        lambda: _build_service().request_generation(
+        lambda: _build_service().submit_generation_draft(
             experiment_id=experiment_id,
             text=text,
             source=source,
             pipeline=pipeline,
-            kind=kind,
             title=title,
             generation_params=generation_params,
+        )
+    )
+
+
+async def pixelle_approve_generation_draft(
+    experiment_id: str,
+    draft_id: str,
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    return await _run_tool(
+        lambda: _build_service().approve_generation_draft(
+            experiment_id=experiment_id,
+            draft_id=draft_id,
+            source=source,
+        )
+    )
+
+
+async def pixelle_request_generation(
+    experiment_id: str,
+    source: dict[str, Any],
+    approved_draft_id: str | None = None,
+    kind: str = "video",
+) -> dict[str, Any]:
+    return await _run_tool(
+        lambda: _build_service().request_generation(
+            experiment_id=experiment_id,
+            source=source,
+            approved_draft_id=approved_draft_id,
+            kind=kind,
         )
     )
 
@@ -215,6 +243,8 @@ for tool in (
     pixelle_create_cycle,
     pixelle_create_experiment,
     pixelle_lock_prediction,
+    pixelle_submit_generation_draft,
+    pixelle_approve_generation_draft,
     pixelle_request_generation,
     pixelle_record_publish,
     pixelle_record_metrics,

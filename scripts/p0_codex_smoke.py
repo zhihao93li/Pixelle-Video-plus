@@ -94,7 +94,6 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
             "pixelle_request_generation",
             {
                 "experiment_id": experiment.data["entity"]["id"],
-                "text": "Generate a short PetWoods validation video.",
                 "source": _source(),
             },
         )
@@ -112,8 +111,29 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
                 "source": _source(),
             },
         )
-        unknown_pipeline = await client.call_tool(
+        unapproved_draft = await client.call_tool(
+            "pixelle_submit_generation_draft",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "text": "Generate a short PetWoods validation video.",
+                "pipeline": "standard",
+                "title": "PetWoods hook validation",
+                "source": _source(),
+            },
+        )
+        draft_blocked_generation = await client.call_tool(
             "pixelle_request_generation",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "approved_draft_id": unapproved_draft.data["event"]["id"],
+                "source": _source(),
+            },
+        )
+        assert draft_blocked_generation.data["status"] == "error"
+        assert draft_blocked_generation.data["error"]["code"] == "approved_draft_required"
+
+        invalid_pipeline_draft = await client.call_tool(
+            "pixelle_submit_generation_draft",
             {
                 "experiment_id": experiment.data["entity"]["id"],
                 "text": "Generate a short PetWoods validation video.",
@@ -121,15 +141,39 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
                 "source": _source(),
             },
         )
+        invalid_pipeline_approval = await client.call_tool(
+            "pixelle_approve_generation_draft",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "draft_id": invalid_pipeline_draft.data["event"]["id"],
+                "source": _source(),
+            },
+        )
+        unknown_pipeline = await client.call_tool(
+            "pixelle_request_generation",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "approved_draft_id": invalid_pipeline_approval.data["event"]["id"],
+                "source": _source(),
+            },
+        )
         assert unknown_pipeline.data["status"] == "error"
         assert unknown_pipeline.data["error"]["code"] == "unknown_generation_pipeline"
+
+        approval = await client.call_tool(
+            "pixelle_approve_generation_draft",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "draft_id": unapproved_draft.data["event"]["id"],
+                "source": _source(),
+            },
+        )
 
         generation = await client.call_tool(
             "pixelle_request_generation",
             {
                 "experiment_id": experiment.data["entity"]["id"],
-                "text": "Generate a short PetWoods validation video.",
-                "title": "PetWoods hook validation",
+                "approved_draft_id": approval.data["event"]["id"],
                 "source": _source(),
             },
         )

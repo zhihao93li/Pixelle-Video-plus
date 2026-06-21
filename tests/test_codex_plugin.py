@@ -52,9 +52,19 @@ async def test_plugin_tools_run_complete_loop(plugin_service):
         prediction={"expected_metric": "save_rate"},
         source=_source(),
     )
-    generation = await server.pixelle_request_generation(
+    draft = await server.pixelle_submit_generation_draft(
         experiment_id=experiment["entity"]["id"],
         text="Generate a video",
+        source=_source(),
+    )
+    approval = await server.pixelle_approve_generation_draft(
+        experiment_id=experiment["entity"]["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+    generation = await server.pixelle_request_generation(
+        experiment_id=experiment["entity"]["id"],
+        approved_draft_id=approval["event"]["id"],
         source=_source(),
     )
     publish = await server.pixelle_record_publish(
@@ -120,17 +130,75 @@ async def test_plugin_rejects_unknown_generation_pipeline(plugin_service):
         prediction={"expected_metric": "save_rate"},
         source=_source(),
     )
-
-    result = await server.pixelle_request_generation(
+    draft = await server.pixelle_submit_generation_draft(
         experiment_id=experiment["entity"]["id"],
         text="Generate a video",
         pipeline="xhs_short_video_v1",
+        source=_source(),
+    )
+    approval = await server.pixelle_approve_generation_draft(
+        experiment_id=experiment["entity"]["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+
+    result = await server.pixelle_request_generation(
+        experiment_id=experiment["entity"]["id"],
+        approved_draft_id=approval["event"]["id"],
         source=_source(),
     )
 
     assert result["status"] == "error"
     assert result["error"]["code"] == "unknown_generation_pipeline"
     assert "standard, custom, asset_based" in result["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_plugin_requires_approved_generation_draft(plugin_service):
+    project = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = await server.pixelle_create_cycle(
+        project_id=project["entity"]["id"],
+        name="Launch week",
+        goal="Validate demand",
+        source=_source(),
+    )
+    experiment = await server.pixelle_create_experiment(
+        project_id=project["entity"]["id"],
+        cycle_id=cycle["entity"]["id"],
+        title="Hook test",
+        hypothesis="Pain hook wins.",
+        source=_source(),
+    )
+    await server.pixelle_lock_prediction(
+        experiment_id=experiment["entity"]["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = await server.pixelle_submit_generation_draft(
+        experiment_id=experiment["entity"]["id"],
+        text="Generate a video",
+        source=_source(),
+    )
+
+    missing_approval = await server.pixelle_request_generation(
+        experiment_id=experiment["entity"]["id"],
+        source=_source(),
+    )
+    unapproved_draft = await server.pixelle_request_generation(
+        experiment_id=experiment["entity"]["id"],
+        approved_draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+
+    assert missing_approval["status"] == "error"
+    assert missing_approval["error"]["code"] == "approved_draft_required"
+    assert unapproved_draft["status"] == "error"
+    assert unapproved_draft["error"]["code"] == "approved_draft_required"
 
 
 @pytest.mark.asyncio
@@ -150,6 +218,8 @@ async def test_fastmcp_client_can_call_pixelle_tools(plugin_service):
         )
 
     assert "pixelle_create_project" in tool_names
+    assert "pixelle_submit_generation_draft" in tool_names
+    assert "pixelle_approve_generation_draft" in tool_names
     assert result.data["entity"]["kind"] == "operating_project"
     assert result.data["next_action"]["kind"] == "create_cycle"
 

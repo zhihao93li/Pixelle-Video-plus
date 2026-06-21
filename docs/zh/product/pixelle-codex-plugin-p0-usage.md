@@ -68,6 +68,8 @@ pixelle_create_project
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
+pixelle_submit_generation_draft
+pixelle_approve_generation_draft
 pixelle_request_generation
 pixelle_record_publish
 pixelle_record_metrics
@@ -82,6 +84,8 @@ pixelle_create_project
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
+pixelle_submit_generation_draft
+pixelle_approve_generation_draft
 pixelle_request_generation
 pixelle_record_publish
 pixelle_record_metrics
@@ -109,12 +113,15 @@ Codex 来源必须满足：
 3. 插件不调用 `web`。
 4. UI/API 不提供写入口。
 5. 没有 locked prediction 不能生成。
-6. 不能自造 pipeline 名称；必须使用 PixelleVideoCore 已注册 pipeline。
-7. 未知 pipeline 必须在写入 `generation_requested` 前返回 `unknown_generation_pipeline`。
-8. 生成失败必须写 `generation_failed`，不能伪成功。
-9. 生成成功必须能提取出 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 之一作为资产引用。
-10. 发布证据不能只有 confirmation note。
-11. metrics 必须挂到已发布 content item。
+6. Codex 必须先提交 `generation_drafted` 文案草稿。
+7. 用户审核后必须记录 `generation_draft_approved`。
+8. `pixelle_request_generation` 只接受已批准 draft 的 approval event id，不能直接传任意文案。
+9. 不能自造 pipeline 名称；必须使用 PixelleVideoCore 已注册 pipeline。
+10. 未知 pipeline 必须在写入 `generation_requested` 前返回 `unknown_generation_pipeline`。
+11. 生成失败必须写 `generation_failed`，不能伪成功。
+12. 生成成功必须能提取出 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 之一作为资产引用。
+13. 发布证据不能只有 confirmation note。
+14. metrics 必须挂到已发布 content item。
 
 当前已注册 pipeline：
 

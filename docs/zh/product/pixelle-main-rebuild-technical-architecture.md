@@ -154,6 +154,8 @@ pixelle_create_project
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
+pixelle_submit_generation_draft
+pixelle_approve_generation_draft
 pixelle_request_generation
 pixelle_record_publish
 pixelle_record_metrics
@@ -858,12 +860,16 @@ pixelle_create_project
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
+pixelle_submit_generation_draft
+pixelle_approve_generation_draft
 pixelle_request_generation
 pixelle_record_publish
 pixelle_record_metrics
 pixelle_write_retro
 pixelle_write_memory
 ```
+
+`pixelle_request_generation` 只能从已批准的 generation draft 生成内容，不能直接接收 Codex 临时拼出的自由文案。生成前必须先写入 `generation_drafted`，用户审核通过后再写入 `generation_draft_approved`。
 
 ### 9.3 State transition result
 

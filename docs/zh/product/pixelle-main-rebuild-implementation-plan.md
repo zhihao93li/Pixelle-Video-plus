@@ -242,6 +242,8 @@ pixelle_create_project
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
+pixelle_submit_generation_draft
+pixelle_approve_generation_draft
 pixelle_request_generation
 pixelle_record_publish
 pixelle_record_metrics
@@ -258,6 +260,8 @@ source.confirmed_by_user == true
 ```
 
 这表示 Codex 是入口，但不是绕过用户确认的状态写入器。
+
+生成链路还必须额外满足：Codex 先提交 `pixelle_submit_generation_draft`，把实际文案给用户审核；用户确认后再调用 `pixelle_approve_generation_draft`；最后 `pixelle_request_generation` 只能使用已批准草稿对应的 approval event，不能直接传入自由文案。
 
 插件工具只调用 `ops.service`，不直接写 SQLite。
 

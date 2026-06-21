@@ -17,6 +17,8 @@ class ExperimentStage(StrEnum):
 
 class OpsEventType(StrEnum):
     PREDICTION_LOCKED = "prediction_locked"
+    GENERATION_DRAFTED = "generation_drafted"
+    GENERATION_DRAFT_APPROVED = "generation_draft_approved"
     GENERATION_REQUESTED = "generation_requested"
     GENERATION_COMPLETED = "generation_completed"
     GENERATION_FAILED = "generation_failed"
