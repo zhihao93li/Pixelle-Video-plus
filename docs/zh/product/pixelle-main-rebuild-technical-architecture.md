@@ -878,9 +878,11 @@ pixelle_write_retro
 pixelle_write_memory
 ```
 
-`pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑和恢复必须先读取它；如果缺失、`protocol_version` 不是 `p0.7.20260621`、`conversation_contract_version` 不是 `p0.7.20260621`，或必需 conversation gates / intent routes 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
+`pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先读取它；如果缺失、`protocol_version` 不是 `p0.7b.20260621`、`conversation_contract_version` 不是 `p0.7b.20260621`、`conversation_contract.requires_capability_first` 不为 true，或必需 conversation gates / intent routes 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
 
 P0.7 的 `intent_routes` 覆盖：状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。它不是新的业务状态机，只是把 Codex 对话层的自然语言路由显式化，减少用户手写工具步骤的需要。
+
+P0.7-B 要求所有自然语言 route 都以 `pixelle_get_capabilities` 为第一工具。视频生成 route 还必须满足 `requires_user_pipeline_choice = true` 和 `default_pipeline_requires_user_acceptance = true`：默认 pipeline 只是推荐，不能在用户未明确接受时自动使用。
 
 `pixelle_request_generation` 只能从已批准的 generation draft 生成内容，不能直接接收 Codex 临时拼出的自由文案。生成前必须先写入 `generation_drafted`，用户审核通过后再写入 `generation_draft_approved`。
 
@@ -888,7 +890,7 @@ P0.7 的 `intent_routes` 覆盖：状态查看、内容推荐、模糊文案请�
 
 当用户只说“下一条”“写文案”“做这个主题”而没有明确内容形态时，Pixelle Codex Plugin 对话层必须先让用户选择：短视频字幕稿、图文笔记、只做 hook、或完整运营实验。不能擅自把自然语言请求解释成图文长文，也不能在用户只要审稿时提前写入实验状态。
 
-进入视频生成前，Codex 必须调用 `pixelle_list_generation_pipelines` 读取当前注册 pipeline，并让用户选择；默认推荐 `standard`，但不能自造 pipeline 名称。
+进入视频生成前，Codex 必须调用 `pixelle_list_generation_pipelines` 读取当前注册 pipeline，并让用户选择；默认推荐 `standard`，但不能自造 pipeline 名称，也不能把默认值当成用户已经选择。
 
 如果同主题或当前实验已经存在 `generation_completed`，Codex 不能直接调用 `pixelle_check_generation_asset` 把旧成片作为本次生成结果。必须先让用户选择：复用已有成片、用当前审核稿重新生成、或新建干净实验重新生成。选择重新生成时，必须创建新实验或绑定到尚未完成生成的干净实验，再提交当前审核稿。
 

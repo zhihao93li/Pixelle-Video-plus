@@ -102,7 +102,7 @@ pixelle_write_memory
 pixelle_get_current
 ```
 
-`pixelle_get_capabilities` 必须作为新线程、P0 验证、状态查看、续跑和恢复的第一步。当前期望 `protocol_version = p0.7.20260621`，`conversation_contract_version = p0.7.20260621`，并且 `content_shape_gate`、`existing_generation_gate`、`pipeline_selection_gate`、`draft_approval_gate`、`async_generation_status`、`asset_check_gate` 都为 true。缺失或不匹配时，说明当前 Codex 线程加载的是旧插件，必须停止并重新加载插件/新开线程。
+`pixelle_get_capabilities` 必须作为新线程、P0 验证、状态查看、续跑、推荐、生成和恢复的第一步。任何 `pixelle_get_current`、pipeline、写入或生成工具都不能在它之前调用。当前期望 `protocol_version = p0.7b.20260621`，`conversation_contract_version = p0.7b.20260621`，`conversation_contract.requires_capability_first = true`，并且 `content_shape_gate`、`existing_generation_gate`、`pipeline_selection_gate`、`draft_approval_gate`、`async_generation_status`、`asset_check_gate` 都为 true。缺失或不匹配时，说明当前 Codex 线程加载的是旧插件，必须停止并重新加载插件/新开线程。
 
 P0.7 起，capability 还必须返回 `intent_routes`，用于把自然语言请求收敛到稳定分支：
 
@@ -120,6 +120,8 @@ metrics_and_retro
 ```
 
 用户不应该再需要发送长工具清单。Codex 必须根据这些 route 决定是只读状态、推荐选题、先问内容形态、进入文案审核链、处理已有成片、记录发布证据，还是执行 mock P0 收口。
+
+P0.7-B 起，`video_generation.requires_user_pipeline_choice` 和 `video_generation.default_pipeline_requires_user_acceptance` 必须为 true。默认 pipeline 只是推荐，不等于用户已经选择；用户说“直接生成视频”只表示认可已审核稿进入生成，不表示自动选择 `standard`。除非同一句或前文明确指定已注册 pipeline，例如“用 standard 生成”，否则必须先问 pipeline。
 
 每个写工具都必须带 `source`。
 
@@ -139,10 +141,10 @@ Codex 来源必须满足：
 2. 插件不直接写 SQLite。
 3. 插件不调用 `web`。
 4. UI/API 不提供写入口。
-5. 新线程必须先通过 `pixelle_get_capabilities` 自检插件协议、对话契约和对话门禁。
+5. 新线程必须先通过 `pixelle_get_capabilities` 自检插件协议、对话契约和对话门禁，且任何 Pixelle Ops 工具不能早于 capability 调用。
 6. 没有 locked prediction 不能生成。
 7. 用户没有明确内容形态时，Codex 必须先问“短视频字幕稿 / 图文笔记 / 只做 hook / 完整运营实验”，不能擅自生成图文长文。
-8. 进入生成前必须调用 `pixelle_list_generation_pipelines`，让用户选择已注册 pipeline；默认推荐 `standard`。
+8. 进入生成前必须调用 `pixelle_list_generation_pipelines`，让用户选择已注册 pipeline；默认 pipeline 只能作为推荐，不能在用户未接受时自动使用。
 9. Codex 必须先提交 `generation_drafted` 文案草稿。
 10. 用户审核后必须记录 `generation_draft_approved`。
 11. `pixelle_request_generation` 只接受已批准 draft 的 approval event id，不能直接传任意文案。
@@ -228,6 +230,16 @@ uv run python scripts/p0_codex_smoke.py
 ```
 
 预期：要求已审核 draft、选择已注册 pipeline、提交 approval 后生成，不直接用自由文案生成。
+
+如果用户没有明确说 `standard`、`custom`、`asset_based` 等已注册 pipeline，预期必须先问：
+
+```text
+生成视频用哪个 pipeline？
+
+1. standard（推荐）
+2. custom
+3. asset_based
+```
 
 ```text
 这个主题已经有成片了，再生成一版

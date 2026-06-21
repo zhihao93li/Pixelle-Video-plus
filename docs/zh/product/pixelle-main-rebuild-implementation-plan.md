@@ -255,9 +255,11 @@ pixelle_write_retro
 pixelle_write_memory
 ```
 
-新线程、P0 验证、状态查看、续跑和恢复必须先调用 `pixelle_get_capabilities`。当前期望协议版本和对话契约版本都是 `p0.7.20260621`，并且内容形态选择、已有成片处理、pipeline 选择、文案审批、异步生成状态、资产检查这些 conversation gates 必须全部可用；否则停止，不走旧的直接生成流程。
+新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先调用 `pixelle_get_capabilities`。当前期望协议版本和对话契约版本都是 `p0.7b.20260621`，并且 `conversation_contract.requires_capability_first = true`，内容形态选择、已有成片处理、pipeline 选择、文案审批、异步生成状态、资产检查这些 conversation gates 必须全部可用；否则停止，不走旧的直接生成流程。
 
 P0.7 对话体验收口要求 capability 返回 `intent_routes`：状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。Codex 应该用这些 route 解释自然语言请求，避免要求用户发送长工具清单。
+
+P0.7-B 进一步要求生成前必须显式选择 pipeline。默认 pipeline 只是推荐，用户说“直接生成视频”不能自动解释为选择 `standard`；除非用户明确说“用 standard/custom/asset_based”，否则 Codex 必须先展示当前注册 pipeline 并等待用户选择。
 
 所有写工具都必须接收 `source` 字段。
 
@@ -269,7 +271,7 @@ source.confirmed_by_user == true
 
 这表示 Codex 是入口，但不是绕过用户确认的状态写入器。
 
-生成链路还必须额外满足：用户没有明确内容形态时，Codex 先问短视频字幕稿、图文笔记、只做 hook、还是完整运营实验；进入视频生成前调用 `pixelle_list_generation_pipelines` 让用户选择已注册 pipeline；Codex 先提交 `pixelle_submit_generation_draft`，把实际文案给用户审核；用户确认后再调用 `pixelle_approve_generation_draft`；最后 `pixelle_request_generation` 只能使用已批准草稿对应的 approval event，不能直接传入自由文案。
+生成链路还必须额外满足：用户没有明确内容形态时，Codex 先问短视频字幕稿、图文笔记、只做 hook、还是完整运营实验；进入视频生成前调用 `pixelle_list_generation_pipelines` 让用户选择已注册 pipeline，默认 pipeline 只作为推荐，不能自动代替用户选择；Codex 先提交 `pixelle_submit_generation_draft`，把实际文案给用户审核；用户确认后再调用 `pixelle_approve_generation_draft`；最后 `pixelle_request_generation` 只能使用已批准草稿对应的 approval event，不能直接传入自由文案。
 
 如果同主题或当前实验已经有 `generation_completed`，Codex 必须先问用户是复用旧成片、用当前审核稿重新生成、还是新建干净实验重新生成。只有选择复用时才能检查并返回旧资产；选择重新生成时必须新建实验或使用未完成生成的干净实验。
 

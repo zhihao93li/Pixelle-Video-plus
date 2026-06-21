@@ -12,8 +12,8 @@ from ops.service import OpsError, OpsService
 
 mcp = FastMCP("pixelle-ops")
 _BACKGROUND_GENERATION_TASKS: set[asyncio.Task] = set()
-PIXELLE_OPS_PROTOCOL_VERSION = "p0.7.20260621"
-PIXELLE_OPS_CONVERSATION_CONTRACT_VERSION = "p0.7.20260621"
+PIXELLE_OPS_PROTOCOL_VERSION = "p0.7b.20260621"
+PIXELLE_OPS_CONVERSATION_CONTRACT_VERSION = "p0.7b.20260621"
 PIXELLE_OPS_REQUIRED_TOOLS = (
     "pixelle_get_capabilities",
     "pixelle_get_current",
@@ -40,6 +40,11 @@ PIXELLE_OPS_CONVERSATION_GATES = {
     "async_generation_status": True,
     "asset_check_gate": True,
 }
+PIXELLE_OPS_CONVERSATION_CONTRACT = {
+    "requires_capability_first": True,
+    "first_tool": "pixelle_get_capabilities",
+    "no_tool_before_capabilities": True,
+}
 PIXELLE_OPS_INTENT_ROUTES = {
     "status_check": {
         "first_tools": ["pixelle_get_capabilities", "pixelle_get_current"],
@@ -65,6 +70,8 @@ PIXELLE_OPS_INTENT_ROUTES = {
     },
     "video_generation": {
         "requires_pipeline_selection": True,
+        "requires_user_pipeline_choice": True,
+        "default_pipeline_requires_user_acceptance": True,
         "requires_draft_approval": True,
         "writes_state": True,
     },
@@ -100,6 +107,7 @@ async def pixelle_get_capabilities() -> dict[str, Any]:
         "plugin": "pixelle-ops",
         "protocol_version": PIXELLE_OPS_PROTOCOL_VERSION,
         "conversation_contract_version": PIXELLE_OPS_CONVERSATION_CONTRACT_VERSION,
+        "conversation_contract": dict(PIXELLE_OPS_CONVERSATION_CONTRACT),
         "required_tools": list(PIXELLE_OPS_REQUIRED_TOOLS),
         "conversation_gates": dict(PIXELLE_OPS_CONVERSATION_GATES),
         "intent_routes": PIXELLE_OPS_INTENT_ROUTES,
