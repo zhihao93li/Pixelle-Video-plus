@@ -60,6 +60,38 @@ def test_generation_draft_rejects_instruction_wrappers(service):
         )
 
 
+def test_legacy_generated_experiment_next_action_records_publish(service):
+    project, cycle, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "completion_rate"},
+        source=_source(),
+    )
+    content_item = service.store.create_content_item(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        kind="video",
+        title="Legacy generated video",
+        status="generated",
+        asset_ref={"video_path": "output/legacy/final.mp4"},
+    )
+    service.store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=content_item["id"],
+        event_type="generation_completed",
+        payload={"asset_ref": {"video_path": "output/legacy/final.mp4"}},
+        source=_source(),
+    )
+    service.store.update_experiment_stage(experiment["id"], "generation_completed")
+
+    view = service.get_experiment_view(experiment["id"])
+
+    assert view["next_action"]["kind"] == "record_publish"
+
+
 def test_create_cycle_requires_existing_project(service):
     with pytest.raises(OpsError, match="project_not_found"):
         service.create_cycle(

@@ -566,12 +566,26 @@ def _next_action_for_view(view: dict[str, Any]) -> dict[str, Any]:
 def _next_action_for_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     if not _has_event(events, OpsEventType.PREDICTION_LOCKED):
         return {"kind": "lock_prediction", "blocked": False}
+    if _has_event(events, OpsEventType.GENERATION_COMPLETED):
+        return _next_action_after_generation_completed(events)
     if not _has_event(events, OpsEventType.GENERATION_DRAFTED):
         return {"kind": "submit_generation_draft", "blocked": False}
     if not _has_event(events, OpsEventType.GENERATION_DRAFT_APPROVED):
         return {"kind": "approve_generation_draft", "blocked": False}
     if not _has_event(events, OpsEventType.GENERATION_COMPLETED):
         return {"kind": "request_generation", "blocked": False}
+    if not _has_event(events, OpsEventType.PUBLISH_RECORDED):
+        return {"kind": "record_publish", "blocked": False}
+    if not _has_event(events, OpsEventType.METRICS_RECORDED):
+        return {"kind": "record_metrics", "blocked": False}
+    if not _has_event(events, OpsEventType.RETRO_WRITTEN, OpsEventType.OBSERVATION_WRITTEN):
+        return {"kind": "write_retro", "blocked": False}
+    if not _has_event(events, OpsEventType.MEMORY_WRITTEN):
+        return {"kind": "write_memory", "blocked": False}
+    return {"kind": "done", "blocked": False}
+
+
+def _next_action_after_generation_completed(events: list[dict[str, Any]]) -> dict[str, Any]:
     if not _has_event(events, OpsEventType.PUBLISH_RECORDED):
         return {"kind": "record_publish", "blocked": False}
     if not _has_event(events, OpsEventType.METRICS_RECORDED):
