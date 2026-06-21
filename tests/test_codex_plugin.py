@@ -17,7 +17,11 @@ def plugin_service(tmp_path, monkeypatch):
 
     store = OpsStore(tmp_path / "ops.db")
     store.init_db()
-    service = OpsService(store, generation_runner=fake_generation_runner)
+    service = OpsService(
+        store,
+        generation_runner=fake_generation_runner,
+        available_pipelines=("standard", "custom", "asset_based"),
+    )
     monkeypatch.setattr(server, "_build_service", lambda: service)
     return service
 
@@ -88,6 +92,45 @@ async def test_plugin_rejects_unconfirmed_codex_write(plugin_service):
     assert result["status"] == "error"
     assert result["error"]["code"] == "source_not_confirmed"
     assert result["next_action"]["blocked"] is True
+
+
+@pytest.mark.asyncio
+async def test_plugin_rejects_unknown_generation_pipeline(plugin_service):
+    project = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = await server.pixelle_create_cycle(
+        project_id=project["entity"]["id"],
+        name="Launch week",
+        goal="Validate demand",
+        source=_source(),
+    )
+    experiment = await server.pixelle_create_experiment(
+        project_id=project["entity"]["id"],
+        cycle_id=cycle["entity"]["id"],
+        title="Hook test",
+        hypothesis="Pain hook wins.",
+        source=_source(),
+    )
+    await server.pixelle_lock_prediction(
+        experiment_id=experiment["entity"]["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+
+    result = await server.pixelle_request_generation(
+        experiment_id=experiment["entity"]["id"],
+        text="Generate a video",
+        pipeline="xhs_short_video_v1",
+        source=_source(),
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "unknown_generation_pipeline"
+    assert "standard, custom, asset_based" in result["error"]["message"]
 
 
 @pytest.mark.asyncio

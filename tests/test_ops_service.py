@@ -73,6 +73,40 @@ async def test_generation_requires_locked_prediction(service):
 
 
 @pytest.mark.asyncio
+async def test_unknown_generation_pipeline_is_rejected_before_request_event(tmp_path):
+    async def fake_generation_runner(**kwargs):
+        raise AssertionError("generation runner should not be called for an unknown pipeline")
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(
+        store,
+        generation_runner=fake_generation_runner,
+        available_pipelines=("standard", "custom", "asset_based"),
+    )
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+
+    with pytest.raises(OpsError, match="unknown_generation_pipeline"):
+        await service.request_generation(
+            experiment_id=experiment["id"],
+            text="Generate a video",
+            pipeline="xhs_short_video_v1",
+            source=_source(),
+        )
+
+    event_types = [event["event_type"] for event in store.list_events_for_experiment(experiment["id"])]
+
+    assert event_types == ["prediction_locked"]
+    assert store.get_experiment(experiment["id"])["stage"] == "prediction_locked"
+    assert store.list_content_items_for_experiment(experiment["id"]) == []
+
+
+@pytest.mark.asyncio
 async def test_request_generation_records_context_and_completed_item(tmp_path):
     async def fake_generation_runner(**kwargs):
         return {"path": "output/petwoods.mp4", "input_text": kwargs["text"]}

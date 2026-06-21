@@ -36,7 +36,11 @@ async def _fake_generation_runner(**kwargs: Any) -> dict[str, Any]:
 async def run_smoke(db_path: Path) -> dict[str, Any]:
     store = OpsStore(db_path)
     store.init_db()
-    service = OpsService(store, generation_runner=_fake_generation_runner)
+    service = OpsService(
+        store,
+        generation_runner=_fake_generation_runner,
+        available_pipelines=("standard", "custom", "asset_based"),
+    )
     server._build_service = lambda: service
 
     async with Client(server.mcp) as client:
@@ -108,6 +112,18 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
                 "source": _source(),
             },
         )
+        unknown_pipeline = await client.call_tool(
+            "pixelle_request_generation",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "text": "Generate a short PetWoods validation video.",
+                "pipeline": "xhs_short_video_v1",
+                "source": _source(),
+            },
+        )
+        assert unknown_pipeline.data["status"] == "error"
+        assert unknown_pipeline.data["error"]["code"] == "unknown_generation_pipeline"
+
         generation = await client.call_tool(
             "pixelle_request_generation",
             {

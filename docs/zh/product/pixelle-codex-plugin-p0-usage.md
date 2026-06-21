@@ -109,10 +109,20 @@ Codex 来源必须满足：
 3. 插件不调用 `web`。
 4. UI/API 不提供写入口。
 5. 没有 locked prediction 不能生成。
-6. 生成失败必须写 `generation_failed`，不能伪成功。
-7. 生成成功必须能提取出 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 之一作为资产引用。
-8. 发布证据不能只有 confirmation note。
-9. metrics 必须挂到已发布 content item。
+6. 不能自造 pipeline 名称；必须使用 PixelleVideoCore 已注册 pipeline。
+7. 未知 pipeline 必须在写入 `generation_requested` 前返回 `unknown_generation_pipeline`。
+8. 生成失败必须写 `generation_failed`，不能伪成功。
+9. 生成成功必须能提取出 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 之一作为资产引用。
+10. 发布证据不能只有 confirmation note。
+11. metrics 必须挂到已发布 content item。
+
+当前已注册 pipeline：
+
+```text
+standard
+custom
+asset_based
+```
 
 ## 8. 错误返回
 

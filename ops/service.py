@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Iterable
 from typing import Any, Callable
 
 from ops.models import ExperimentStage, OpsEventType
@@ -20,10 +21,16 @@ GenerationRunner = Callable[..., Any]
 
 
 class OpsService:
-    def __init__(self, store: OpsStore | None = None, generation_runner: GenerationRunner | None = None):
+    def __init__(
+        self,
+        store: OpsStore | None = None,
+        generation_runner: GenerationRunner | None = None,
+        available_pipelines: Iterable[str] | None = None,
+    ):
         self.store = store or OpsStore()
         self.store.init_db()
         self.generation_runner = generation_runner
+        self.available_pipelines = tuple(dict.fromkeys(available_pipelines)) if available_pipelines is not None else None
 
     def create_project(
         self,
@@ -130,6 +137,7 @@ class OpsService:
         events = self.store.list_events_for_experiment(experiment_id)
         if not _has_event(events, OpsEventType.PREDICTION_LOCKED):
             raise OpsError("prediction_required", "Content generation requires a locked prediction.")
+        await self._require_known_pipeline(pipeline)
 
         operation_context = {
             "project_id": experiment["project_id"],
@@ -311,6 +319,28 @@ class OpsService:
             "events": self.store.list_events_for_experiment(experiment_id),
             "next_action": _next_action_for_events(self.store.list_events_for_experiment(experiment_id)),
         }
+
+    async def _require_known_pipeline(self, pipeline: str) -> None:
+        available_pipelines = await self._list_available_pipelines()
+        if available_pipelines is None or pipeline in available_pipelines:
+            return
+        available = ", ".join(available_pipelines)
+        raise OpsError(
+            "unknown_generation_pipeline",
+            f"Unknown pipeline: {pipeline!r}. Available pipelines: {available}.",
+        )
+
+    async def _list_available_pipelines(self) -> tuple[str, ...] | None:
+        if self.available_pipelines is not None:
+            return self.available_pipelines
+        if self.generation_runner is not None:
+            return None
+
+        from pixelle_video import pixelle_video
+
+        if not pixelle_video.generate_video:
+            await pixelle_video.initialize()
+        return tuple(pixelle_video.pipelines.keys())
 
     async def _run_generation(self, **kwargs: Any) -> dict[str, Any]:
         if self.generation_runner is None:
