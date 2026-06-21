@@ -102,7 +102,24 @@ pixelle_write_memory
 pixelle_get_current
 ```
 
-`pixelle_get_capabilities` 必须作为新线程、P0 验证、状态查看、续跑和恢复的第一步。当前期望 `protocol_version = p0.6.20260621`，并且 `content_shape_gate`、`existing_generation_gate`、`pipeline_selection_gate`、`draft_approval_gate`、`async_generation_status`、`asset_check_gate` 都为 true。缺失或不匹配时，说明当前 Codex 线程加载的是旧插件，必须停止并重新加载插件/新开线程。
+`pixelle_get_capabilities` 必须作为新线程、P0 验证、状态查看、续跑和恢复的第一步。当前期望 `protocol_version = p0.7.20260621`，`conversation_contract_version = p0.7.20260621`，并且 `content_shape_gate`、`existing_generation_gate`、`pipeline_selection_gate`、`draft_approval_gate`、`async_generation_status`、`asset_check_gate` 都为 true。缺失或不匹配时，说明当前 Codex 线程加载的是旧插件，必须停止并重新加载插件/新开线程。
+
+P0.7 起，capability 还必须返回 `intent_routes`，用于把自然语言请求收敛到稳定分支：
+
+```text
+status_check
+content_recommendation
+ambiguous_copy_request
+approved_copy_request
+full_operations_experiment
+video_generation
+existing_generation
+publish_evidence
+mock_p0_closeout
+metrics_and_retro
+```
+
+用户不应该再需要发送长工具清单。Codex 必须根据这些 route 决定是只读状态、推荐选题、先问内容形态、进入文案审核链、处理已有成片、记录发布证据，还是执行 mock P0 收口。
 
 每个写工具都必须带 `source`。
 
@@ -122,7 +139,7 @@ Codex 来源必须满足：
 2. 插件不直接写 SQLite。
 3. 插件不调用 `web`。
 4. UI/API 不提供写入口。
-5. 新线程必须先通过 `pixelle_get_capabilities` 自检插件协议和对话门禁。
+5. 新线程必须先通过 `pixelle_get_capabilities` 自检插件协议、对话契约和对话门禁。
 6. 没有 locked prediction 不能生成。
 7. 用户没有明确内容形态时，Codex 必须先问“短视频字幕稿 / 图文笔记 / 只做 hook / 完整运营实验”，不能擅自生成图文长文。
 8. 进入生成前必须调用 `pixelle_list_generation_pipelines`，让用户选择已注册 pipeline；默认推荐 `standard`。
@@ -183,3 +200,43 @@ uv run python scripts/p0_codex_smoke.py
 ```
 
 `scripts/p0_codex_smoke.py` 使用隔离临时 SQLite DB 和 fake generation runner，通过 FastMCP client 调用真实 `pixelle_*` 工具面，验证 Codex 插件链路和 P0 状态机。真实视频生成需要单独验收。
+
+## 10. P0.7 对话验收用例
+
+新线程加载 `@pixelle-ops` 后，用短话术验收对话路由：
+
+```text
+使用 @pixelle-ops，帮我看一下当前状态
+```
+
+预期：先自检 capability，再读取 current state，不写状态。
+
+```text
+使用 @pixelle-ops，下一条内容适合做什么？
+```
+
+预期：读取当前状态后给推荐，不创建实验。
+
+```text
+文案呢？
+```
+
+预期：如果内容形态不明确，先问短视频字幕稿、图文笔记、只做 hook、还是完整运营实验。
+
+```text
+用这版生成视频
+```
+
+预期：要求已审核 draft、选择已注册 pipeline、提交 approval 后生成，不直接用自由文案生成。
+
+```text
+这个主题已经有成片了，再生成一版
+```
+
+预期：先问复用已有成片、用当前审核稿重生成、还是新建干净实验。
+
+```text
+先 mock 跑完 P0 收口
+```
+
+预期：允许 mock 发布证据和 mock metrics，但必须显式标记 mock，不伪装真实发布。

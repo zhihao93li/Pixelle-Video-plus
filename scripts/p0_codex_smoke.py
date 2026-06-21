@@ -51,8 +51,11 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
         assert capabilities.data["status"] == "ok"
         assert capabilities.data["plugin"] == "pixelle-ops"
         assert capabilities.data["protocol_version"] == server.PIXELLE_OPS_PROTOCOL_VERSION
+        assert capabilities.data["conversation_contract_version"] == server.PIXELLE_OPS_CONVERSATION_CONTRACT_VERSION
         assert capabilities.data["conversation_gates"]["content_shape_gate"] is True
         assert capabilities.data["conversation_gates"]["existing_generation_gate"] is True
+        assert capabilities.data["intent_routes"]["ambiguous_copy_request"]["requires_user_choice"] is True
+        assert capabilities.data["intent_routes"]["video_generation"]["requires_draft_approval"] is True
         assert "pixelle_submit_generation_draft" in capabilities.data["required_tools"]
         assert "pixelle_approve_generation_draft" in capabilities.data["required_tools"]
 

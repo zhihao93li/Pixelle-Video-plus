@@ -255,7 +255,9 @@ pixelle_write_retro
 pixelle_write_memory
 ```
 
-新线程、P0 验证、状态查看、续跑和恢复必须先调用 `pixelle_get_capabilities`。当前期望协议版本是 `p0.6.20260621`，并且内容形态选择、已有成片处理、pipeline 选择、文案审批、异步生成状态、资产检查这些 conversation gates 必须全部可用；否则停止，不走旧的直接生成流程。
+新线程、P0 验证、状态查看、续跑和恢复必须先调用 `pixelle_get_capabilities`。当前期望协议版本和对话契约版本都是 `p0.7.20260621`，并且内容形态选择、已有成片处理、pipeline 选择、文案审批、异步生成状态、资产检查这些 conversation gates 必须全部可用；否则停止，不走旧的直接生成流程。
+
+P0.7 对话体验收口要求 capability 返回 `intent_routes`：状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。Codex 应该用这些 route 解释自然语言请求，避免要求用户发送长工具清单。
 
 所有写工具都必须接收 `source` 字段。
 

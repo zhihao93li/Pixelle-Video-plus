@@ -122,13 +122,23 @@ async def test_plugin_reports_capabilities(plugin_service):
 
     assert result["status"] == "ok"
     assert result["plugin"] == "pixelle-ops"
-    assert result["protocol_version"] == "p0.6.20260621"
+    assert result["protocol_version"] == "p0.7.20260621"
     assert "pixelle_get_capabilities" in result["required_tools"]
     assert "pixelle_submit_generation_draft" in result["required_tools"]
     assert "pixelle_approve_generation_draft" in result["required_tools"]
     assert result["conversation_gates"]["content_shape_gate"] is True
     assert result["conversation_gates"]["existing_generation_gate"] is True
     assert result["conversation_gates"]["pipeline_selection_gate"] is True
+    assert result["conversation_contract_version"] == "p0.7.20260621"
+    assert result["intent_routes"]["status_check"]["first_tools"] == [
+        "pixelle_get_capabilities",
+        "pixelle_get_current",
+    ]
+    assert result["intent_routes"]["content_recommendation"]["writes_state"] is False
+    assert result["intent_routes"]["ambiguous_copy_request"]["requires_user_choice"] is True
+    assert result["intent_routes"]["video_generation"]["requires_draft_approval"] is True
+    assert result["intent_routes"]["existing_generation"]["requires_reuse_decision"] is True
+    assert result["intent_routes"]["mock_p0_closeout"]["allows_mock_evidence"] is True
     assert result["next_action"]["kind"] == "route_user_request"
 
 

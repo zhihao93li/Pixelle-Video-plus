@@ -170,7 +170,7 @@ pixelle_write_memory
 职责：
 
 1. 把 Codex 的结构化工具调用转成 Pixelle Ops service 调用。
-2. 通过 `pixelle_get_capabilities` 暴露当前插件协议版本、必备工具和对话门禁，便于新线程先判断是否加载了正确插件。
+2. 通过 `pixelle_get_capabilities` 暴露当前插件协议版本、对话契约版本、必备工具、对话门禁和 intent routes，便于新线程先判断是否加载了正确插件，并把自然语言请求路由到稳定分支。
 3. 为每次写入附带 `source`、`skill`、`workspace_path`、`confirmed_by_user`。
 4. 返回下一步动作和阻断原因。
 5. 不直接写 SQLite。
@@ -878,7 +878,9 @@ pixelle_write_retro
 pixelle_write_memory
 ```
 
-`pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑和恢复必须先读取它；如果缺失、`protocol_version` 不是 `p0.6.20260621`，或必需 conversation gates 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
+`pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑和恢复必须先读取它；如果缺失、`protocol_version` 不是 `p0.7.20260621`、`conversation_contract_version` 不是 `p0.7.20260621`，或必需 conversation gates / intent routes 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
+
+P0.7 的 `intent_routes` 覆盖：状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。它不是新的业务状态机，只是把 Codex 对话层的自然语言路由显式化，减少用户手写工具步骤的需要。
 
 `pixelle_request_generation` 只能从已批准的 generation draft 生成内容，不能直接接收 Codex 临时拼出的自由文案。生成前必须先写入 `generation_drafted`，用户审核通过后再写入 `generation_draft_approved`。
 
