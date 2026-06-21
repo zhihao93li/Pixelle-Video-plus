@@ -1,0 +1,207 @@
+"""Run a local Pixelle Ops P0 smoke loop through the MCP tool surface."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any
+
+from fastmcp import Client
+
+from codex_plugin import server
+from ops.service import OpsService
+from ops.store import OpsStore
+
+
+def _source() -> dict[str, Any]:
+    return {
+        "kind": "codex",
+        "skill": "cheat-on-content",
+        "confirmed_by_user": True,
+    }
+
+
+async def _fake_generation_runner(**kwargs: Any) -> dict[str, Any]:
+    return {
+        "path": "output/p0-codex-smoke.mp4",
+        "media_type": "video",
+        "task_id": "p0-codex-smoke",
+    }
+
+
+async def run_smoke(db_path: Path) -> dict[str, Any]:
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store, generation_runner=_fake_generation_runner)
+    server._build_service = lambda: service
+
+    async with Client(server.mcp) as client:
+        unconfirmed = await client.call_tool(
+            "pixelle_create_project",
+            {
+                "name": "Rejected project",
+                "product": "PetWoods",
+                "channel": "xiaohongshu",
+                "source": {
+                    "kind": "codex",
+                    "skill": "cheat-on-content",
+                    "confirmed_by_user": False,
+                },
+            },
+        )
+        assert unconfirmed.data["status"] == "error"
+        assert unconfirmed.data["error"]["code"] == "source_not_confirmed"
+
+        project = await client.call_tool(
+            "pixelle_create_project",
+            {
+                "name": "PetWoods P0 Smoke",
+                "product": "PetWoods",
+                "channel": "xiaohongshu",
+                "description": "Disposable P0 Codex smoke project.",
+                "source": _source(),
+            },
+        )
+        cycle = await client.call_tool(
+            "pixelle_create_cycle",
+            {
+                "project_id": project.data["entity"]["id"],
+                "name": "P0 validation",
+                "goal": "Verify Codex plugin and Pixelle Ops state loop.",
+                "source": _source(),
+            },
+        )
+        experiment = await client.call_tool(
+            "pixelle_create_experiment",
+            {
+                "project_id": project.data["entity"]["id"],
+                "cycle_id": cycle.data["entity"]["id"],
+                "title": "Hook test",
+                "hypothesis": "A concrete pain hook should outperform a generic intro.",
+                "source": _source(),
+            },
+        )
+
+        blocked_generation = await client.call_tool(
+            "pixelle_request_generation",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "text": "Generate a short PetWoods validation video.",
+                "source": _source(),
+            },
+        )
+        assert blocked_generation.data["status"] == "error"
+        assert blocked_generation.data["error"]["code"] == "prediction_required"
+
+        await client.call_tool(
+            "pixelle_lock_prediction",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "prediction": {
+                    "expected_metric": "save_rate",
+                    "expected_direction": "above_baseline",
+                },
+                "source": _source(),
+            },
+        )
+        generation = await client.call_tool(
+            "pixelle_request_generation",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "text": "Generate a short PetWoods validation video.",
+                "title": "PetWoods hook validation",
+                "source": _source(),
+            },
+        )
+        content_item_id = generation.data["content_item"]["id"]
+        publish = await client.call_tool(
+            "pixelle_record_publish",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "content_item_id": content_item_id,
+                "evidence": {
+                    "platform_url": "https://example.com/petwoods/p0-smoke",
+                },
+                "source": _source(),
+            },
+        )
+        await client.call_tool(
+            "pixelle_record_metrics",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "content_item_id": content_item_id,
+                "metrics": {
+                    "views": 100,
+                    "likes": 8,
+                    "saves": 12,
+                },
+                "source": _source(),
+            },
+        )
+        await client.call_tool(
+            "pixelle_write_retro",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "retro": {
+                    "summary": "P0 smoke completed through the plugin tool surface.",
+                },
+                "source": _source(),
+            },
+        )
+        await client.call_tool(
+            "pixelle_write_memory",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "memory": {
+                    "learning": "Pixelle Ops P0 plugin smoke can complete the state loop.",
+                },
+                "source": _source(),
+            },
+        )
+        current = await client.call_tool("pixelle_get_current", {})
+
+    assert publish.data["next_action"]["kind"] == "record_metrics"
+    assert current.data["experiment"]["id"] == experiment.data["entity"]["id"]
+    assert current.data["next_action"]["kind"] == "done"
+
+    return {
+        "status": "ok",
+        "db_path": str(db_path),
+        "project_id": project.data["entity"]["id"],
+        "cycle_id": cycle.data["entity"]["id"],
+        "experiment_id": experiment.data["entity"]["id"],
+        "content_item_id": content_item_id,
+        "current_next_action": current.data["next_action"],
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--db",
+        type=Path,
+        help="SQLite DB path. Defaults to a temporary isolated database.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    if args.db:
+        args.db.parent.mkdir(parents=True, exist_ok=True)
+        os.environ["PIXELLE_OPS_DB_PATH"] = str(args.db)
+        result = asyncio.run(run_smoke(args.db))
+    else:
+        with TemporaryDirectory(prefix="pixelle-p0-smoke-") as tmp_dir:
+            db_path = Path(tmp_dir) / "ops.db"
+            os.environ["PIXELLE_OPS_DB_PATH"] = str(db_path)
+            result = asyncio.run(run_smoke(db_path))
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

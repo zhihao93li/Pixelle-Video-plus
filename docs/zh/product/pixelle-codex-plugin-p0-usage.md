@@ -10,7 +10,31 @@ Pixelle Codex Plugin 是 P0 的运营写入口。
 
 Codex 通过插件工具发起运营动作；Pixelle Ops 保存状态和证据；Pixelle UI/API 只读展示结果。
 
-## 2. 本地启动
+## 2. 本地 Codex Plugin
+
+当前已经提供个人本地插件包：
+
+```text
+/Users/zhihaoli/plugins/pixelle-ops
+```
+
+个人 marketplace：
+
+```text
+/Users/zhihaoli/.agents/plugins/marketplace.json
+```
+
+插件包含：
+
+```text
+.codex-plugin/plugin.json
+.mcp.json
+skills/pixelle-ops/SKILL.md
+```
+
+Codex app 中查看或启用该插件后，新线程会加载 `pixelle-ops` skill 和 Pixelle Ops MCP 工具。
+
+## 3. 本地 MCP 启动
 
 在项目根目录运行：
 
@@ -20,9 +44,9 @@ uv run python -m codex_plugin.server
 
 该命令以 stdio MCP server 形式启动 Pixelle 工具入口。
 
-P0 不提供远程插件发布包，不提供 HTTP 写入口。
+P0 不提供远程插件发布包，不提供 HTTP 写入口。正式使用优先走本地 Codex Plugin；该命令主要用于手动调试 MCP server。
 
-## 3. 状态库
+## 4. 状态库
 
 默认状态库：
 
@@ -36,7 +60,7 @@ data/ops.db
 PIXELLE_OPS_DB_PATH=/tmp/pixelle-ops.db uv run python -m codex_plugin.server
 ```
 
-## 4. 工具清单
+## 5. 工具清单
 
 ```text
 pixelle_get_current
@@ -51,7 +75,7 @@ pixelle_write_retro
 pixelle_write_memory
 ```
 
-## 5. 最小闭环顺序
+## 6. 最小闭环顺序
 
 ```text
 pixelle_create_project
@@ -78,7 +102,7 @@ Codex 来源必须满足：
 }
 ```
 
-## 6. P0 边界
+## 7. P0 边界
 
 1. 插件只调用 `ops.service`。
 2. 插件不直接写 SQLite。
@@ -90,7 +114,7 @@ Codex 来源必须满足：
 8. 发布证据不能只有 confirmation note。
 9. metrics 必须挂到已发布 content item。
 
-## 7. 错误返回
+## 8. 错误返回
 
 插件工具遇到业务错误时，不把 Python exception 暴露给 Codex，而是返回稳定结构：
 
@@ -111,9 +135,12 @@ Codex 来源必须满足：
 
 API 遇到业务错误时，HTTP status code 反映请求结果，`detail.error.code` 保留同一套业务错误码。
 
-## 8. 本地验证
+## 9. 本地验证
 
 ```bash
 uv run pytest tests/test_codex_plugin.py -q
 uv run pytest tests/test_ops_store.py tests/test_ops_service.py tests/test_codex_plugin.py tests/test_ops_api.py -q
+uv run python scripts/p0_codex_smoke.py
 ```
+
+`scripts/p0_codex_smoke.py` 使用隔离临时 SQLite DB 和 fake generation runner，通过 FastMCP client 调用真实 `pixelle_*` 工具面，验证 Codex 插件链路和 P0 状态机。真实视频生成需要单独验收。
