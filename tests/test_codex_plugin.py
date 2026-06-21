@@ -1,4 +1,5 @@
 import pytest
+from fastmcp import Client
 
 from codex_plugin import server
 from ops.service import OpsError, OpsService
@@ -84,3 +85,38 @@ async def test_plugin_rejects_unconfirmed_codex_write(plugin_service):
             channel="xiaohongshu",
             source=_source(confirmed=False),
         )
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_client_can_call_pixelle_tools(plugin_service):
+    async with Client(server.mcp) as client:
+        tools = await client.list_tools()
+        tool_names = {tool.name for tool in tools}
+
+        result = await client.call_tool(
+            "pixelle_create_project",
+            {
+                "name": "PetWoods",
+                "product": "PetWoods",
+                "channel": "xiaohongshu",
+                "source": _source(),
+            },
+        )
+
+    assert "pixelle_create_project" in tool_names
+    assert result.data["entity"]["kind"] == "operating_project"
+    assert result.data["next_action"]["kind"] == "create_cycle"
+
+
+def test_plugin_main_runs_stdio_transport(monkeypatch):
+    captured = {}
+
+    def fake_run(*, transport, show_banner):
+        captured["transport"] = transport
+        captured["show_banner"] = show_banner
+
+    monkeypatch.setattr(server.mcp, "run", fake_run)
+
+    server.main()
+
+    assert captured == {"transport": "stdio", "show_banner": False}

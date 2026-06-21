@@ -21,7 +21,6 @@ async def pixelle_get_current() -> dict[str, Any]:
 
 
 async def pixelle_create_project(
-    *,
     name: str,
     product: str,
     channel: str,
@@ -39,7 +38,6 @@ async def pixelle_create_project(
 
 
 async def pixelle_create_cycle(
-    *,
     project_id: str,
     name: str,
     goal: str,
@@ -59,7 +57,6 @@ async def pixelle_create_cycle(
 
 
 async def pixelle_create_experiment(
-    *,
     project_id: str,
     cycle_id: str,
     title: str,
@@ -77,7 +74,6 @@ async def pixelle_create_experiment(
 
 
 async def pixelle_lock_prediction(
-    *,
     experiment_id: str,
     prediction: dict[str, Any],
     source: dict[str, Any],
@@ -90,7 +86,6 @@ async def pixelle_lock_prediction(
 
 
 async def pixelle_request_generation(
-    *,
     experiment_id: str,
     text: str,
     source: dict[str, Any],
@@ -111,7 +106,6 @@ async def pixelle_request_generation(
 
 
 async def pixelle_record_publish(
-    *,
     experiment_id: str,
     evidence: dict[str, Any],
     source: dict[str, Any],
@@ -126,7 +120,6 @@ async def pixelle_record_publish(
 
 
 async def pixelle_record_metrics(
-    *,
     experiment_id: str,
     metrics: dict[str, Any],
     source: dict[str, Any],
@@ -141,7 +134,6 @@ async def pixelle_record_metrics(
 
 
 async def pixelle_write_retro(
-    *,
     experiment_id: str,
     retro: dict[str, Any],
     source: dict[str, Any],
@@ -154,7 +146,6 @@ async def pixelle_write_retro(
 
 
 async def pixelle_write_memory(
-    *,
     experiment_id: str,
     memory: dict[str, Any],
     source: dict[str, Any],
@@ -179,3 +170,11 @@ for tool in (
     pixelle_write_memory,
 ):
     mcp.tool(tool)
+
+
+def main() -> None:
+    mcp.run(transport="stdio", show_banner=False)
+
+
+if __name__ == "__main__":
+    main()

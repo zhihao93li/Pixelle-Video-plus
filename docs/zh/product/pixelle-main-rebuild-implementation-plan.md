@@ -445,6 +445,7 @@ codex_plugin/server.py
 4. 不直接写 SQLite。
 5. 不调用 `web`。
 6. P0 使用本地 MCP/FastMCP server 形态，不做发布市场或远程插件包装。
+7. 本地启动和调用说明写入 `docs/zh/product/pixelle-codex-plugin-p0-usage.md`。
 
 验收：
 

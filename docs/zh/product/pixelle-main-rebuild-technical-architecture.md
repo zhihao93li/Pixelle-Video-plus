@@ -169,6 +169,8 @@ pixelle_write_memory
 4. 不直接写 SQLite。
 5. 不读取或修改 `pixelle_video` 内部状态。
 
+本地启动方式见 `docs/zh/product/pixelle-codex-plugin-p0-usage.md`。P0 固定为 stdio MCP server，不提供远程插件发布包。
+
 后续如果需要正式插件包或 MCP 发布形态，只包装这一层，不改变 Pixelle Ops 内核。
 
 ### 3.3 Pixelle Ops 拥有的数据
