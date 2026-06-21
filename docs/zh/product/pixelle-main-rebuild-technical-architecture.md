@@ -871,6 +871,8 @@ pixelle_write_memory
 
 `pixelle_request_generation` 只能从已批准的 generation draft 生成内容，不能直接接收 Codex 临时拼出的自由文案。生成前必须先写入 `generation_drafted`，用户审核通过后再写入 `generation_draft_approved`。
 
+`generation_drafted.payload.text` 只能保存最终上屏字幕或口播稿。生成说明、发布标题、发布正文、标签等辅助字段必须放在其他结构化字段或后续发布证据里，不能混入生成正文。
+
 ### 9.3 State transition result
 
 所有 Pixelle Codex Plugin 写工具都返回 state transition result：

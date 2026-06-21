@@ -136,6 +136,7 @@ class OpsService:
         events = self.store.list_events_for_experiment(experiment_id)
         if not _has_event(events, OpsEventType.PREDICTION_LOCKED):
             raise OpsError("prediction_required", "Generation draft requires a locked prediction.")
+        _require_clean_generation_draft_text(text)
         event = self.store.append_event(
             project_id=experiment["project_id"],
             cycle_id=experiment["cycle_id"],
@@ -187,6 +188,7 @@ class OpsService:
         events = self.store.list_events_for_experiment(experiment_id)
         if not _has_event(events, OpsEventType.PREDICTION_LOCKED):
             raise OpsError("prediction_required", "Content generation requires a locked prediction.")
+        _require_generation_request_window(events)
         draft = _approved_draft_for_generation(events, approved_draft_id)
         if draft is None:
             raise OpsError("approved_draft_required", "Content generation requires an approved generation draft.")
@@ -429,6 +431,52 @@ def _require_confirmed_source(source: dict[str, Any]) -> None:
 def _has_event(events: list[dict[str, Any]], *event_types: OpsEventType) -> bool:
     values = {event_type.value for event_type in event_types}
     return any(event["event_type"] in values for event in events)
+
+
+def _require_clean_generation_draft_text(text: str) -> None:
+    if not text.strip():
+        raise OpsError("generation_draft_invalid", "Generation draft text cannot be empty.")
+
+    blocked_markers = (
+        "【视频目标】",
+        "【内容形式】",
+        "【屏幕字幕版】",
+        "【发布标题】",
+        "【发布正文】",
+        "【标签】",
+        "【时长】",
+        "【安全边界】",
+        "【成片结构】",
+        "【字幕文案】",
+    )
+    found = [marker for marker in blocked_markers if marker in text]
+    if found:
+        markers = ", ".join(found)
+        raise OpsError(
+            "generation_draft_invalid",
+            f"Generation draft text must be the final script/subtitles only. Remove wrapper sections: {markers}.",
+        )
+
+
+def _require_generation_request_window(events: list[dict[str, Any]]) -> None:
+    if _has_event(events, OpsEventType.GENERATION_COMPLETED):
+        raise OpsError("generation_already_completed", "Generation is already completed for this experiment.")
+
+    latest_generation_event = next(
+        (
+            event
+            for event in reversed(events)
+            if event["event_type"]
+            in {
+                OpsEventType.GENERATION_REQUESTED.value,
+                OpsEventType.GENERATION_COMPLETED.value,
+                OpsEventType.GENERATION_FAILED.value,
+            }
+        ),
+        None,
+    )
+    if latest_generation_event and latest_generation_event["event_type"] == OpsEventType.GENERATION_REQUESTED.value:
+        raise OpsError("generation_in_progress", "Generation is already requested and has not completed or failed.")
 
 
 def _find_event(

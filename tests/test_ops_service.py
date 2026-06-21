@@ -40,6 +40,26 @@ def _seed_experiment(service):
     return project, cycle, experiment
 
 
+def test_generation_draft_rejects_instruction_wrappers(service):
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "completion_rate"},
+        source=_source(),
+    )
+
+    with pytest.raises(OpsError, match="generation_draft_invalid"):
+        service.submit_generation_draft(
+            experiment_id=experiment["id"],
+            text=(
+                "【视频目标】生成一条适合小红书的短视频。\n"
+                "【屏幕字幕版】\n"
+                "母猫打滚就是想配了吗？\n还真不是。"
+            ),
+            source=_source(),
+        )
+
+
 def test_create_cycle_requires_existing_project(service):
     with pytest.raises(OpsError, match="project_not_found"):
         service.create_cycle(
@@ -193,6 +213,88 @@ async def test_generation_requires_an_approved_draft(tmp_path):
 
     assert event_types == ["prediction_locked", "generation_drafted"]
     assert store.list_content_items_for_experiment(experiment["id"]) == []
+
+
+@pytest.mark.asyncio
+async def test_generation_request_blocks_duplicate_in_progress_event(tmp_path):
+    async def fake_generation_runner(**kwargs):
+        raise AssertionError("generation runner should not be called while generation is already in progress")
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    project, cycle, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="母猫打滚就是想配了吗？\n还真不是。",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+    store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        event_type="generation_requested",
+        payload={"text": "already running"},
+        source=_source(),
+    )
+
+    with pytest.raises(OpsError, match="generation_in_progress"):
+        await service.request_generation(
+            experiment_id=experiment["id"],
+            approved_draft_id=approval["event"]["id"],
+            source=_source(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_generation_request_blocks_completed_experiment(tmp_path):
+    async def fake_generation_runner(**kwargs):
+        raise AssertionError("generation runner should not be called after generation completed")
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    project, cycle, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="母猫打滚就是想配了吗？\n还真不是。",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+    store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        event_type="generation_completed",
+        payload={"asset_ref": {"video_path": "output/final.mp4"}},
+        source=_source(),
+    )
+
+    with pytest.raises(OpsError, match="generation_already_completed"):
+        await service.request_generation(
+            experiment_id=experiment["id"],
+            approved_draft_id=approval["event"]["id"],
+            source=_source(),
+        )
 
 
 @pytest.mark.asyncio

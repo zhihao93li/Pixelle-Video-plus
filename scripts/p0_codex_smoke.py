@@ -111,6 +111,18 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
                 "source": _source(),
             },
         )
+        invalid_draft_text = await client.call_tool(
+            "pixelle_submit_generation_draft",
+            {
+                "experiment_id": experiment.data["entity"]["id"],
+                "text": "【视频目标】生成短视频。\n【屏幕字幕版】\nGenerate a short PetWoods validation video.",
+                "pipeline": "standard",
+                "source": _source(),
+            },
+        )
+        assert invalid_draft_text.data["status"] == "error"
+        assert invalid_draft_text.data["error"]["code"] == "generation_draft_invalid"
+
         unapproved_draft = await client.call_tool(
             "pixelle_submit_generation_draft",
             {

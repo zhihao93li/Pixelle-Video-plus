@@ -263,6 +263,8 @@ source.confirmed_by_user == true
 
 生成链路还必须额外满足：Codex 先提交 `pixelle_submit_generation_draft`，把实际文案给用户审核；用户确认后再调用 `pixelle_approve_generation_draft`；最后 `pixelle_request_generation` 只能使用已批准草稿对应的 approval event，不能直接传入自由文案。
 
+`pixelle_submit_generation_draft` 的 `text` 必须是最终上屏字幕或口播稿，不允许包含 `【视频目标】`、`【内容形式】`、`【发布标题】`、`【发布正文】`、`【标签】` 等生成说明或发布字段。
+
 插件工具只调用 `ops.service`，不直接写 SQLite。
 
 ### 7.2 UI query API
@@ -393,6 +395,8 @@ uv run pytest tests/test_ops_store.py -q
 4. 成功后记录 `generation_completed` event。
 5. 失败时记录 `generation_failed` event，保留失败信息，不生成 content item，不伪成功。
 6. 生成成功必须能提取资产引用；没有 `path`、`video_path`、`url`、`asset_url` 或 `output_path` 时仍按失败处理。
+7. 如果已有未完成的 `generation_requested`，返回 `generation_in_progress`，不能重复发起生成。
+8. 如果已有 `generation_completed`，返回 `generation_already_completed`，不能在同一实验里静默重生成。
 
 注意：
 

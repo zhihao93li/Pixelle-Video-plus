@@ -202,6 +202,43 @@ async def test_plugin_requires_approved_generation_draft(plugin_service):
 
 
 @pytest.mark.asyncio
+async def test_plugin_rejects_instruction_wrapped_generation_draft(plugin_service):
+    project = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = await server.pixelle_create_cycle(
+        project_id=project["entity"]["id"],
+        name="Launch week",
+        goal="Validate demand",
+        source=_source(),
+    )
+    experiment = await server.pixelle_create_experiment(
+        project_id=project["entity"]["id"],
+        cycle_id=cycle["entity"]["id"],
+        title="Hook test",
+        hypothesis="Pain hook wins.",
+        source=_source(),
+    )
+    await server.pixelle_lock_prediction(
+        experiment_id=experiment["entity"]["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+
+    result = await server.pixelle_submit_generation_draft(
+        experiment_id=experiment["entity"]["id"],
+        text="【视频目标】生成短视频。\n【屏幕字幕版】\n母猫打滚就是想配了吗？",
+        source=_source(),
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "generation_draft_invalid"
+
+
+@pytest.mark.asyncio
 async def test_fastmcp_client_can_call_pixelle_tools(plugin_service):
     async with Client(server.mcp) as client:
         tools = await client.list_tools()
