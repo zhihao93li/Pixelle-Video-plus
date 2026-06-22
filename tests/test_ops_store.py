@@ -59,7 +59,7 @@ def test_store_initializes_entities_events_and_current_view(tmp_path):
     assert view["content_items"][0]["asset_ref"]["path"] == "output/video.mp4"
 
 
-def test_store_supports_social_accounts_and_explicit_current_context(tmp_path):
+def test_store_supports_channel_accounts_and_explicit_current_context(tmp_path):
     store = OpsStore(tmp_path / "ops.db")
     store.init_db()
 
@@ -82,7 +82,7 @@ def test_store_supports_social_accounts_and_explicit_current_context(tmp_path):
         hypothesis="Cat hook wins.",
         source=_source(),
     )
-    pet_account = store.create_social_account(
+    pet_account = store.create_channel_account(
         project_id=petwoods["id"],
         platform="xiaohongshu",
         account_name="PetWoods 宠物森友会",
@@ -114,10 +114,10 @@ def test_store_supports_social_accounts_and_explicit_current_context(tmp_path):
     )
 
     projects = store.list_projects()
-    accounts = store.list_social_accounts(project_id=petwoods["id"])
+    accounts = store.list_channel_accounts(project_id=petwoods["id"])
     default_view = store.get_current_view()
     pet_view = store.get_current_view(project_id=petwoods["id"])
-    account_view = store.get_current_view(account_id=pet_account["id"])
+    account_view = store.get_current_view(channel_account_id=pet_account["id"])
 
     assert [project["name"] for project in projects] == ["PetWoods", "Other Brand"]
     assert accounts[0]["account_handle"] == "petwoods"
@@ -126,8 +126,8 @@ def test_store_supports_social_accounts_and_explicit_current_context(tmp_path):
     assert default_view["context"]["selection"] == "latest_project"
     assert pet_view["project"]["id"] == petwoods["id"]
     assert pet_view["experiment"]["id"] == pet_experiment["id"]
-    assert pet_view["social_accounts"][0]["id"] == pet_account["id"]
+    assert pet_view["channel_accounts"][0]["id"] == pet_account["id"]
     assert pet_view["context"]["selection"] == "explicit_project"
     assert account_view["project"]["id"] == petwoods["id"]
-    assert account_view["context"]["account_id"] == pet_account["id"]
-    assert account_view["context"]["selection"] == "explicit_account"
+    assert account_view["context"]["channel_account_id"] == pet_account["id"]
+    assert account_view["context"]["selection"] == "explicit_channel_account"

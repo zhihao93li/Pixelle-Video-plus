@@ -9,6 +9,8 @@ class OpsCurrentResponse(BaseModel):
     project: dict[str, Any] | None = None
     cycle: dict[str, Any] | None = None
     experiment: dict[str, Any] | None = None
+    channel_accounts: list[dict[str, Any]] = Field(default_factory=list)
+    selected_channel_account: dict[str, Any] | None = None
     social_accounts: list[dict[str, Any]] = Field(default_factory=list)
     selected_social_account: dict[str, Any] | None = None
     context: dict[str, Any] = Field(default_factory=dict)

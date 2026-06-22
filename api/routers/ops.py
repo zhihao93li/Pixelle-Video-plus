@@ -9,9 +9,17 @@ router = APIRouter(prefix="/ops", tags=["Ops"])
 
 
 @router.get("/current", response_model=OpsCurrentResponse)
-async def get_current_ops_view(project_id: str | None = None, account_id: str | None = None):
+async def get_current_ops_view(
+    project_id: str | None = None,
+    channel_account_id: str | None = None,
+    account_id: str | None = None,
+):
     try:
-        return OpsService().current_view(project_id=project_id, account_id=account_id)
+        return OpsService().current_view(
+            project_id=project_id,
+            channel_account_id=channel_account_id,
+            account_id=account_id,
+        )
     except OpsError as exc:
         _raise_ops_error(exc)
 

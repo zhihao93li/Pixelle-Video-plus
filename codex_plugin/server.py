@@ -12,14 +12,14 @@ from ops.service import OpsError, OpsService
 
 mcp = FastMCP("pixelle-ops")
 _BACKGROUND_GENERATION_TASKS: set[asyncio.Task] = set()
-PIXELLE_OPS_PROTOCOL_VERSION = "p0.8.20260622"
-PIXELLE_OPS_CONVERSATION_CONTRACT_VERSION = "p0.8.20260622"
+PIXELLE_OPS_PROTOCOL_VERSION = "p0.9.20260622"
+PIXELLE_OPS_CONVERSATION_CONTRACT_VERSION = "p0.9.20260622"
 PIXELLE_OPS_REQUIRED_TOOLS = (
     "pixelle_get_capabilities",
     "pixelle_list_projects",
     "pixelle_get_current",
     "pixelle_create_project",
-    "pixelle_create_social_account",
+    "pixelle_create_channel_account",
     "pixelle_create_cycle",
     "pixelle_create_experiment",
     "pixelle_lock_prediction",
@@ -35,8 +35,8 @@ PIXELLE_OPS_REQUIRED_TOOLS = (
     "pixelle_write_memory",
 )
 PIXELLE_OPS_CONVERSATION_GATES = {
-    "project_context_gate": True,
-    "social_account_context_gate": True,
+    "project_selection_gate": True,
+    "channel_account_gate": True,
     "content_shape_gate": True,
     "existing_generation_gate": True,
     "pipeline_selection_gate": True,
@@ -50,8 +50,13 @@ PIXELLE_OPS_CONVERSATION_CONTRACT = {
     "no_tool_before_capabilities": True,
 }
 PIXELLE_OPS_INTENT_ROUTES = {
-    "project_context_selection": {
+    "project_selection": {
         "required_when_multiple_projects": True,
+        "first_tools": ["pixelle_get_capabilities", "pixelle_list_projects"],
+        "writes_state": False,
+    },
+    "channel_account_selection": {
+        "required_when_multiple_accounts": True,
         "first_tools": ["pixelle_get_capabilities", "pixelle_list_projects"],
         "writes_state": False,
     },
@@ -61,7 +66,7 @@ PIXELLE_OPS_INTENT_ROUTES = {
     },
     "content_recommendation": {
         "first_tools": ["pixelle_get_capabilities", "pixelle_get_current"],
-        "requires_project_context": True,
+        "requires_project_or_channel_account": True,
         "writes_state": False,
     },
     "ambiguous_copy_request": {
@@ -139,10 +144,17 @@ async def pixelle_list_projects() -> dict[str, Any]:
 
 async def pixelle_get_current(
     project_id: str | None = None,
+    channel_account_id: str | None = None,
     account_id: str | None = None,
 ) -> dict[str, Any]:
     """Return the current Pixelle operations state."""
-    return await _run_tool(lambda: _build_service().current_view(project_id=project_id, account_id=account_id))
+    return await _run_tool(
+        lambda: _build_service().current_view(
+            project_id=project_id,
+            channel_account_id=channel_account_id,
+            account_id=account_id,
+        )
+    )
 
 
 async def pixelle_create_project(
@@ -169,7 +181,7 @@ async def pixelle_create_project(
     return await _run_tool(action)
 
 
-async def pixelle_create_social_account(
+async def pixelle_create_channel_account(
     project_id: str,
     platform: str,
     account_name: str,
@@ -180,7 +192,7 @@ async def pixelle_create_social_account(
     credential_ref: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     def action():
-        social_account = _build_service().create_social_account(
+        channel_account = _build_service().create_channel_account(
             project_id=project_id,
             platform=platform,
             account_name=account_name,
@@ -192,11 +204,34 @@ async def pixelle_create_social_account(
         )
         return {
             "status": "ok",
-            "entity": {"kind": "social_account", **social_account},
+            "entity": {"kind": "channel_account", **channel_account},
             "next_action": {"kind": "select_project", "blocked": False},
         }
 
     return await _run_tool(action)
+
+
+async def pixelle_create_social_account(
+    project_id: str,
+    platform: str,
+    account_name: str,
+    source: dict[str, Any],
+    account_handle: str | None = None,
+    external_account_id: str | None = None,
+    status: str = "configured",
+    credential_ref: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Backward-compatible alias for pixelle_create_channel_account."""
+    return await pixelle_create_channel_account(
+        project_id=project_id,
+        platform=platform,
+        account_name=account_name,
+        source=source,
+        account_handle=account_handle,
+        external_account_id=external_account_id,
+        status=status,
+        credential_ref=credential_ref,
+    )
 
 
 async def pixelle_create_cycle(
@@ -385,11 +420,15 @@ async def pixelle_record_publish(
     evidence: dict[str, Any],
     source: dict[str, Any],
     content_item_id: str | None = None,
+    channel_account_id: str | None = None,
+    account_id: str | None = None,
 ) -> dict[str, Any]:
     return await _run_tool(
         lambda: _build_service().record_publish(
             experiment_id=experiment_id,
             content_item_id=content_item_id,
+            channel_account_id=channel_account_id,
+            account_id=account_id,
             evidence=evidence,
             source=source,
         )
@@ -463,6 +502,7 @@ for tool in (
     pixelle_list_projects,
     pixelle_get_current,
     pixelle_create_project,
+    pixelle_create_channel_account,
     pixelle_create_social_account,
     pixelle_create_cycle,
     pixelle_create_experiment,

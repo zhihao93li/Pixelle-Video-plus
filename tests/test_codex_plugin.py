@@ -122,18 +122,18 @@ async def test_plugin_reports_capabilities(plugin_service):
 
     assert result["status"] == "ok"
     assert result["plugin"] == "pixelle-ops"
-    assert result["protocol_version"] == "p0.8.20260622"
+    assert result["protocol_version"] == "p0.9.20260622"
     assert "pixelle_list_projects" in result["required_tools"]
-    assert "pixelle_create_social_account" in result["required_tools"]
+    assert "pixelle_create_channel_account" in result["required_tools"]
     assert "pixelle_get_capabilities" in result["required_tools"]
     assert "pixelle_submit_generation_draft" in result["required_tools"]
     assert "pixelle_approve_generation_draft" in result["required_tools"]
-    assert result["conversation_gates"]["project_context_gate"] is True
-    assert result["conversation_gates"]["social_account_context_gate"] is True
+    assert result["conversation_gates"]["project_selection_gate"] is True
+    assert result["conversation_gates"]["channel_account_gate"] is True
     assert result["conversation_gates"]["content_shape_gate"] is True
     assert result["conversation_gates"]["existing_generation_gate"] is True
     assert result["conversation_gates"]["pipeline_selection_gate"] is True
-    assert result["conversation_contract_version"] == "p0.8.20260622"
+    assert result["conversation_contract_version"] == "p0.9.20260622"
     assert result["conversation_contract"]["requires_capability_first"] is True
     assert result["conversation_contract"]["first_tool"] == "pixelle_get_capabilities"
     assert result["intent_routes"]["status_check"]["first_tools"] == [
@@ -141,9 +141,10 @@ async def test_plugin_reports_capabilities(plugin_service):
         "pixelle_get_current",
     ]
     assert result["intent_routes"]["content_recommendation"]["writes_state"] is False
-    assert result["intent_routes"]["content_recommendation"]["requires_project_context"] is True
+    assert result["intent_routes"]["content_recommendation"]["requires_project_or_channel_account"] is True
     assert result["intent_routes"]["ambiguous_copy_request"]["requires_user_choice"] is True
-    assert result["intent_routes"]["project_context_selection"]["required_when_multiple_projects"] is True
+    assert result["intent_routes"]["project_selection"]["required_when_multiple_projects"] is True
+    assert result["intent_routes"]["channel_account_selection"]["required_when_multiple_accounts"] is True
     assert result["intent_routes"]["video_generation"]["requires_draft_approval"] is True
     assert result["intent_routes"]["video_generation"]["requires_user_pipeline_choice"] is True
     assert result["intent_routes"]["video_generation"]["default_pipeline_requires_user_acceptance"] is True
@@ -153,7 +154,7 @@ async def test_plugin_reports_capabilities(plugin_service):
 
 
 @pytest.mark.asyncio
-async def test_plugin_lists_projects_and_gets_selected_current_context(plugin_service):
+async def test_plugin_lists_projects_and_gets_selected_current_project_or_channel_account(plugin_service):
     petwoods = await server.pixelle_create_project(
         name="PetWoods",
         product="PetWoods",
@@ -173,7 +174,7 @@ async def test_plugin_lists_projects_and_gets_selected_current_context(plugin_se
         hypothesis="Cat hook wins.",
         source=_source(),
     )
-    account = await server.pixelle_create_social_account(
+    account = await server.pixelle_create_channel_account(
         project_id=petwoods["entity"]["id"],
         platform="xiaohongshu",
         account_name="PetWoods 宠物森友会",
@@ -204,15 +205,36 @@ async def test_plugin_lists_projects_and_gets_selected_current_context(plugin_se
     projects = await server.pixelle_list_projects()
     ambiguous = await server.pixelle_get_current()
     selected_project = await server.pixelle_get_current(project_id=petwoods["entity"]["id"])
-    selected_account = await server.pixelle_get_current(account_id=account["entity"]["id"])
+    selected_account = await server.pixelle_get_current(channel_account_id=account["entity"]["id"])
 
     assert projects["status"] == "ok"
     assert [project["name"] for project in projects["projects"]] == ["PetWoods", "Other Brand"]
-    assert projects["projects"][0]["social_accounts"][0]["account_name"] == "PetWoods 宠物森友会"
+    assert projects["projects"][0]["channel_accounts"][0]["account_name"] == "PetWoods 宠物森友会"
     assert ambiguous["next_action"]["kind"] == "select_project"
     assert selected_project["project"]["id"] == petwoods["entity"]["id"]
     assert selected_project["next_action"]["kind"] == "lock_prediction"
     assert selected_account["project"]["id"] == petwoods["entity"]["id"]
+
+
+@pytest.mark.asyncio
+async def test_plugin_keeps_legacy_social_account_tool_as_alias(plugin_service):
+    project = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+
+    account = await server.pixelle_create_social_account(
+        project_id=project["entity"]["id"],
+        platform="xiaohongshu",
+        account_name="PetWoods legacy alias",
+        source=_source(),
+    )
+    selected = await server.pixelle_get_current(account_id=account["entity"]["id"])
+
+    assert account["entity"]["kind"] == "channel_account"
+    assert selected["context"]["channel_account_id"] == account["entity"]["id"]
 
 
 @pytest.mark.asyncio

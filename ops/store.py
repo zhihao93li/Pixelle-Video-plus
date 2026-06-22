@@ -50,7 +50,7 @@ class OpsStore:
                     FOREIGN KEY(project_id) REFERENCES operating_projects(id)
                 );
 
-                CREATE TABLE IF NOT EXISTS social_accounts (
+                CREATE TABLE IF NOT EXISTS channel_accounts (
                     id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL,
                     platform TEXT NOT NULL,
@@ -110,6 +110,7 @@ class OpsStore:
                 );
                 """
             )
+            self._migrate_legacy_social_accounts(conn)
 
     def create_project(
         self,
@@ -142,7 +143,7 @@ class OpsStore:
             ).fetchall()
         return [_decode(dict(row)) for row in rows]
 
-    def create_social_account(
+    def create_channel_account(
         self,
         *,
         project_id: str,
@@ -166,18 +167,21 @@ class OpsStore:
             "source_json": _to_json(source),
             "created_at": _now(),
         }
-        self._insert("social_accounts", row)
+        self._insert("channel_accounts", row)
         return _decode(row)
 
-    def list_social_accounts(self, project_id: str | None = None) -> list[dict[str, Any]]:
+    def create_social_account(self, **kwargs: Any) -> dict[str, Any]:
+        return self.create_channel_account(**kwargs)
+
+    def list_channel_accounts(self, project_id: str | None = None) -> list[dict[str, Any]]:
         sql = """
-            SELECT * FROM social_accounts
+            SELECT * FROM channel_accounts
             ORDER BY created_at ASC, id ASC
         """
         params: tuple[Any, ...] = ()
         if project_id:
             sql = """
-                SELECT * FROM social_accounts
+                SELECT * FROM channel_accounts
                 WHERE project_id = ?
                 ORDER BY created_at ASC, id ASC
             """
@@ -185,6 +189,9 @@ class OpsStore:
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [_decode(dict(row)) for row in rows]
+
+    def list_social_accounts(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        return self.list_channel_accounts(project_id=project_id)
 
     def create_cycle(
         self,
@@ -293,8 +300,11 @@ class OpsStore:
     def get_project(self, project_id: str) -> dict[str, Any] | None:
         return self._fetch_one("SELECT * FROM operating_projects WHERE id = ?", (project_id,))
 
+    def get_channel_account(self, channel_account_id: str) -> dict[str, Any] | None:
+        return self._fetch_one("SELECT * FROM channel_accounts WHERE id = ?", (channel_account_id,))
+
     def get_social_account(self, account_id: str) -> dict[str, Any] | None:
-        return self._fetch_one("SELECT * FROM social_accounts WHERE id = ?", (account_id,))
+        return self.get_channel_account(account_id)
 
     def get_cycle(self, cycle_id: str) -> dict[str, Any] | None:
         return self._fetch_one("SELECT * FROM operation_cycles WHERE id = ?", (cycle_id,))
@@ -330,13 +340,15 @@ class OpsStore:
         self,
         *,
         project_id: str | None = None,
+        channel_account_id: str | None = None,
         account_id: str | None = None,
     ) -> dict[str, Any]:
-        account = self.get_social_account(account_id) if account_id else None
+        effective_account_id = channel_account_id or account_id
+        account = self.get_channel_account(effective_account_id) if effective_account_id else None
         effective_project_id = account["project_id"] if account else project_id
         if effective_project_id:
             project = self.get_project(effective_project_id)
-            selection = "explicit_account" if account else "explicit_project"
+            selection = "explicit_channel_account" if account else "explicit_project"
         else:
             project = self._fetch_one(
                 "SELECT * FROM operating_projects ORDER BY created_at DESC, id DESC LIMIT 1"
@@ -346,9 +358,9 @@ class OpsStore:
         experiment = None
         events: list[dict[str, Any]] = []
         items: list[dict[str, Any]] = []
-        social_accounts: list[dict[str, Any]] = []
+        channel_accounts: list[dict[str, Any]] = []
         if project:
-            social_accounts = self.list_social_accounts(project_id=project["id"])
+            channel_accounts = self.list_channel_accounts(project_id=project["id"])
             cycle = self._fetch_one(
                 """
                 SELECT * FROM operation_cycles
@@ -375,14 +387,52 @@ class OpsStore:
             "experiment": experiment,
             "content_items": items,
             "events": events,
-            "social_accounts": social_accounts,
+            "channel_accounts": channel_accounts,
+            "selected_channel_account": account,
+            "social_accounts": channel_accounts,
             "selected_social_account": account,
             "context": {
                 "project_id": project["id"] if project else None,
+                "channel_account_id": account["id"] if account else effective_account_id,
                 "account_id": account["id"] if account else account_id,
                 "selection": selection,
             },
         }
+
+    def _migrate_legacy_social_accounts(self, conn: sqlite3.Connection) -> None:
+        legacy = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'social_accounts'"
+        ).fetchone()
+        if not legacy:
+            return
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO channel_accounts (
+                id,
+                project_id,
+                platform,
+                account_name,
+                account_handle,
+                external_account_id,
+                status,
+                credential_ref_json,
+                source_json,
+                created_at
+            )
+            SELECT
+                id,
+                project_id,
+                platform,
+                account_name,
+                account_handle,
+                external_account_id,
+                status,
+                credential_ref_json,
+                source_json,
+                created_at
+            FROM social_accounts
+            """
+        )
 
     def _fetch_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         with self._connect() as conn:

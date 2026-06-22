@@ -102,6 +102,56 @@ def test_ops_api_current_view_can_be_filtered_by_project(tmp_path, monkeypatch):
     assert selected.json()["next_action"]["kind"] == "lock_prediction"
 
 
+def test_ops_api_current_view_can_be_filtered_by_channel_account(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = service.create_cycle(
+        project_id=project["id"],
+        name="Pet cycle",
+        goal="Grow cat content",
+        source=_source(),
+    )
+    service.create_experiment(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        title="Cat hook",
+        hypothesis="Cat hook wins.",
+        source=_source(),
+    )
+    first = service.create_channel_account(
+        project_id=project["id"],
+        platform="xiaohongshu",
+        account_name="PetWoods XHS",
+        source=_source(),
+    )
+    service.create_channel_account(
+        project_id=project["id"],
+        platform="douyin",
+        account_name="PetWoods Douyin",
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    ambiguous = client.get(f"/api/ops/current?project_id={project['id']}")
+    selected = client.get(f"/api/ops/current?channel_account_id={first['id']}")
+
+    assert ambiguous.status_code == 200
+    assert ambiguous.json()["next_action"]["reason"] == "multiple_accounts"
+    assert selected.status_code == 200
+    assert selected.json()["selected_channel_account"]["id"] == first["id"]
+    assert selected.json()["context"]["channel_account_id"] == first["id"]
+
+
 def test_ops_api_returns_404_for_missing_experiment(tmp_path, monkeypatch):
     monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(tmp_path / "ops.db"))
 

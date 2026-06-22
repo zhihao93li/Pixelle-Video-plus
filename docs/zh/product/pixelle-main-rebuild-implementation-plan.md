@@ -46,7 +46,7 @@ Codex 通过 Pixelle 插件工具发起运营动作，Pixelle Ops 负责保存�
 8. 发布必须有 `PublishRecord` 证据。
 9. 没有预测的复盘只能是 observation。
 10. 提供只读 `GET /api/ops/current`，让未来 UI 展示。
-11. P0.8 增加项目/社交账号上下文选择，避免多账号运营时默认混用最近项目。
+11. P0.9 增加项目/平台账号选择，避免多账号运营时默认混用最近项目。
 
 ### 3.2 P0 不做
 
@@ -160,11 +160,11 @@ marketing/
 data/ops.db
 ```
 
-P0.8 表结构控制在 6 张表内：
+P0.9 表结构控制在 6 张表内：
 
 ```text
 operating_projects
-social_accounts
+channel_accounts
 operation_cycles
 content_experiments
 content_items
@@ -243,7 +243,7 @@ pixelle_get_capabilities
 pixelle_list_projects
 pixelle_get_current
 pixelle_create_project
-pixelle_create_social_account
+pixelle_create_channel_account
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
@@ -259,11 +259,13 @@ pixelle_write_retro
 pixelle_write_memory
 ```
 
-新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先调用 `pixelle_get_capabilities`。当前期望协议版本和对话契约版本都是 `p0.8.20260622`，并且 `conversation_contract.requires_capability_first = true`，项目上下文选择、社交账号上下文、内容形态选择、已有成片处理、pipeline 选择、文案审批、异步生成状态、资产检查这些 conversation gates 必须全部可用；否则停止，不走旧的直接生成流程。
+新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先调用 `pixelle_get_capabilities`。当前期望协议版本和对话契约版本都是 `p0.9.20260622`，并且 `conversation_contract.requires_capability_first = true`，项目选择、平台账号选择、内容形态选择、已有成片处理、pipeline 选择、文案审批、异步生成状态、资产检查这些 conversation gates 必须全部可用；否则停止，不走旧的直接生成流程。
 
-P0.8 对话体验收口要求 capability 返回 `intent_routes`：项目/账号选择、状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。Codex 应该用这些 route 解释自然语言请求，避免要求用户发送长工具清单。
+P0.9 对话体验收口要求 capability 返回 `intent_routes`：项目选择、平台账号选择、状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。Codex 应该用这些 route 解释自然语言请求，避免要求用户发送长工具清单。
 
-如果 Pixelle Ops 里存在多个运营项目或多个社交账号，Codex 不能默认把最近项目当成当前项目。推荐、生成、发布、指标和复盘写入前，必须先调用 `pixelle_list_projects`，让用户选择项目或账号，再用 `pixelle_get_current(project_id=...)` 或 `pixelle_get_current(account_id=...)` 读取明确上下文。`pixelle_create_social_account` 只记录账号元数据和 credential reference；它不是 OAuth、自动发布或平台数据回收能力。
+项目是顶层长期运营对象，通常是一个品牌、业务、IP 或账号矩阵。平台账号是项目下的分发渠道。内容在项目内生产和判断；同一条内容可以生成多条发布记录，每条发布记录指向一个平台账号。
+
+如果 Pixelle Ops 里存在多个运营项目或多个平台账号，Codex 不能默认把最近项目当成当前项目。推荐、生成、发布、指标和复盘写入前，必须先调用 `pixelle_list_projects`，让用户选择项目或平台账号，再用 `pixelle_get_current(project_id=...)` 或 `pixelle_get_current(channel_account_id=...)` 读取明确选择。`pixelle_create_channel_account` 只记录平台账号元数据和 credential reference；它不是 OAuth、自动发布或平台数据回收能力。
 
 P0.7-B 进一步要求生成前必须显式选择 pipeline。默认 pipeline 只是推荐，用户说“直接生成视频”不能自动解释为选择 `standard`；除非用户明确说“用 standard/custom/asset_based”，否则 Codex 必须先展示当前注册 pipeline 并等待用户选择。
 
@@ -313,8 +315,8 @@ P0 必须保护以下规则：
 9. 没有 prediction 的 retro 只能写 `observation_written`。
 10. UI/query API 不能写状态。
 11. Codex 插件不能直接写 SQLite，必须调用 `ops.service`。
-12. 多项目/多账号时，未选择上下文不能继续推荐或写状态。
-13. 社交账号记录只能保存账号元数据和 credential reference，不能保存明文平台凭据。
+12. 多项目/多平台账号时，未选择项目或平台账号不能继续推荐或写状态。
+13. 平台账号记录只能保存平台账号元数据和 credential reference，不能保存明文平台凭据。
 
 ## 9. 实施步骤
 

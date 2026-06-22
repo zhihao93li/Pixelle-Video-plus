@@ -34,7 +34,7 @@
 包括：
 
 1. 运营项目。
-2. 社交账号上下文。
+2. 平台账号。
 3. 运营周期。
 4. 内容实验。
 5. 预测锁定记录。
@@ -45,6 +45,17 @@
 10. 项目记忆。
 
 Codex 输出、cheat workspace 文件、生成目录、日志、截图、demo 文件都不能直接等同于产品状态。
+
+P0.9 起，产品主模型固定为：
+
+```text
+Project
+  -> ChannelAccount
+  -> Content
+      -> PublishRecord
+```
+
+项目是主聚合，代表一个长期运营对象，通常是品牌、业务、IP 或账号矩阵。平台账号是项目下的分发渠道。内容属于项目；发布记录表示某条内容发到某个平台账号的一次发布。
 
 ### 2.2 模块之间只通过契约协作
 
@@ -61,13 +72,13 @@ Codex 输出、cheat workspace 文件、生成目录、日志、截图、demo �
 
 `pixelle_video` 不应该 import Pixelle Ops，也不应该知道 OperatingProject、ContentExperiment、ProjectMemoryEvent 的业务规则。
 
-它只接收一个生成请求，产出生成任务和媒体资产。运营上下文可以作为 opaque metadata 附带，但生成模块不能根据这些字段改变产品状态。
+它只接收一个生成请求，产出生成任务和媒体资产。运营 metadata 可以作为 opaque metadata 附带，但生成模块不能根据这些字段改变产品状态。
 
 ### 2.4 Codex 不直接写产品真相
 
 `cheat-on-content` 是运营脑和校准方法论，不是数据库客户端。
 
-Codex 可以读取上下文、生成候选、写预测、做复盘草稿、提出记忆写入建议，但进入 Pixelle 产品状态前必须经过 Pixelle Ops 的校验和 apply。
+Codex 可以读取状态摘要、生成候选、写预测、做复盘草稿、提出记忆写入建议，但进入 Pixelle 产品状态前必须经过 Pixelle Ops 的校验和 apply。
 
 ### 2.5 Codex Plugin 是运营入口
 
@@ -76,7 +87,7 @@ Codex 可以读取上下文、生成候选、写预测、做复盘草稿、提�
 包括：
 
 1. 创建或选择运营项目。
-2. 选择项目下的社交账号上下文。
+2. 选择项目下的平台账号。
 3. 开启运营周期。
 4. 讨论候选内容。
 5. 锁定预测。
@@ -155,7 +166,7 @@ pixelle_get_capabilities
 pixelle_list_projects
 pixelle_get_current
 pixelle_create_project
-pixelle_create_social_account
+pixelle_create_channel_account
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
@@ -179,7 +190,7 @@ pixelle_write_memory
 4. 返回下一步动作和阻断原因。
 5. 不直接写 SQLite。
 6. 不读取或修改 `pixelle_video` 内部状态。
-7. 在多项目或多社交账号时，要求用户显式选择 `project_id` 或 `account_id`，不能默认用最近项目执行推荐或写入。
+7. 在多项目或多平台账号时，要求用户显式选择 `project_id` 或 `channel_account_id`，不能默认用最近项目执行推荐或写入。
 
 本地启动方式见 `docs/zh/product/pixelle-codex-plugin-p0-usage.md`。P0 固定为 stdio MCP server，不提供远程插件发布包。
 
@@ -188,7 +199,7 @@ pixelle_write_memory
 ### 3.3 Pixelle Ops 拥有的数据
 
 1. `operating_projects`
-2. `social_accounts`
+2. `channel_accounts`
 3. `operation_cycles`
 4. `content_experiments`
 5. `content_items`
@@ -374,7 +385,7 @@ P0 不需要新建大型前端应用。UI 的定位是只读展示面板。
 5. 不在前端复制核心规则。
 6. 不提供候选、预测、发布、复盘和记忆写入的主操作表单。
 
-后续可以在 UI 中增加社交账号绑定，但它的边界是配置入口：写入账号元数据和 credential reference，供 Codex/Pixelle Ops 选择上下文。UI 账号绑定不改变运营入口，不直接触发推荐、生成、发布、指标或复盘写入。
+后续可以在 UI 中增加平台账号绑定，但它的边界是配置入口：写入账号元数据和 credential reference，供 Codex/Pixelle Ops 选择项目下的分发账号。UI 账号绑定不改变运营入口，不直接触发推荐、生成、发布、指标或复盘写入。
 
 如果后续要恢复 `apps/console`，必须作为单独阶段进入，不应作为 P0 必须项。
 
@@ -466,7 +477,7 @@ Pixelle 提供给 Codex 的上下文必须是只读快照。
     "channel": "xiaohongshu",
     "long_term_goal": "验证清洁内容是否能稳定带来购买意向"
   },
-  "social_accounts": [
+  "channel_accounts": [
     {
       "id": "acct_123",
       "platform": "xiaohongshu",
@@ -479,14 +490,14 @@ Pixelle 提供给 Codex 的上下文必须是只读快照。
       }
     }
   ],
-  "selected_social_account": {
+  "selected_channel_account": {
     "id": "acct_123",
     "platform": "xiaohongshu"
   },
   "context": {
-    "selection": "explicit_account",
+    "selection": "explicit_channel_account",
     "project_id": "op_123",
-    "account_id": "acct_123"
+    "channel_account_id": "acct_123"
   },
   "current_cycle": {
     "id": "cycle_123",
@@ -839,13 +850,14 @@ audit_events
 
 ```text
 OperatingProject 1 -> N OperationCycle
-OperatingProject 1 -> N SocialAccount
+OperatingProject 1 -> N ChannelAccount
 OperationCycle 1 -> N ContentExperiment
 ContentExperiment 1 -> N ContentItem
 ContentExperiment 1 -> N PredictionLock
 ContentItem 1 -> N GenerationJob
 ContentItem 1 -> N MediaAssetRef
 ContentItem 1 -> N PublishRecord
+ChannelAccount 1 -> N PublishRecord
 PublishRecord 1 -> N MetricsSnapshot
 ContentExperiment 1 -> N ContentRetro
 OperatingProject 1 -> N ProjectMemoryEvent
@@ -896,7 +908,7 @@ pixelle_get_capabilities
 pixelle_list_projects
 pixelle_get_current
 pixelle_create_project
-pixelle_create_social_account
+pixelle_create_channel_account
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
@@ -912,11 +924,11 @@ pixelle_write_retro
 pixelle_write_memory
 ```
 
-`pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先读取它；如果缺失、`protocol_version` 不是 `p0.8.20260622`、`conversation_contract_version` 不是 `p0.8.20260622`、`conversation_contract.requires_capability_first` 不为 true，或必需 conversation gates / intent routes 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
+`pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先读取它；如果缺失、`protocol_version` 不是 `p0.9.20260622`、`conversation_contract_version` 不是 `p0.9.20260622`、`conversation_contract.requires_capability_first` 不为 true，或必需 conversation gates / intent routes 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
 
-P0.8 的 `intent_routes` 覆盖：项目/账号选择、状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。它不是新的业务状态机，只是把 Codex 对话层的自然语言路由显式化，减少用户手写工具步骤的需要。
+P0.9 的 `intent_routes` 覆盖：项目选择、平台账号选择、状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。它不是新的业务状态机，只是把 Codex 对话层的自然语言路由显式化，减少用户手写工具步骤的需要。
 
-当存在多个运营项目或多个社交账号时，Codex 必须先调用 `pixelle_list_projects`，再由用户选择 `project_id` 或 `account_id`。`pixelle_get_current(project_id=...)` / `pixelle_get_current(account_id=...)` 是明确上下文读取；默认最近项目只能用于单项目场景，不能驱动推荐或写入。
+当存在多个运营项目或多个平台账号时，Codex 必须先调用 `pixelle_list_projects`，再由用户选择 `project_id` 或 `channel_account_id`。`pixelle_get_current(project_id=...)` / `pixelle_get_current(channel_account_id=...)` 是明确选择读取；默认最近项目只能用于单项目场景，不能驱动推荐或写入。
 
 P0.7-B 要求所有自然语言 route 都以 `pixelle_get_capabilities` 为第一工具。视频生成 route 还必须满足 `requires_user_pipeline_choice = true` 和 `default_pipeline_requires_user_acceptance = true`：默认 pipeline 只是推荐，不能在用户未明确接受时自动使用。
 
@@ -1039,7 +1051,7 @@ P0 是当前唯一执行范围。
 
 1. Pixelle Ops 基础对象和状态规则。
 2. 本地 SQLite repository/store。
-3. Pixelle Codex Plugin 列出项目、创建项目、记录社交账号上下文。
+3. Pixelle Codex Plugin 列出项目、创建项目、记录平台账号。
 4. Pixelle Codex Plugin 创建周期、内容实验。
 5. Pixelle Codex Plugin 锁定预测。
 6. 通过 adapter 调用 `pixelle_video`。
@@ -1053,7 +1065,7 @@ P0 是当前唯一执行范围。
 1. 单条内容可以完整跑通。
 2. 每个阶段缺证据时 blocked。
 3. 生成失败不会被当作成功。
-4. 多项目/多账号时必须先选上下文，不能默认混用最近项目。
+4. 多项目/多平台账号时必须先选项目或平台账号，不能默认混用最近项目。
 5. UI 不参与运营写入也能展示完整状态。
 
 不做：
@@ -1088,7 +1100,7 @@ P0 是当前唯一执行范围。
 3. 证据链结果页。
 4. 生成资产预览。
 5. Codex draft/apply 审计记录。
-6. 社交账号绑定配置页，只写账号元数据和 credential reference。
+6. 平台账号绑定配置页，只写账号元数据和 credential reference。
 
 不做：
 

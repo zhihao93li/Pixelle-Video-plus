@@ -1,8 +1,8 @@
 # Pixelle Codex Plugin P0 使用说明
 
-版本：v1.1
+版本：v1.2
 日期：2026-06-22
-范围：P0/P0.8 本地插件入口
+范围：P0/P0.9 本地插件入口
 
 ## 1. 定位
 
@@ -67,7 +67,7 @@ pixelle_get_capabilities
 pixelle_list_projects
 pixelle_get_current
 pixelle_create_project
-pixelle_create_social_account
+pixelle_create_channel_account
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
@@ -88,9 +88,9 @@ pixelle_write_memory
 ```text
 pixelle_get_capabilities
 pixelle_list_projects
-pixelle_get_current(project_id/account_id)
+pixelle_get_current(project_id/channel_account_id)
 pixelle_create_project
-pixelle_create_social_account
+pixelle_create_channel_account
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
@@ -107,12 +107,13 @@ pixelle_write_memory
 pixelle_get_current
 ```
 
-`pixelle_get_capabilities` 必须作为新线程、P0 验证、状态查看、续跑、推荐、生成和恢复的第一步。任何 `pixelle_get_current`、项目列表、pipeline、写入或生成工具都不能在它之前调用。当前期望 `protocol_version = p0.8.20260622`，`conversation_contract_version = p0.8.20260622`，`conversation_contract.requires_capability_first = true`，并且 `project_context_gate`、`social_account_context_gate`、`content_shape_gate`、`existing_generation_gate`、`pipeline_selection_gate`、`draft_approval_gate`、`async_generation_status`、`asset_check_gate` 都为 true。缺失或不匹配时，说明当前 Codex 线程加载的是旧插件，必须停止并重新加载插件/新开线程。
+`pixelle_get_capabilities` 必须作为新线程、P0 验证、状态查看、续跑、推荐、生成和恢复的第一步。任何 `pixelle_get_current`、项目列表、pipeline、写入或生成工具都不能在它之前调用。当前期望 `protocol_version = p0.9.20260622`，`conversation_contract_version = p0.9.20260622`，`conversation_contract.requires_capability_first = true`，并且 `project_selection_gate`、`channel_account_gate`、`content_shape_gate`、`existing_generation_gate`、`pipeline_selection_gate`、`draft_approval_gate`、`async_generation_status`、`asset_check_gate` 都为 true。缺失或不匹配时，说明当前 Codex 线程加载的是旧插件，必须停止并重新加载插件/新开线程。
 
-P0.8 起，capability 还必须返回 `intent_routes`，用于把自然语言请求收敛到稳定分支：
+P0.9 起，capability 还必须返回 `intent_routes`，用于把自然语言请求收敛到稳定分支：
 
 ```text
-project_context_selection
+project_selection
+channel_account_selection
 status_check
 content_recommendation
 ambiguous_copy_request
@@ -125,11 +126,22 @@ mock_p0_closeout
 metrics_and_retro
 ```
 
-用户不应该再需要发送长工具清单。Codex 必须根据这些 route 决定是先选择项目/账号、只读状态、推荐选题、先问内容形态、进入文案审核链、处理已有成片、记录发布证据，还是执行 mock P0 收口。
+用户不应该再需要发送长工具清单。Codex 必须根据这些 route 决定是先选择项目/平台账号、只读状态、推荐选题、先问内容形态、进入文案审核链、处理已有成片、记录发布证据，还是执行 mock P0 收口。
 
 P0.7-B 起，`video_generation.requires_user_pipeline_choice` 和 `video_generation.default_pipeline_requires_user_acceptance` 必须为 true。默认 pipeline 只是推荐，不等于用户已经选择；用户说“直接生成视频”只表示认可已审核稿进入生成，不表示自动选择 `standard`。除非同一句或前文明确指定已注册 pipeline，例如“用 standard 生成”，否则必须先问 pipeline。
 
-P0.8 起，如果 Pixelle Ops 中存在多个运营项目或多个社交账号，Codex 不能默认使用“最近项目”做推荐、生成、发布、指标或复盘写入。必须先调用 `pixelle_list_projects`，让用户选择项目或账号，再用 `pixelle_get_current(project_id=...)` 或 `pixelle_get_current(account_id=...)` 读取明确上下文。`pixelle_create_social_account` 只保存账号元数据和 credential reference，不做真实平台授权、不发布、不回收数据；后续 UI 账号绑定也应写入同一套账号/credential reference 模型，不改变 Codex 作为运营入口。
+P0.9 起，用户模型收敛为四个词：
+
+```text
+项目
+平台账号
+内容
+发布记录
+```
+
+项目是顶层长期运营对象，通常是一个品牌、业务、IP 或账号矩阵，例如 PetWoods。平台账号是项目下的分发渠道，例如小红书 PetWoods、抖音 PetWoods、YouTube PetWoods。内容是项目里生产和判断的对象，同一条内容可以有多条发布记录；发布记录表示这条内容发到某个平台账号的一次发布。
+
+如果 Pixelle Ops 中存在多个项目或多个平台账号，Codex 不能默认使用“最近项目”做推荐、生成、发布、指标或复盘写入。必须先调用 `pixelle_list_projects`，让用户选择项目或平台账号，再用 `pixelle_get_current(project_id=...)` 或 `pixelle_get_current(channel_account_id=...)` 读取明确选择。`pixelle_create_channel_account` 只保存平台账号元数据和 credential reference，不做真实平台授权、不发布、不回收数据；后续 UI 账号绑定也应写入同一套平台账号/credential reference 模型，不改变 Codex 作为运营入口。
 
 每个写工具都必须带 `source`。
 
@@ -150,8 +162,8 @@ Codex 来源必须满足：
 3. 插件不调用 `web`。
 4. UI/API 不提供写入口。
 5. 新线程必须先通过 `pixelle_get_capabilities` 自检插件协议、对话契约和对话门禁，且任何 Pixelle Ops 工具不能早于 capability 调用。
-6. 多项目或多账号时必须先选项目/账号上下文，不能默认使用最近项目。
-7. 社交账号绑定在 P0.8 只表示运营上下文和 credential reference，不代表真实平台授权、发布能力或数据回收能力。
+6. 多项目或多平台账号时必须先选项目或平台账号，不能默认使用最近项目。
+7. 平台账号绑定在 P0.9 只表示分发渠道配置和 credential reference，不代表真实平台授权、发布能力或数据回收能力。
 8. 没有 locked prediction 不能生成。
 9. 用户没有明确内容形态时，Codex 必须先问“短视频字幕稿 / 图文笔记 / 只做 hook / 完整运营实验”，不能擅自生成图文长文。
 10. 进入生成前必须调用 `pixelle_list_generation_pipelines`，让用户选择已注册 pipeline；默认 pipeline 只能作为推荐，不能在用户未接受时自动使用。
@@ -213,7 +225,7 @@ uv run python scripts/p0_codex_smoke.py
 
 `scripts/p0_codex_smoke.py` 使用隔离临时 SQLite DB 和 fake generation runner，通过 FastMCP client 调用真实 `pixelle_*` 工具面，验证 Codex 插件链路和 P0 状态机。真实视频生成需要单独验收。
 
-## 10. P0.8 对话验收用例
+## 10. P0.9 对话验收用例
 
 新线程加载 `@pixelle-ops` 后，用短话术验收对话路由：
 
@@ -233,7 +245,7 @@ uv run python scripts/p0_codex_smoke.py
 使用 @pixelle-ops，下一条内容适合做什么？
 ```
 
-多项目预期：先返回类似“你要操作哪个项目/账号？”的短选择题；用户选择后才调用 `pixelle_get_current(project_id=...)` 或 `pixelle_get_current(account_id=...)` 并给推荐。
+多项目预期：先返回类似“你要操作哪个项目/平台账号？”的短选择题；用户选择后才调用 `pixelle_get_current(project_id=...)` 或 `pixelle_get_current(channel_account_id=...)` 并给推荐。
 
 ```text
 文案呢？

@@ -76,7 +76,8 @@ class OpsService:
             projects.append(
                 {
                     **project,
-                    "social_accounts": self.store.list_social_accounts(project_id=project["id"]),
+                    "channel_accounts": self.store.list_channel_accounts(project_id=project["id"]),
+                    "social_accounts": self.store.list_channel_accounts(project_id=project["id"]),
                 }
             )
         return {
@@ -88,7 +89,7 @@ class OpsService:
             },
         }
 
-    def create_social_account(
+    def create_channel_account(
         self,
         *,
         project_id: str,
@@ -102,8 +103,8 @@ class OpsService:
     ) -> dict[str, Any]:
         _require_confirmed_source(source)
         if not self.store.get_project(project_id):
-            raise OpsError("project_not_found", "Social account requires an existing project.")
-        return self.store.create_social_account(
+            raise OpsError("project_not_found", "Channel account requires an existing project.")
+        return self.store.create_channel_account(
             project_id=project_id,
             platform=platform,
             account_name=account_name,
@@ -113,6 +114,9 @@ class OpsService:
             credential_ref=credential_ref,
             source=source,
         )
+
+    def create_social_account(self, **kwargs: Any) -> dict[str, Any]:
+        return self.create_channel_account(**kwargs)
 
     def create_cycle(
         self,
@@ -460,20 +464,43 @@ class OpsService:
         evidence: dict[str, Any],
         source: dict[str, Any],
         content_item_id: str | None = None,
+        channel_account_id: str | None = None,
+        account_id: str | None = None,
     ) -> dict[str, Any]:
         _require_confirmed_source(source)
         experiment = self._get_experiment_or_raise(experiment_id)
+        effective_account_id = channel_account_id or account_id
+        channel_account = None
+        if effective_account_id:
+            channel_account = self.store.get_channel_account(effective_account_id)
+            if not channel_account:
+                raise OpsError("channel_account_not_found", "Publish record must reference an existing channel account.")
+            if channel_account["project_id"] != experiment["project_id"]:
+                raise OpsError(
+                    "channel_account_project_mismatch",
+                    "Publish channel account must belong to the same project as the experiment.",
+                )
         if not _has_publish_evidence(evidence):
             raise OpsError("publish_evidence_required", "Publish evidence requires a URL, post id, Buffer id, or API response.")
         events = self.store.list_events_for_experiment(experiment_id)
         _require_passed_asset_check_before_publish(events, content_item_id)
+        payload = {"evidence": evidence}
+        if channel_account:
+            payload["channel_account_id"] = channel_account["id"]
+            payload["publication"] = {
+                "content_item_id": content_item_id,
+                "channel_account_id": channel_account["id"],
+                "platform": channel_account["platform"],
+                "account_name": channel_account["account_name"],
+                "account_handle": channel_account.get("account_handle"),
+            }
         event = self.store.append_event(
             project_id=experiment["project_id"],
             cycle_id=experiment["cycle_id"],
             experiment_id=experiment_id,
             content_item_id=content_item_id,
             event_type=OpsEventType.PUBLISH_RECORDED.value,
-            payload={"evidence": evidence},
+            payload=payload,
             source=source,
         )
         self.store.update_experiment_stage(experiment_id, ExperimentStage.PUBLISHED.value)
@@ -559,17 +586,26 @@ class OpsService:
         self,
         *,
         project_id: str | None = None,
+        channel_account_id: str | None = None,
         account_id: str | None = None,
     ) -> dict[str, Any]:
         if project_id and not self.store.get_project(project_id):
             raise OpsError("project_not_found", "Current view project filter must reference an existing project.")
-        if account_id and not self.store.get_social_account(account_id):
-            raise OpsError("social_account_not_found", "Current view account filter must reference an existing account.")
-        view = self.store.get_current_view(project_id=project_id, account_id=account_id)
-        if not project_id and not account_id and len(self.store.list_projects()) > 1:
+        effective_account_id = channel_account_id or account_id
+        if effective_account_id and not self.store.get_channel_account(effective_account_id):
+            raise OpsError(
+                "channel_account_not_found",
+                "Current view account filter must reference an existing channel account.",
+            )
+        view = self.store.get_current_view(
+            project_id=project_id,
+            channel_account_id=channel_account_id,
+            account_id=account_id,
+        )
+        if not project_id and not effective_account_id and len(self.store.list_projects()) > 1:
             view["next_action"] = _select_context_action("multiple_projects")
             return view
-        if not account_id and len(view["social_accounts"]) > 1:
+        if not effective_account_id and len(view["channel_accounts"]) > 1:
             view["next_action"] = _select_context_action("multiple_accounts")
             return view
         view["next_action"] = _next_action_for_view(view)
