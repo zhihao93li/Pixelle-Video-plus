@@ -146,6 +146,7 @@ def test_ops_api_current_view_can_be_filtered_by_channel_account(tmp_path, monke
     selected = client.get(f"/api/ops/current?channel_account_id={first['id']}")
 
     assert ambiguous.status_code == 200
+    assert ambiguous.json()["next_action"]["kind"] == "select_channel_account"
     assert ambiguous.json()["next_action"]["reason"] == "multiple_accounts"
     assert selected.status_code == 200
     assert selected.json()["selected_channel_account"]["id"] == first["id"]

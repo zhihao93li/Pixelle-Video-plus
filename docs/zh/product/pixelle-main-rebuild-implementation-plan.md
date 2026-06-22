@@ -267,6 +267,13 @@ P0.9 对话体验收口要求 capability 返回 `intent_routes`：项目选择�
 
 如果 Pixelle Ops 里存在多个运营项目或多个平台账号，Codex 不能默认把最近项目当成当前项目。推荐、生成、发布、指标和复盘写入前，必须先调用 `pixelle_list_projects`，让用户选择项目或平台账号，再用 `pixelle_get_current(project_id=...)` 或 `pixelle_get_current(channel_account_id=...)` 读取明确选择。`pixelle_create_channel_account` 只记录平台账号元数据和 credential reference；它不是 OAuth、自动发布或平台数据回收能力。
 
+阻断动作必须区分：
+
+```text
+multiple_projects -> select_project
+multiple_accounts -> select_channel_account
+```
+
 P0.7-B 进一步要求生成前必须显式选择 pipeline。默认 pipeline 只是推荐，用户说“直接生成视频”不能自动解释为选择 `standard`；除非用户明确说“用 standard/custom/asset_based”，否则 Codex 必须先展示当前注册 pipeline 并等待用户选择。
 
 所有写工具都必须接收 `source` 字段。

@@ -918,8 +918,9 @@ def _next_action_for_view(view: dict[str, Any]) -> dict[str, Any]:
 
 
 def _select_context_action(reason: str) -> dict[str, Any]:
+    kind = "select_channel_account" if reason == "multiple_accounts" else "select_project"
     return {
-        "kind": "select_project",
+        "kind": kind,
         "blocked": True,
         "reason": reason,
     }

@@ -184,12 +184,12 @@ def test_service_blocks_ambiguous_multi_account_current(service):
     selected_account = service.current_view(channel_account_id=first["id"])
 
     assert ambiguous_default["next_action"] == {
-        "kind": "select_project",
+        "kind": "select_channel_account",
         "blocked": True,
         "reason": "multiple_accounts",
     }
     assert ambiguous_project["next_action"] == {
-        "kind": "select_project",
+        "kind": "select_channel_account",
         "blocked": True,
         "reason": "multiple_accounts",
     }

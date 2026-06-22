@@ -143,6 +143,15 @@ P0.9 起，用户模型收敛为四个词：
 
 如果 Pixelle Ops 中存在多个项目或多个平台账号，Codex 不能默认使用“最近项目”做推荐、生成、发布、指标或复盘写入。必须先调用 `pixelle_list_projects`，让用户选择项目或平台账号，再用 `pixelle_get_current(project_id=...)` 或 `pixelle_get_current(channel_account_id=...)` 读取明确选择。`pixelle_create_channel_account` 只保存平台账号元数据和 credential reference，不做真实平台授权、不发布、不回收数据；后续 UI 账号绑定也应写入同一套平台账号/credential reference 模型，不改变 Codex 作为运营入口。
 
+`pixelle_get_current` 的阻断动作必须区分清楚：
+
+```text
+multiple_projects -> select_project
+multiple_accounts -> select_channel_account
+```
+
+所以发布、指标、平台数据相关操作遇到多个平台账号时，Codex 应该问“这次要操作哪个平台账号？”，不是再问“哪个项目？”。
+
 每个写工具都必须带 `source`。
 
 Codex 来源必须满足：
