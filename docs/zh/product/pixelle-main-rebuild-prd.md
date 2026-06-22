@@ -7,6 +7,9 @@
 目标读者：产品、后端、前端、Codex/自动化执行者  
 配套技术方案：`docs/zh/product/pixelle-main-rebuild-technical-architecture.md`  
 配套实施计划：`docs/zh/product/pixelle-main-rebuild-implementation-plan.md`  
+P1 UI PRD：`docs/zh/product/pixelle-p1-ui-prd.md`
+P1 UI 信息架构：`docs/zh/product/pixelle-p1-ui-information-architecture.md`
+P1 UI 实施计划：`docs/zh/product/pixelle-p1-ui-implementation-plan.md`
 
 ## 1. 一句话目标
 
