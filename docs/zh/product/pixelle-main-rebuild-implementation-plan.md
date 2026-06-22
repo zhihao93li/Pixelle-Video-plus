@@ -263,6 +263,8 @@ pixelle_write_memory
 
 P0.9 对话体验收口要求 capability 返回 `intent_routes`：项目选择、平台账号选择、状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。Codex 应该用这些 route 解释自然语言请求，避免要求用户发送长工具清单。
 
+mock P0 收口只用于验收闭环，不代表真实发布或真实平台数据。mock 发布证据和 mock metrics 必须同时带 `mock: true` 和非空 `mock_label`；普通确认备注不能被当作发布证据。
+
 项目是顶层长期运营对象，通常是一个品牌、业务、IP 或账号矩阵。平台账号是项目下的分发渠道。内容在项目内生产和判断；同一条内容可以生成多条发布记录，每条发布记录指向一个平台账号。
 
 如果 Pixelle Ops 里存在多个运营项目或多个平台账号，Codex 不能默认把最近项目当成当前项目。推荐、生成、发布、指标和复盘写入前，必须先调用 `pixelle_list_projects`，让用户选择项目或平台账号，再用 `pixelle_get_current(project_id=...)` 或 `pixelle_get_current(channel_account_id=...)` 读取明确选择。`pixelle_create_channel_account` 只记录平台账号元数据和 credential reference；它不是 OAuth、自动发布或平台数据回收能力。

@@ -269,7 +269,8 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
                 "experiment_id": experiment.data["entity"]["id"],
                 "content_item_id": content_item_id,
                 "evidence": {
-                    "platform_url": "https://example.com/petwoods/p0-smoke",
+                    "mock": True,
+                    "mock_label": "P0 closeout smoke publish",
                 },
                 "source": _source(),
             },
@@ -280,6 +281,8 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
                 "experiment_id": experiment.data["entity"]["id"],
                 "content_item_id": content_item_id,
                 "metrics": {
+                    "mock": True,
+                    "mock_label": "P0 closeout smoke metrics",
                     "views": 100,
                     "likes": 8,
                     "saves": 12,

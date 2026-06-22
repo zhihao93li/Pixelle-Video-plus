@@ -288,4 +288,4 @@ uv run python scripts/p0_codex_smoke.py
 先 mock 跑完 P0 收口
 ```
 
-预期：允许 mock 发布证据和 mock metrics，但必须显式标记 mock，不伪装真实发布。
+预期：允许 mock 发布证据和 mock metrics，但必须显式标记 mock，不伪装真实发布。mock 发布证据和 mock metrics 都必须带 `mock: true` 和非空 `mock_label`；只有一句备注或“我已经发布了”不能算发布证据。

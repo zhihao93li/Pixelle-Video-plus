@@ -718,6 +718,30 @@ def test_publish_requires_real_evidence(service):
         )
 
 
+def test_mock_publish_requires_explicit_mock_label(service):
+    _, _, experiment = _seed_experiment(service)
+
+    with pytest.raises(OpsError, match="publish_evidence_required"):
+        service.record_publish(
+            experiment_id=experiment["id"],
+            evidence={"mock": True},
+            source=_source(),
+        )
+
+    result = service.record_publish(
+        experiment_id=experiment["id"],
+        evidence={
+            "mock": True,
+            "mock_label": "P0 closeout smoke publish",
+        },
+        source=_source(),
+    )
+
+    assert result["event"]["payload"]["evidence"]["mock"] is True
+    assert result["event"]["payload"]["evidence"]["mock_label"] == "P0 closeout smoke publish"
+    assert result["next_action"]["kind"] == "record_metrics"
+
+
 def test_publish_record_can_target_a_channel_account(service):
     project, _, experiment = _seed_experiment(service)
     account = service.create_channel_account(
@@ -827,6 +851,50 @@ def test_metrics_require_published_content(service):
             metrics={"views": 100},
             source=_source(),
         )
+
+
+def test_mock_publish_requires_mock_metrics_label(service):
+    project, cycle, experiment = _seed_experiment(service)
+    content_item = service.store.create_content_item(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        kind="video",
+        title="P0 mock content",
+        status="generated",
+        asset_ref={"video_path": "mock://p0-closeout"},
+    )
+    service.record_publish(
+        experiment_id=experiment["id"],
+        content_item_id=content_item["id"],
+        evidence={
+            "mock": True,
+            "mock_label": "P0 closeout smoke publish",
+        },
+        source=_source(),
+    )
+
+    with pytest.raises(OpsError, match="mock_metrics_label_required"):
+        service.record_metrics(
+            experiment_id=experiment["id"],
+            content_item_id=content_item["id"],
+            metrics={"views": 100},
+            source=_source(),
+        )
+
+    result = service.record_metrics(
+        experiment_id=experiment["id"],
+        content_item_id=content_item["id"],
+        metrics={
+            "mock": True,
+            "mock_label": "P0 closeout smoke metrics",
+            "views": 100,
+        },
+        source=_source(),
+    )
+
+    assert result["event"]["payload"]["metrics"]["mock"] is True
+    assert result["next_action"]["kind"] == "write_retro"
 
 
 @pytest.mark.asyncio

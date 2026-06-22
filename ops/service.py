@@ -524,6 +524,13 @@ class OpsService:
                 "published_content_required",
                 "Metrics must reference the content item that has publish evidence.",
             )
+        publish_event = _publish_event_for_content(events, content_item_id)
+        if publish_event and _is_mock_evidence(publish_event["payload"].get("evidence", {})):
+            if not _is_mock_evidence(metrics):
+                raise OpsError(
+                    "mock_metrics_label_required",
+                    "Mock metrics require mock=true and a non-empty mock_label.",
+                )
         event = self.store.append_event(
             project_id=experiment["project_id"],
             cycle_id=experiment["cycle_id"],
@@ -879,10 +886,25 @@ def _has_published_content(events: list[dict[str, Any]], content_item_id: str) -
 
 
 def _has_publish_evidence(evidence: dict[str, Any]) -> bool:
-    return any(
+    has_real_evidence = any(
         evidence.get(key)
         for key in ("platform_url", "platform_post_id", "buffer_post_id", "platform_response")
     )
+    return has_real_evidence or _is_mock_evidence(evidence)
+
+
+def _is_mock_evidence(payload: dict[str, Any]) -> bool:
+    return payload.get("mock") is True and bool(str(payload.get("mock_label", "")).strip())
+
+
+def _publish_event_for_content(events: list[dict[str, Any]], content_item_id: str) -> dict[str, Any] | None:
+    for event in reversed(events):
+        if (
+            event["event_type"] == OpsEventType.PUBLISH_RECORDED.value
+            and event.get("content_item_id") == content_item_id
+        ):
+            return event
+    return None
 
 
 def _require_passed_asset_check_before_publish(
