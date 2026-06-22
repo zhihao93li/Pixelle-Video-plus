@@ -45,6 +45,63 @@ def test_ops_api_exposes_current_view_as_read_only(tmp_path, monkeypatch):
     assert post_response.status_code == 405
 
 
+def test_ops_api_current_view_can_be_filtered_by_project(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    petwoods = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    pet_cycle = service.create_cycle(
+        project_id=petwoods["id"],
+        name="Pet cycle",
+        goal="Grow cat content",
+        source=_source(),
+    )
+    service.create_experiment(
+        project_id=petwoods["id"],
+        cycle_id=pet_cycle["id"],
+        title="Cat hook",
+        hypothesis="Cat hook wins.",
+        source=_source(),
+    )
+    other = service.create_project(
+        name="Other Brand",
+        product="Other",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    other_cycle = service.create_cycle(
+        project_id=other["id"],
+        name="Other cycle",
+        goal="Avoid mixed context",
+        source=_source(),
+    )
+    service.create_experiment(
+        project_id=other["id"],
+        cycle_id=other_cycle["id"],
+        title="Other hook",
+        hypothesis="Other hook wins.",
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    ambiguous = client.get("/api/ops/current")
+    selected = client.get(f"/api/ops/current?project_id={petwoods['id']}")
+
+    assert ambiguous.status_code == 200
+    assert ambiguous.json()["next_action"]["kind"] == "select_project"
+    assert selected.status_code == 200
+    assert selected.json()["project"]["name"] == "PetWoods"
+    assert selected.json()["next_action"]["kind"] == "lock_prediction"
+
+
 def test_ops_api_returns_404_for_missing_experiment(tmp_path, monkeypatch):
     monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(tmp_path / "ops.db"))
 

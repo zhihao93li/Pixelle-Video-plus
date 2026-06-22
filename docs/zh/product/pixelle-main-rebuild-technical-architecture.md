@@ -34,14 +34,15 @@
 包括：
 
 1. 运营项目。
-2. 运营周期。
-3. 内容实验。
-4. 预测锁定记录。
-5. 生成任务绑定关系。
-6. 发布证据。
-7. 数据快照。
-8. 复盘结果。
-9. 项目记忆。
+2. 社交账号上下文。
+3. 运营周期。
+4. 内容实验。
+5. 预测锁定记录。
+6. 生成任务绑定关系。
+7. 发布证据。
+8. 数据快照。
+9. 复盘结果。
+10. 项目记忆。
 
 Codex 输出、cheat workspace 文件、生成目录、日志、截图、demo 文件都不能直接等同于产品状态。
 
@@ -75,14 +76,15 @@ Codex 可以读取上下文、生成候选、写预测、做复盘草稿、提�
 包括：
 
 1. 创建或选择运营项目。
-2. 开启运营周期。
-3. 讨论候选内容。
-4. 锁定预测。
-5. 发起内容生成。
-6. 登记发布证据。
-7. 录入或导入指标。
-8. 起草复盘。
-9. 写入项目记忆。
+2. 选择项目下的社交账号上下文。
+3. 开启运营周期。
+4. 讨论候选内容。
+5. 锁定预测。
+6. 发起内容生成。
+7. 登记发布证据。
+8. 录入或导入指标。
+9. 起草复盘。
+10. 写入项目记忆。
 
 Pixelle UI 不复刻这些流程，只展示这些动作执行后的状态、证据、资产和审计记录。
 
@@ -150,8 +152,10 @@ P0 暴露工具：
 
 ```text
 pixelle_get_capabilities
+pixelle_list_projects
 pixelle_get_current
 pixelle_create_project
+pixelle_create_social_account
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
@@ -175,6 +179,7 @@ pixelle_write_memory
 4. 返回下一步动作和阻断原因。
 5. 不直接写 SQLite。
 6. 不读取或修改 `pixelle_video` 内部状态。
+7. 在多项目或多社交账号时，要求用户显式选择 `project_id` 或 `account_id`，不能默认用最近项目执行推荐或写入。
 
 本地启动方式见 `docs/zh/product/pixelle-codex-plugin-p0-usage.md`。P0 固定为 stdio MCP server，不提供远程插件发布包。
 
@@ -183,17 +188,18 @@ pixelle_write_memory
 ### 3.3 Pixelle Ops 拥有的数据
 
 1. `operating_projects`
-2. `operation_cycles`
-3. `content_experiments`
-4. `content_items`
-5. `prediction_locks`
-6. `media_asset_refs`
-7. `publish_records`
-8. `metrics_snapshots`
-9. `content_retros`
-10. `project_memory_events`
-11. `codex_writeback_drafts`
-12. `audit_events`
+2. `social_accounts`
+3. `operation_cycles`
+4. `content_experiments`
+5. `content_items`
+6. `prediction_locks`
+7. `media_asset_refs`
+8. `publish_records`
+9. `metrics_snapshots`
+10. `content_retros`
+11. `project_memory_events`
+12. `codex_writeback_drafts`
+13. `audit_events`
 
 允许依赖：
 
@@ -368,6 +374,8 @@ P0 不需要新建大型前端应用。UI 的定位是只读展示面板。
 5. 不在前端复制核心规则。
 6. 不提供候选、预测、发布、复盘和记忆写入的主操作表单。
 
+后续可以在 UI 中增加社交账号绑定，但它的边界是配置入口：写入账号元数据和 credential reference，供 Codex/Pixelle Ops 选择上下文。UI 账号绑定不改变运营入口，不直接触发推荐、生成、发布、指标或复盘写入。
+
 如果后续要恢复 `apps/console`，必须作为单独阶段进入，不应作为 P0 必须项。
 
 ### 3.9 Asset Store
@@ -457,6 +465,28 @@ Pixelle 提供给 Codex 的上下文必须是只读快照。
     "name": "PetWoods 小红书增长项目",
     "channel": "xiaohongshu",
     "long_term_goal": "验证清洁内容是否能稳定带来购买意向"
+  },
+  "social_accounts": [
+    {
+      "id": "acct_123",
+      "platform": "xiaohongshu",
+      "account_name": "PetWoods 宠物森友会",
+      "account_handle": "@petwoods",
+      "status": "configured",
+      "credential_ref": {
+        "provider": "local_keychain",
+        "key": "pixelle/petwoods/xhs"
+      }
+    }
+  ],
+  "selected_social_account": {
+    "id": "acct_123",
+    "platform": "xiaohongshu"
+  },
+  "context": {
+    "selection": "explicit_account",
+    "project_id": "op_123",
+    "account_id": "acct_123"
   },
   "current_cycle": {
     "id": "cycle_123",
@@ -809,6 +839,7 @@ audit_events
 
 ```text
 OperatingProject 1 -> N OperationCycle
+OperatingProject 1 -> N SocialAccount
 OperationCycle 1 -> N ContentExperiment
 ContentExperiment 1 -> N ContentItem
 ContentExperiment 1 -> N PredictionLock
@@ -862,7 +893,10 @@ Codex 的写入口是 Pixelle Codex Plugin。P0 使用本地 MCP/FastMCP server 
 
 ```text
 pixelle_get_capabilities
+pixelle_list_projects
+pixelle_get_current
 pixelle_create_project
+pixelle_create_social_account
 pixelle_create_cycle
 pixelle_create_experiment
 pixelle_lock_prediction
@@ -878,9 +912,11 @@ pixelle_write_retro
 pixelle_write_memory
 ```
 
-`pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先读取它；如果缺失、`protocol_version` 不是 `p0.7b.20260621`、`conversation_contract_version` 不是 `p0.7b.20260621`、`conversation_contract.requires_capability_first` 不为 true，或必需 conversation gates / intent routes 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
+`pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先读取它；如果缺失、`protocol_version` 不是 `p0.8.20260622`、`conversation_contract_version` 不是 `p0.8.20260622`、`conversation_contract.requires_capability_first` 不为 true，或必需 conversation gates / intent routes 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
 
-P0.7 的 `intent_routes` 覆盖：状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。它不是新的业务状态机，只是把 Codex 对话层的自然语言路由显式化，减少用户手写工具步骤的需要。
+P0.8 的 `intent_routes` 覆盖：项目/账号选择、状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。它不是新的业务状态机，只是把 Codex 对话层的自然语言路由显式化，减少用户手写工具步骤的需要。
+
+当存在多个运营项目或多个社交账号时，Codex 必须先调用 `pixelle_list_projects`，再由用户选择 `project_id` 或 `account_id`。`pixelle_get_current(project_id=...)` / `pixelle_get_current(account_id=...)` 是明确上下文读取；默认最近项目只能用于单项目场景，不能驱动推荐或写入。
 
 P0.7-B 要求所有自然语言 route 都以 `pixelle_get_capabilities` 为第一工具。视频生成 route 还必须满足 `requires_user_pipeline_choice = true` 和 `default_pipeline_requires_user_acceptance = true`：默认 pipeline 只是推荐，不能在用户未明确接受时自动使用。
 
@@ -1003,20 +1039,22 @@ P0 是当前唯一执行范围。
 
 1. Pixelle Ops 基础对象和状态规则。
 2. 本地 SQLite repository/store。
-3. Pixelle Codex Plugin 创建项目、周期、内容实验。
-4. Pixelle Codex Plugin 锁定预测。
-5. 通过 adapter 调用 `pixelle_video`。
-6. Pixelle Codex Plugin 记录发布证据。
-7. Pixelle Codex Plugin 录入 metrics。
-8. Pixelle Codex Plugin 写 retro 和 memory。
-9. UI query API 只读展示当前状态。
+3. Pixelle Codex Plugin 列出项目、创建项目、记录社交账号上下文。
+4. Pixelle Codex Plugin 创建周期、内容实验。
+5. Pixelle Codex Plugin 锁定预测。
+6. 通过 adapter 调用 `pixelle_video`。
+7. Pixelle Codex Plugin 记录发布证据。
+8. Pixelle Codex Plugin 录入 metrics。
+9. Pixelle Codex Plugin 写 retro 和 memory。
+10. UI query API 只读展示当前状态。
 
 验收：
 
 1. 单条内容可以完整跑通。
 2. 每个阶段缺证据时 blocked。
 3. 生成失败不会被当作成功。
-4. UI 不参与写入也能展示完整状态。
+4. 多项目/多账号时必须先选上下文，不能默认混用最近项目。
+5. UI 不参与运营写入也能展示完整状态。
 
 不做：
 
@@ -1050,6 +1088,7 @@ P0 是当前唯一执行范围。
 3. 证据链结果页。
 4. 生成资产预览。
 5. Codex draft/apply 审计记录。
+6. 社交账号绑定配置页，只写账号元数据和 credential reference。
 
 不做：
 
@@ -1057,6 +1096,7 @@ P0 是当前唯一执行范围。
 2. Media Core 工作台。
 3. 大型 dashboard。
 4. 运营操作表单。
+5. 从 UI 触发推荐、生成、发布、指标或复盘写入。
 
 ### P3：证据自动化
 

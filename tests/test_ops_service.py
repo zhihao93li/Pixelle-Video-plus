@@ -112,6 +112,101 @@ def test_codex_writes_require_user_confirmation(service):
         )
 
 
+def test_service_lists_projects_and_blocks_ambiguous_multi_project_current(service):
+    petwoods, pet_cycle, _ = _seed_experiment(service)
+    account = service.create_social_account(
+        project_id=petwoods["id"],
+        platform="xiaohongshu",
+        account_name="PetWoods 宠物森友会",
+        source=_source(),
+        account_handle="petwoods",
+        status="connected",
+    )
+    other = service.create_project(
+        name="Other Brand",
+        product="Other",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    other_cycle = service.create_cycle(
+        project_id=other["id"],
+        name="Other cycle",
+        goal="Avoid mixed context",
+        source=_source(),
+    )
+    service.create_experiment(
+        project_id=other["id"],
+        cycle_id=other_cycle["id"],
+        title="Other hook",
+        hypothesis="Other hook wins.",
+        source=_source(),
+    )
+
+    projects = service.list_projects()
+    ambiguous = service.current_view()
+    selected_project = service.current_view(project_id=petwoods["id"])
+    selected_account = service.current_view(account_id=account["id"])
+
+    assert projects["status"] == "ok"
+    assert [project["name"] for project in projects["projects"]] == ["PetWoods", "Other Brand"]
+    assert projects["projects"][0]["social_accounts"][0]["account_handle"] == "petwoods"
+    assert ambiguous["next_action"] == {
+        "kind": "select_project",
+        "blocked": True,
+        "reason": "multiple_projects",
+    }
+    assert selected_project["next_action"]["kind"] == "lock_prediction"
+    assert selected_project["project"]["id"] == petwoods["id"]
+    assert selected_project["cycle"]["id"] == pet_cycle["id"]
+    assert selected_account["project"]["id"] == petwoods["id"]
+    assert selected_account["context"]["account_id"] == account["id"]
+
+
+def test_service_blocks_ambiguous_multi_account_current(service):
+    petwoods, _, _ = _seed_experiment(service)
+    first = service.create_social_account(
+        project_id=petwoods["id"],
+        platform="xiaohongshu",
+        account_name="PetWoods XHS",
+        source=_source(),
+        account_handle="petwoods-xhs",
+    )
+    service.create_social_account(
+        project_id=petwoods["id"],
+        platform="douyin",
+        account_name="PetWoods Douyin",
+        source=_source(),
+        account_handle="petwoods-dy",
+    )
+
+    ambiguous_default = service.current_view()
+    ambiguous_project = service.current_view(project_id=petwoods["id"])
+    selected_account = service.current_view(account_id=first["id"])
+
+    assert ambiguous_default["next_action"] == {
+        "kind": "select_project",
+        "blocked": True,
+        "reason": "multiple_accounts",
+    }
+    assert ambiguous_project["next_action"] == {
+        "kind": "select_project",
+        "blocked": True,
+        "reason": "multiple_accounts",
+    }
+    assert selected_account["next_action"]["kind"] == "lock_prediction"
+    assert selected_account["context"]["account_id"] == first["id"]
+
+
+def test_social_account_requires_existing_project(service):
+    with pytest.raises(OpsError, match="project_not_found"):
+        service.create_social_account(
+            project_id="missing",
+            platform="xiaohongshu",
+            account_name="Missing",
+            source=_source(),
+        )
+
+
 @pytest.mark.asyncio
 async def test_generation_requires_locked_prediction(service):
     _, _, experiment = _seed_experiment(service)

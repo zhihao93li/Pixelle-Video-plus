@@ -12,12 +12,14 @@ from ops.service import OpsError, OpsService
 
 mcp = FastMCP("pixelle-ops")
 _BACKGROUND_GENERATION_TASKS: set[asyncio.Task] = set()
-PIXELLE_OPS_PROTOCOL_VERSION = "p0.7b.20260621"
-PIXELLE_OPS_CONVERSATION_CONTRACT_VERSION = "p0.7b.20260621"
+PIXELLE_OPS_PROTOCOL_VERSION = "p0.8.20260622"
+PIXELLE_OPS_CONVERSATION_CONTRACT_VERSION = "p0.8.20260622"
 PIXELLE_OPS_REQUIRED_TOOLS = (
     "pixelle_get_capabilities",
+    "pixelle_list_projects",
     "pixelle_get_current",
     "pixelle_create_project",
+    "pixelle_create_social_account",
     "pixelle_create_cycle",
     "pixelle_create_experiment",
     "pixelle_lock_prediction",
@@ -33,6 +35,8 @@ PIXELLE_OPS_REQUIRED_TOOLS = (
     "pixelle_write_memory",
 )
 PIXELLE_OPS_CONVERSATION_GATES = {
+    "project_context_gate": True,
+    "social_account_context_gate": True,
     "content_shape_gate": True,
     "existing_generation_gate": True,
     "pipeline_selection_gate": True,
@@ -46,12 +50,18 @@ PIXELLE_OPS_CONVERSATION_CONTRACT = {
     "no_tool_before_capabilities": True,
 }
 PIXELLE_OPS_INTENT_ROUTES = {
+    "project_context_selection": {
+        "required_when_multiple_projects": True,
+        "first_tools": ["pixelle_get_capabilities", "pixelle_list_projects"],
+        "writes_state": False,
+    },
     "status_check": {
         "first_tools": ["pixelle_get_capabilities", "pixelle_get_current"],
         "writes_state": False,
     },
     "content_recommendation": {
         "first_tools": ["pixelle_get_capabilities", "pixelle_get_current"],
+        "requires_project_context": True,
         "writes_state": False,
     },
     "ambiguous_copy_request": {
@@ -122,9 +132,17 @@ async def pixelle_get_capabilities() -> dict[str, Any]:
     }
 
 
-async def pixelle_get_current() -> dict[str, Any]:
+async def pixelle_list_projects() -> dict[str, Any]:
+    """Return Pixelle operating projects and their configured social accounts."""
+    return _build_service().list_projects()
+
+
+async def pixelle_get_current(
+    project_id: str | None = None,
+    account_id: str | None = None,
+) -> dict[str, Any]:
     """Return the current Pixelle operations state."""
-    return _build_service().current_view()
+    return await _run_tool(lambda: _build_service().current_view(project_id=project_id, account_id=account_id))
 
 
 async def pixelle_create_project(
@@ -146,6 +164,36 @@ async def pixelle_create_project(
             "status": "ok",
             "entity": {"kind": "operating_project", **project},
             "next_action": {"kind": "create_cycle", "blocked": False},
+        }
+
+    return await _run_tool(action)
+
+
+async def pixelle_create_social_account(
+    project_id: str,
+    platform: str,
+    account_name: str,
+    source: dict[str, Any],
+    account_handle: str | None = None,
+    external_account_id: str | None = None,
+    status: str = "configured",
+    credential_ref: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    def action():
+        social_account = _build_service().create_social_account(
+            project_id=project_id,
+            platform=platform,
+            account_name=account_name,
+            account_handle=account_handle,
+            external_account_id=external_account_id,
+            status=status,
+            credential_ref=credential_ref,
+            source=source,
+        )
+        return {
+            "status": "ok",
+            "entity": {"kind": "social_account", **social_account},
+            "next_action": {"kind": "select_project", "blocked": False},
         }
 
     return await _run_tool(action)
@@ -412,8 +460,10 @@ def _ops_error(exc: OpsError) -> dict[str, Any]:
 
 for tool in (
     pixelle_get_capabilities,
+    pixelle_list_projects,
     pixelle_get_current,
     pixelle_create_project,
+    pixelle_create_social_account,
     pixelle_create_cycle,
     pixelle_create_experiment,
     pixelle_lock_prediction,

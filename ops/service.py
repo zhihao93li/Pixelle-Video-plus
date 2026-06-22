@@ -70,6 +70,50 @@ class OpsService:
             source=source,
         )
 
+    def list_projects(self) -> dict[str, Any]:
+        projects = []
+        for project in self.store.list_projects():
+            projects.append(
+                {
+                    **project,
+                    "social_accounts": self.store.list_social_accounts(project_id=project["id"]),
+                }
+            )
+        return {
+            "status": "ok",
+            "projects": projects,
+            "next_action": {
+                "kind": "select_project" if projects else "create_project",
+                "blocked": False,
+            },
+        }
+
+    def create_social_account(
+        self,
+        *,
+        project_id: str,
+        platform: str,
+        account_name: str,
+        source: dict[str, Any],
+        account_handle: str | None = None,
+        external_account_id: str | None = None,
+        status: str = "configured",
+        credential_ref: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        _require_confirmed_source(source)
+        if not self.store.get_project(project_id):
+            raise OpsError("project_not_found", "Social account requires an existing project.")
+        return self.store.create_social_account(
+            project_id=project_id,
+            platform=platform,
+            account_name=account_name,
+            account_handle=account_handle,
+            external_account_id=external_account_id,
+            status=status,
+            credential_ref=credential_ref,
+            source=source,
+        )
+
     def create_cycle(
         self,
         *,
@@ -511,8 +555,23 @@ class OpsService:
         )
         return _transition("memory_written", event, "done")
 
-    def current_view(self) -> dict[str, Any]:
-        view = self.store.get_current_view()
+    def current_view(
+        self,
+        *,
+        project_id: str | None = None,
+        account_id: str | None = None,
+    ) -> dict[str, Any]:
+        if project_id and not self.store.get_project(project_id):
+            raise OpsError("project_not_found", "Current view project filter must reference an existing project.")
+        if account_id and not self.store.get_social_account(account_id):
+            raise OpsError("social_account_not_found", "Current view account filter must reference an existing account.")
+        view = self.store.get_current_view(project_id=project_id, account_id=account_id)
+        if not project_id and not account_id and len(self.store.list_projects()) > 1:
+            view["next_action"] = _select_context_action("multiple_projects")
+            return view
+        if not account_id and len(view["social_accounts"]) > 1:
+            view["next_action"] = _select_context_action("multiple_accounts")
+            return view
         view["next_action"] = _next_action_for_view(view)
         return view
 
@@ -820,6 +879,14 @@ def _next_action_for_view(view: dict[str, Any]) -> dict[str, Any]:
     if not view.get("experiment"):
         return {"kind": "create_experiment", "blocked": False}
     return _next_action_for_events(view["events"])
+
+
+def _select_context_action(reason: str) -> dict[str, Any]:
+    return {
+        "kind": "select_project",
+        "blocked": True,
+        "reason": reason,
+    }
 
 
 def _next_action_for_events(events: list[dict[str, Any]]) -> dict[str, Any]:

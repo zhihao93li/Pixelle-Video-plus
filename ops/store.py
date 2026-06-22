@@ -50,6 +50,20 @@ class OpsStore:
                     FOREIGN KEY(project_id) REFERENCES operating_projects(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS social_accounts (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    account_name TEXT NOT NULL,
+                    account_handle TEXT,
+                    external_account_id TEXT,
+                    status TEXT NOT NULL,
+                    credential_ref_json TEXT NOT NULL,
+                    source_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(project_id) REFERENCES operating_projects(id)
+                );
+
                 CREATE TABLE IF NOT EXISTS content_experiments (
                     id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL,
@@ -117,6 +131,60 @@ class OpsStore:
         }
         self._insert("operating_projects", row)
         return _decode(row)
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM operating_projects
+                ORDER BY created_at ASC, id ASC
+                """
+            ).fetchall()
+        return [_decode(dict(row)) for row in rows]
+
+    def create_social_account(
+        self,
+        *,
+        project_id: str,
+        platform: str,
+        account_name: str,
+        source: dict[str, Any],
+        account_handle: str | None = None,
+        external_account_id: str | None = None,
+        status: str = "configured",
+        credential_ref: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        row = {
+            "id": _new_id("acct"),
+            "project_id": project_id,
+            "platform": platform,
+            "account_name": account_name,
+            "account_handle": account_handle,
+            "external_account_id": external_account_id,
+            "status": status,
+            "credential_ref_json": _to_json(credential_ref or {}),
+            "source_json": _to_json(source),
+            "created_at": _now(),
+        }
+        self._insert("social_accounts", row)
+        return _decode(row)
+
+    def list_social_accounts(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        sql = """
+            SELECT * FROM social_accounts
+            ORDER BY created_at ASC, id ASC
+        """
+        params: tuple[Any, ...] = ()
+        if project_id:
+            sql = """
+                SELECT * FROM social_accounts
+                WHERE project_id = ?
+                ORDER BY created_at ASC, id ASC
+            """
+            params = (project_id,)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_decode(dict(row)) for row in rows]
 
     def create_cycle(
         self,
@@ -225,6 +293,9 @@ class OpsStore:
     def get_project(self, project_id: str) -> dict[str, Any] | None:
         return self._fetch_one("SELECT * FROM operating_projects WHERE id = ?", (project_id,))
 
+    def get_social_account(self, account_id: str) -> dict[str, Any] | None:
+        return self._fetch_one("SELECT * FROM social_accounts WHERE id = ?", (account_id,))
+
     def get_cycle(self, cycle_id: str) -> dict[str, Any] | None:
         return self._fetch_one("SELECT * FROM operation_cycles WHERE id = ?", (cycle_id,))
 
@@ -255,15 +326,29 @@ class OpsStore:
             ).fetchall()
         return [_decode(dict(row)) for row in rows]
 
-    def get_current_view(self) -> dict[str, Any]:
-        project = self._fetch_one(
-            "SELECT * FROM operating_projects ORDER BY created_at DESC, id DESC LIMIT 1"
-        )
+    def get_current_view(
+        self,
+        *,
+        project_id: str | None = None,
+        account_id: str | None = None,
+    ) -> dict[str, Any]:
+        account = self.get_social_account(account_id) if account_id else None
+        effective_project_id = account["project_id"] if account else project_id
+        if effective_project_id:
+            project = self.get_project(effective_project_id)
+            selection = "explicit_account" if account else "explicit_project"
+        else:
+            project = self._fetch_one(
+                "SELECT * FROM operating_projects ORDER BY created_at DESC, id DESC LIMIT 1"
+            )
+            selection = "latest_project" if project else "empty"
         cycle = None
         experiment = None
         events: list[dict[str, Any]] = []
         items: list[dict[str, Any]] = []
+        social_accounts: list[dict[str, Any]] = []
         if project:
+            social_accounts = self.list_social_accounts(project_id=project["id"])
             cycle = self._fetch_one(
                 """
                 SELECT * FROM operation_cycles
@@ -290,6 +375,13 @@ class OpsStore:
             "experiment": experiment,
             "content_items": items,
             "events": events,
+            "social_accounts": social_accounts,
+            "selected_social_account": account,
+            "context": {
+                "project_id": project["id"] if project else None,
+                "account_id": account["id"] if account else account_id,
+                "selection": selection,
+            },
         }
 
     def _fetch_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
@@ -324,7 +416,7 @@ def _to_json(value: dict[str, Any]) -> str:
 
 def _decode(row: dict[str, Any]) -> dict[str, Any]:
     decoded = dict(row)
-    for key in ("source_json", "payload_json", "asset_ref_json"):
+    for key in ("source_json", "payload_json", "asset_ref_json", "credential_ref_json"):
         if key in decoded:
             decoded[key.removesuffix("_json")] = json.loads(decoded.pop(key) or "{}")
     return decoded

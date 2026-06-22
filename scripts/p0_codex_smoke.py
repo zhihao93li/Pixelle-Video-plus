@@ -53,11 +53,20 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
         assert capabilities.data["protocol_version"] == server.PIXELLE_OPS_PROTOCOL_VERSION
         assert capabilities.data["conversation_contract_version"] == server.PIXELLE_OPS_CONVERSATION_CONTRACT_VERSION
         assert capabilities.data["conversation_contract"]["requires_capability_first"] is True
+        assert capabilities.data["conversation_gates"]["project_context_gate"] is True
+        assert capabilities.data["conversation_gates"]["social_account_context_gate"] is True
         assert capabilities.data["conversation_gates"]["content_shape_gate"] is True
         assert capabilities.data["conversation_gates"]["existing_generation_gate"] is True
+        assert (
+            capabilities.data["intent_routes"]["project_context_selection"]["required_when_multiple_projects"]
+            is True
+        )
+        assert capabilities.data["intent_routes"]["content_recommendation"]["requires_project_context"] is True
         assert capabilities.data["intent_routes"]["ambiguous_copy_request"]["requires_user_choice"] is True
         assert capabilities.data["intent_routes"]["video_generation"]["requires_draft_approval"] is True
         assert capabilities.data["intent_routes"]["video_generation"]["requires_user_pipeline_choice"] is True
+        assert "pixelle_list_projects" in capabilities.data["required_tools"]
+        assert "pixelle_create_social_account" in capabilities.data["required_tools"]
         assert "pixelle_submit_generation_draft" in capabilities.data["required_tools"]
         assert "pixelle_approve_generation_draft" in capabilities.data["required_tools"]
 
@@ -91,6 +100,21 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
                 "source": _source(),
             },
         )
+        account = await client.call_tool(
+            "pixelle_create_social_account",
+            {
+                "project_id": project.data["entity"]["id"],
+                "platform": "xiaohongshu",
+                "account_name": "PetWoods Smoke",
+                "account_handle": "@petwoods-smoke",
+                "credential_ref": {"provider": "smoke", "key": "petwoods/xhs"},
+                "source": _source(),
+            },
+        )
+        assert account.data["entity"]["kind"] == "social_account"
+        projects = await client.call_tool("pixelle_list_projects", {})
+        assert projects.data["projects"][0]["social_accounts"][0]["id"] == account.data["entity"]["id"]
+
         cycle = await client.call_tool(
             "pixelle_create_cycle",
             {
@@ -278,7 +302,23 @@ async def run_smoke(db_path: Path) -> dict[str, Any]:
                 "source": _source(),
             },
         )
-        current = await client.call_tool("pixelle_get_current", {})
+        await client.call_tool(
+            "pixelle_create_project",
+            {
+                "name": "Other Brand P0 Smoke",
+                "product": "Other Brand",
+                "channel": "xiaohongshu",
+                "description": "Second project used to verify explicit context selection.",
+                "source": _source(),
+            },
+        )
+        ambiguous_current = await client.call_tool("pixelle_get_current", {})
+        assert ambiguous_current.data["next_action"]["kind"] == "select_project"
+        assert ambiguous_current.data["next_action"]["blocked"] is True
+        current = await client.call_tool(
+            "pixelle_get_current",
+            {"project_id": project.data["entity"]["id"]},
+        )
 
     assert publish.data["next_action"]["kind"] == "record_metrics"
     assert current.data["experiment"]["id"] == experiment.data["entity"]["id"]
