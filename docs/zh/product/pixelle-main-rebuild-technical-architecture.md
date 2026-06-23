@@ -1013,7 +1013,7 @@ P0.9 的 `intent_routes` 覆盖：Codex 自然语言入口、UI 兜底上下文�
 
 Codex 自然语言入口是主路径：用户应该能直接问“下一步做什么”“查看当前状态”“下一条内容适合做什么”。UI 复制上下文只是兜底，不是授权机制；即使收到 UI 复制的 project/account/cycle/experiment ID，Codex 也必须先读取 capability 和实时状态，发现缺失或冲突时先让用户确认。
 
-当存在多个运营项目或多个平台账号时，Codex 必须先调用 `pixelle_list_projects`，再由用户选择 `project_id` 或 `channel_account_id`。`pixelle_get_current(project_id=...)` / `pixelle_get_current(channel_account_id=...)` 是明确选择读取；默认最近项目只能用于单项目场景，不能驱动推荐或写入。
+当存在多个运营项目或多个平台账号时，Codex 必须先调用 `pixelle_list_projects`，再由用户选择 `project_id` 或 `channel_account_id`。`pixelle_get_current(project_id=...)` / `pixelle_get_current(channel_account_id=...)` 是明确选择读取；默认最近项目只能用于单项目场景，不能驱动推荐或写入。若选中的项目只有一个平台账号，服务层可以自动把该账号作为 `selected_channel_account` 返回；若有多个平台账号，必须继续要求用户选择，不能默认最近账号。
 
 P0.7-B 要求所有自然语言 route 都以 `pixelle_get_capabilities` 为第一工具。视频生成 route 还必须满足 `requires_user_pipeline_choice = true` 和 `default_pipeline_requires_user_acceptance = true`：默认 pipeline 只是推荐，不能在用户未明确接受时自动使用。
 

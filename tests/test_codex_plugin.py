@@ -218,6 +218,8 @@ async def test_plugin_lists_projects_and_gets_selected_current_project_or_channe
     assert projects["projects"][0]["channel_accounts"][0]["account_name"] == "PetWoods 宠物森友会"
     assert ambiguous["next_action"]["kind"] == "select_project"
     assert selected_project["project"]["id"] == petwoods["entity"]["id"]
+    assert selected_project["selected_channel_account"]["id"] == account["entity"]["id"]
+    assert selected_project["context"]["channel_account_id"] == account["entity"]["id"]
     assert selected_project["next_action"]["kind"] == "lock_prediction"
     assert selected_account["project"]["id"] == petwoods["entity"]["id"]
 

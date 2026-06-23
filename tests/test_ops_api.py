@@ -153,6 +153,36 @@ def test_ops_api_current_view_can_be_filtered_by_channel_account(tmp_path, monke
     assert selected.json()["context"]["channel_account_id"] == first["id"]
 
 
+def test_ops_api_current_view_auto_selects_single_channel_account(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="youtube",
+        source=_source(),
+    )
+    account = service.create_channel_account(
+        project_id=project["id"],
+        platform="youtube",
+        account_name="PetWoods YouTube",
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    response = client.get(f"/api/ops/current?project_id={project['id']}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["selected_channel_account"]["id"] == account["id"]
+    assert body["context"]["channel_account_id"] == account["id"]
+    assert body["context"]["selection"] == "implicit_single_channel_account"
+
+
 def test_ops_api_lists_projects_with_channel_accounts(tmp_path, monkeypatch):
     db_path = tmp_path / "ops.db"
     monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))

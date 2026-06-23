@@ -233,8 +233,11 @@ API 遇到业务错误时，HTTP status code 反映请求结果，`detail.error.
 ```bash
 uv run pytest tests/test_codex_plugin.py -q
 uv run pytest tests/test_ops_store.py tests/test_ops_service.py tests/test_codex_plugin.py tests/test_ops_api.py -q
+uv run python scripts/p1_codex_direct_entry_smoke.py
 uv run python scripts/p0_codex_smoke.py
 ```
+
+`scripts/p1_codex_direct_entry_smoke.py` 使用隔离临时 SQLite DB，通过 FastMCP client 验证自然语言主路径所需的只读契约：capability-first、多项目选择、多账号选择、单账号项目自动选中、以及状态读取不写运营事实。
 
 `scripts/p0_codex_smoke.py` 使用隔离临时 SQLite DB 和 fake generation runner，通过 FastMCP client 调用真实 `pixelle_*` 工具面，验证 Codex 插件链路和 P0 状态机。真实视频生成需要单独验收。
 

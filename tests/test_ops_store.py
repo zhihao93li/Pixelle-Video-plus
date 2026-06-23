@@ -127,7 +127,9 @@ def test_store_supports_channel_accounts_and_explicit_current_context(tmp_path):
     assert pet_view["project"]["id"] == petwoods["id"]
     assert pet_view["experiment"]["id"] == pet_experiment["id"]
     assert pet_view["channel_accounts"][0]["id"] == pet_account["id"]
-    assert pet_view["context"]["selection"] == "explicit_project"
+    assert pet_view["selected_channel_account"]["id"] == pet_account["id"]
+    assert pet_view["context"]["channel_account_id"] == pet_account["id"]
+    assert pet_view["context"]["selection"] == "implicit_single_channel_account"
     assert account_view["project"]["id"] == petwoods["id"]
     assert account_view["context"]["channel_account_id"] == pet_account["id"]
     assert account_view["context"]["selection"] == "explicit_channel_account"

@@ -424,6 +424,9 @@ class OpsStore:
         channel_accounts: list[dict[str, Any]] = []
         if project:
             channel_accounts = self.list_channel_accounts(project_id=project["id"])
+            if not account and len(channel_accounts) == 1:
+                account = channel_accounts[0]
+                selection = "implicit_single_channel_account"
             cycle = self._fetch_one(
                 """
                 SELECT * FROM operation_cycles

@@ -138,12 +138,23 @@ Streamlit 仍可作为视频工具单独运行
 ## 4. 验收命令
 
 ```bash
+uv run python scripts/p1_codex_direct_entry_smoke.py
 uv run python scripts/p1_ops_ui_smoke.py
 uv run pytest -q
-uv run ruff check api/app.py web/app.py api/routers/ops.py api/schemas/ops.py ops/service.py ops/store.py tests/test_ops_api.py tests/test_ops_service.py scripts/p1_ops_ui_smoke.py
+uv run ruff check api/app.py web/app.py api/routers/ops.py api/schemas/ops.py ops/service.py ops/store.py codex_plugin/server.py tests/test_ops_api.py tests/test_ops_service.py tests/test_codex_plugin.py scripts/p1_codex_direct_entry_smoke.py scripts/p1_ops_ui_smoke.py
 cd ops-web && npm run build
 git diff --check
 ```
+
+`scripts/p1_codex_direct_entry_smoke.py` 是 Codex 自然语言主路径的合同测试，必须覆盖：
+
+1. capability 声明 `primary_entry = codex_natural_language`。
+2. UI 复制内容只能作为 `fallback_only`。
+3. 多项目未选择时返回 `select_project`。
+4. 选中多账号项目但未选账号时返回 `select_channel_account`。
+5. 选中具体平台账号后直接返回内容闭环下一步。
+6. 单账号项目自动带上该账号，不额外要求用户选择。
+7. 只读状态查询不能写入运营事实。
 
 `scripts/p1_ops_ui_smoke.py` 是 P1-A 的边缘态合同测试，必须覆盖：
 
