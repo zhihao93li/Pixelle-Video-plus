@@ -190,6 +190,7 @@ def run_smoke(db_path: Path) -> dict[str, Any]:
         },
     ).json()
     projects_after_update = client.get("/api/ops/projects").json()
+    integrations = client.get("/api/ops/integrations").json()
 
     _assert(projects["status"] == "ok", "projects endpoint failed")
     _assert(len(projects["projects"]) == 3, "expected seeded projects")
@@ -229,6 +230,13 @@ def run_smoke(db_path: Path) -> dict[str, Any]:
         any(account["account_name"] == "XHS Main Edited" for account in updated_accounts),
         "projects endpoint should reflect account update",
     )
+    _assert(integrations["status"] == "ok", "integrations endpoint failed")
+    _assert(integrations["capabilities"]["returns_plaintext_secrets"] is False, "integrations must redact secrets")
+    _assert(
+        {integration["id"] for integration in integrations["integrations"]}
+        >= {"llm", "runninghub", "comfyui", "fish_audio", "cos", "buffer"},
+        "integrations endpoint should expose expected global services",
+    )
 
     result = {
         "status": "ok",
@@ -240,6 +248,7 @@ def run_smoke(db_path: Path) -> dict[str, Any]:
             "unchecked_asset": generated_view["next_action"]["kind"],
             "mock_publish": publish_event["payload"]["evidence"]["mock_label"],
             "account_update": account_update["channel_account"]["status"],
+            "integrations": len(integrations["integrations"]),
         },
     }
     output_path.unlink(missing_ok=True)

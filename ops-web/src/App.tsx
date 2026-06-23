@@ -2,16 +2,20 @@ import {
   AlertTriangle,
   CheckCircle2,
   Copy,
+  ExternalLink,
+  KeyRound,
   Loader2,
   MessageCircle,
   RefreshCw,
   Settings2,
+  ShieldCheck,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   createChannelAccount,
   getCurrent,
+  listIntegrations,
   listProjectCycles,
   listProjects,
   updateChannelAccount,
@@ -39,6 +43,8 @@ import type {
   CurrentResponse,
   CycleView,
   ExperimentView,
+  IntegrationStatus,
+  IntegrationsResponse,
   JsonObject,
   JsonValue,
   NextAction,
@@ -50,12 +56,13 @@ import type {
 
 const VIDEO_BASE = (import.meta.env.VITE_PIXELLE_VIDEO_BASE || "http://localhost:8501").replace(/\/$/, "");
 
-type Screen = "ops" | "projects";
+type Screen = "ops" | "projects" | "settings";
 
 interface LoadState {
   projects?: ProjectsResponse;
   current?: CurrentResponse;
   cycles?: ProjectCyclesResponse;
+  integrations?: IntegrationsResponse;
   loading: boolean;
   error: string | null;
 }
@@ -97,7 +104,7 @@ export function App() {
   async function refresh(projectId = selectedProject?.id || selectedProjectId, accountId = selectedAccount?.id || selectedAccountId) {
     setState((prev) => ({ ...prev, loading: true, error: null }));
     try {
-      const projectsResponse = await listProjects();
+      const [projectsResponse, integrationsResponse] = await Promise.all([listProjects(), listIntegrations()]);
       const nextProject =
         projectsResponse.projects.find((project) => project.id === projectId)
         || (projectsResponse.projects.length === 1 ? projectsResponse.projects[0] : null);
@@ -118,6 +125,7 @@ export function App() {
         projects: projectsResponse,
         current: currentResponse,
         cycles: cyclesResponse,
+        integrations: integrationsResponse,
         loading: false,
         error: null,
       });
@@ -189,7 +197,10 @@ export function App() {
       <main className="main">
         {state.loading && !state.projects ? <LoadingScreen /> : null}
         {state.error ? <ErrorScreen error={state.error} onRetry={() => void refresh()} /> : null}
-        {!state.loading && !state.error && !projects.length ? <NoProjects /> : null}
+        {!state.loading && !state.error && !projects.length && screen !== "settings" ? <NoProjects /> : null}
+        {!state.loading && !state.error && screen === "settings" && !projects.length ? (
+          <SettingsScreen integrations={state.integrations} />
+        ) : null}
         {!state.error && projects.length ? (
           <>
             <Topbar
@@ -221,7 +232,7 @@ export function App() {
                 onSelectCycle={setSelectedCycleId}
                 onSelectStep={setSelectedStep}
               />
-            ) : (
+            ) : screen === "projects" ? (
               <ProjectsScreen
                 project={selectedProject}
                 accounts={accounts}
@@ -230,6 +241,8 @@ export function App() {
                   void refresh(selectedProject?.id, accountId);
                 }}
               />
+            ) : (
+              <SettingsScreen integrations={state.integrations} />
             )}
           </>
         ) : null}
@@ -257,6 +270,10 @@ function Sidebar({ screen, onScreenChange }: { screen: Screen; onScreenChange: (
           <span>Projects</span>
           <span>账号配置</span>
         </button>
+        <button className={screen === "settings" ? "active" : ""} onClick={() => onScreenChange("settings")} type="button">
+          <span>Settings</span>
+          <span>Integrations</span>
+        </button>
         <a href={VIDEO_BASE} rel="noreferrer">
           <span>Create</span>
           <span>视频沙盒</span>
@@ -264,10 +281,6 @@ function Sidebar({ screen, onScreenChange }: { screen: Screen; onScreenChange: (
         <a href={`${VIDEO_BASE}/History`} rel="noreferrer">
           <span>History</span>
           <span>生成记录</span>
-        </a>
-        <a href={`${VIDEO_BASE}/Settings`} rel="noreferrer">
-          <span>Settings</span>
-          <span>Integrations</span>
         </a>
       </nav>
       <div className="sidebar-footer">选题、文案、生成、发布登记仍通过 Codex + pixelle-ops 执行。</div>
@@ -1067,8 +1080,12 @@ function ProjectsScreen({
                 <div>
                   <strong>{account.account_name}</strong>
                   <span>{account.platform} · {account.account_handle || account.external_account_id || "未记录 handle"}</span>
+                  <small>
+                    credential: {account.credential_ref?.key ? String(account.credential_ref.key) : "-"} · Buffer:{" "}
+                    {account.credential_ref?.buffer_channel_id ? String(account.credential_ref.buffer_channel_id) : "-"}
+                  </small>
                 </div>
-                <span className="pill">{account.status}</span>
+                <span className={`status-pill ${accountStatusTone(account.status)}`}>{account.status}</span>
               </button>
             ))
           ) : (
@@ -1141,6 +1158,10 @@ function AccountForm({
         <p>只保存引用，不保存平台密码或明文 token。</p>
       </div>
       <div className="form-grid">
+        <div className="form-note">
+          <strong>配置边界</strong>
+          <span>这里保存账号元数据和 credential reference，不做 OAuth 授权，不发布内容，也不抓取平台数据。</span>
+        </div>
         <label>
           平台
           <select name="platform" defaultValue={account?.platform || "xiaohongshu"}>
@@ -1172,6 +1193,7 @@ function AccountForm({
             <option value="needs_auth">needs_auth</option>
             <option value="disabled">disabled</option>
           </select>
+          <span className="field-help">connected 只表示配置可用，不代表已完成真实发布授权。</span>
         </label>
         <label>
           Credential provider
@@ -1194,6 +1216,134 @@ function AccountForm({
       </button>
     </form>
   );
+}
+
+function accountStatusTone(status: string): string {
+  if (status === "connected" || status === "configured") return "configured";
+  if (status === "needs_auth") return "partial";
+  return "missing";
+}
+
+function SettingsScreen({ integrations }: { integrations?: IntegrationsResponse }) {
+  if (!integrations) {
+    return (
+      <div className="center-state">
+        <Loader2 className="spin" size={24} />
+        <strong>正在读取集成配置</strong>
+      </div>
+    );
+  }
+  const generation = integrations.integrations.filter((item) => item.group === "generation");
+  const publish = integrations.integrations.filter((item) => item.group === "publish");
+  const configured = integrations.integrations.filter((item) => item.status === "configured").length;
+  const total = integrations.integrations.length;
+  return (
+    <section className="settings-page">
+      <div className="panel settings-hero">
+        <div>
+          <p className="current-marker">Settings / Integrations</p>
+          <h2>全局能力配置</h2>
+          <p>
+            这里查看 LLM、RunningHub、ComfyUI、Fish Audio、COS 和 Buffer 的配置状态。P1 只展示状态与入口，不保存明文密钥，也不触发生成、发布或数据回收。
+          </p>
+        </div>
+        <div className="settings-score">
+          <strong>{configured}/{total}</strong>
+          <span>configured</span>
+        </div>
+      </div>
+      <div className="settings-grid">
+        <section className="panel settings-panel">
+          <div className="section-heading">
+            <h2>生成服务</h2>
+            <p>用于文案、图片、视频和配音生产；运营动作仍从 Codex 发起。</p>
+          </div>
+          <IntegrationList integrations={generation} />
+        </section>
+        <section className="panel settings-panel">
+          <div className="section-heading">
+            <h2>发布准备</h2>
+            <p>用于后续真实发布证据链；P1 不自动发布，也不自动回收数据。</p>
+          </div>
+          <IntegrationList integrations={publish} />
+        </section>
+      </div>
+      <section className="panel settings-panel">
+        <div className="settings-footer-grid">
+          <div className="settings-boundary">
+            <ShieldCheck size={18} />
+            <div>
+              <strong>安全边界</strong>
+              <p>API 返回脱敏状态，不返回 API Key、SecretId、SecretKey 或 token 原文。UI 写入范围仍限制在配置对象和平台账号元数据。</p>
+            </div>
+          </div>
+          <div className="settings-boundary">
+            <KeyRound size={18} />
+            <div>
+              <strong>配置来源</strong>
+              <p>
+                {String(integrations.config_source.path || "config.yaml")} ·{" "}
+                {integrations.config_source.exists ? "已存在" : "未创建"} ·{" "}
+                {integrations.config_source.writable ? "可写" : "只读"}
+              </p>
+            </div>
+          </div>
+          <a className="button primary settings-link" href={`${VIDEO_BASE}/Settings`} rel="noreferrer" target="_blank">
+            <ExternalLink size={16} />
+            打开高级配置
+          </a>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function IntegrationList({ integrations }: { integrations: IntegrationStatus[] }) {
+  if (!integrations.length) return <p className="muted">暂无集成配置。</p>;
+  return (
+    <div className="integration-list">
+      {integrations.map((integration) => (
+        <article className="integration-card" key={integration.id}>
+          <div className="integration-head">
+            <div>
+              <h3>{integration.name}</h3>
+              <p>{integration.description}</p>
+            </div>
+            <span className={`status-pill ${integration.status}`}>{integrationStatusLabel(integration.status)}</span>
+          </div>
+          {integration.safe_fields.length ? (
+            <div className="integration-fields">
+              {integration.safe_fields.map((field) => (
+                <div key={`${integration.id}-${field.label}`}>
+                  <span>{field.label}</span>
+                  <strong>{field.value}</strong>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div className="secret-list">
+            {integration.secret_refs.map((secret) => (
+              <div key={`${integration.id}-${secret.label}`}>
+                <span>{secret.label}</span>
+                <strong>{secret.configured ? "已配置" : "未配置"}</strong>
+                <em>{secret.source}</em>
+              </div>
+            ))}
+          </div>
+          {integration.missing_fields.length ? (
+            <div className="missing-line">缺少：{integration.missing_fields.join(" / ")}</div>
+          ) : null}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function integrationStatusLabel(status: string): string {
+  if (status === "configured") return "configured";
+  if (status === "partial") return "partial";
+  if (status === "missing") return "missing";
+  return status;
 }
 
 function LoadingScreen() {

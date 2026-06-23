@@ -39,6 +39,14 @@ class OpsProjectCyclesResponse(BaseModel):
     next_action: dict[str, Any]
 
 
+class OpsIntegrationsResponse(BaseModel):
+    status: str
+    config_source: dict[str, Any]
+    integrations: list[dict[str, Any]] = Field(default_factory=list)
+    capabilities: dict[str, Any]
+    next_action: dict[str, Any]
+
+
 class OpsChannelAccountCreateRequest(BaseModel):
     platform: str
     account_name: str

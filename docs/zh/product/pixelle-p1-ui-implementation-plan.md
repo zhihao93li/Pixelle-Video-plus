@@ -47,6 +47,7 @@ uv run python -m py_compile web/app.py
 GET /api/ops/current
 GET /api/ops/projects
 GET /api/ops/projects/{project_id}/cycles
+GET /api/ops/integrations
 POST /api/ops/projects/{project_id}/channel-accounts
 ```
 
@@ -128,12 +129,13 @@ Streamlit 仍可作为视频工具单独运行
 3. Ops 默认展示项目、当前轮次、轮次轨道和当前步骤。
 4. 点击闭环步骤，工作面、Inspector、证据抽屉同步变化。
 5. 点击 Projects，能看到平台账号、新增账号表单和编辑账号表单。
-6. 点击 Create / History / Settings，跳到旧 Streamlit 工具入口。
+6. 点击 Settings，进入 `ops-web` 的全局集成状态页；点击 Create / History，跳到旧 Streamlit 工具入口。
 7. 新增或编辑平台账号保存后，当前 UI 选中刚保存的账号。
 8. 无账号空态跳到 Projects；无轮次空态提示回 Codex 直接问 `@pixelle-ops`，不在 UI 写运营事实。
 9. 顶部展示项目、平台账号、选中轮次、当前实验和下一步，并明确 Codex 自然语言是主路径。
 10. “复制兜底上下文”是弱入口，复制内容包含当前选中的 project/account/cycle/experiment ID，并要求上下文不完整时先确认。
 11. 切换历史轮次后，顶部选中轮次、工作面、证据抽屉和兜底上下文同步变化。
+12. Settings / Integrations 展示 LLM、RunningHub、ComfyUI、Fish Audio、COS、Buffer 的脱敏状态；不展示任何明文 key/token/secret。
 
 ## 4. 验收命令
 
@@ -165,5 +167,6 @@ git diff --check
 5. `generation_completed` 之后必须先 `asset_checked`，不能直接进入发布。
 6. 本地输出视频资产必须可被 Ops UI 预览。
 7. mock 发布证据必须保留 `mock: true` 和非空 `mock_label`。
+8. `GET /api/ops/integrations` 必须暴露全局服务状态，且 `returns_plaintext_secrets = false`。
 
 说明：仓库全量 ruff 仍可能被旧代码 lint debt 阻塞，不作为本阶段完成门槛；本阶段只要求改动相关文件通过。

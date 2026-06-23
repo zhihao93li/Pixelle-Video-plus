@@ -1,5 +1,6 @@
 """Read-only Pixelle operations API."""
 
+import os
 from copy import deepcopy
 from pathlib import Path
 from urllib.parse import quote
@@ -13,10 +14,13 @@ from api.schemas.ops import (
     OpsChannelAccountUpdateResponse,
     OpsCurrentResponse,
     OpsExperimentResponse,
+    OpsIntegrationsResponse,
     OpsProjectCyclesResponse,
     OpsProjectsResponse,
 )
 from ops.service import OpsError, OpsService
+from pixelle_video.config.loader import load_config_dict
+from pixelle_video.config.schema import PixelleVideoConfig
 
 router = APIRouter(prefix="/ops", tags=["Ops"])
 
@@ -61,6 +65,11 @@ async def list_ops_project_cycles(project_id: str):
         return _with_asset_preview_urls(OpsService().list_project_cycles(project_id))
     except OpsError as exc:
         _raise_ops_error(exc)
+
+
+@router.get("/integrations", response_model=OpsIntegrationsResponse)
+async def list_ops_integrations():
+    return _build_integrations_response()
 
 
 @router.post(
@@ -216,3 +225,190 @@ def _resolve_output_asset_path(asset_path: str) -> Path | None:
     except ValueError:
         return None
     return resolved
+
+
+def _build_integrations_response() -> dict:
+    config_path = Path("config.yaml")
+    raw_config = load_config_dict(str(config_path))
+    config = PixelleVideoConfig(**raw_config)
+    integrations = _integration_statuses(config)
+    return {
+        "status": "ok",
+        "config_source": {
+            "path": str(config_path),
+            "exists": config_path.exists(),
+            "writable": os.access(config_path, os.W_OK) if config_path.exists() else os.access(Path.cwd(), os.W_OK),
+            "write_owner": "Streamlit Settings / config.yaml",
+        },
+        "integrations": integrations,
+        "capabilities": {
+            "writes_ops_facts": False,
+            "returns_plaintext_secrets": False,
+            "ui_write_scope": "configuration_only",
+            "advanced_settings_url": "http://localhost:8501/Settings",
+        },
+        "next_action": {"kind": "open_settings_if_configuration_missing", "blocked": False},
+    }
+
+
+def _integration_statuses(config: PixelleVideoConfig) -> list[dict]:
+    llm = config.llm
+    comfy = config.comfyui
+    fish = comfy.tts.fish_audio
+    publish = config.publish
+    buffer_channels = publish.buffer.channels.model_dump()
+
+    return [
+        _integration(
+            integration_id="llm",
+            name="LLM",
+            group="generation",
+            description="文案、标题、提示词等生成能力。",
+            required={
+                "API Key": bool(llm.api_key.strip()),
+                "Base URL": bool(llm.base_url.strip()),
+                "Model": bool(llm.model.strip()),
+            },
+            fields=[
+                ("Base URL", llm.base_url),
+                ("Model", llm.model),
+            ],
+            secrets=[("API Key", bool(llm.api_key.strip()), "config.yaml")],
+            owner="Video generation",
+        ),
+        _integration(
+            integration_id="runninghub",
+            name="RunningHub",
+            group="generation",
+            description="云端 ComfyUI / 媒体生成工作流执行能力。",
+            required={"API Key": bool(comfy.runninghub_api_key)},
+            fields=[
+                ("并发限制", comfy.runninghub_concurrent_limit),
+                ("机器规格", comfy.runninghub_instance_type or "默认"),
+                ("默认生图工作流", comfy.image.default_workflow),
+                ("默认视频工作流", comfy.video.default_workflow),
+            ],
+            secrets=[("RunningHub API Key", bool(comfy.runninghub_api_key), "config.yaml")],
+            owner="Video generation",
+        ),
+        _integration(
+            integration_id="comfyui",
+            name="ComfyUI",
+            group="generation",
+            description="本地或自建 ComfyUI 服务地址，供工作流执行使用。",
+            required={"Server URL": bool(comfy.comfyui_url.strip())},
+            fields=[
+                ("Server URL", comfy.comfyui_url),
+                ("TTS 模式", comfy.tts.inference_mode),
+                ("TTS 工作流", comfy.tts.comfyui.default_workflow),
+            ],
+            secrets=[("ComfyUI API Key", bool(comfy.comfyui_api_key), "config.yaml")],
+            owner="Video generation",
+        ),
+        _integration(
+            integration_id="fish_audio",
+            name="Fish Audio",
+            group="generation",
+            description="配音合成能力；可由 config.yaml 或 FISH_API_KEY 提供 key。",
+            required={"API Key": bool(fish.api_key or os.getenv("FISH_API_KEY"))},
+            fields=[
+                ("Base URL", fish.base_url),
+                ("Model", fish.model),
+                ("默认音色 ID", fish.reference_id),
+            ],
+            secrets=[
+                (
+                    "Fish Audio API Key",
+                    bool(fish.api_key or os.getenv("FISH_API_KEY")),
+                    "env:FISH_API_KEY" if os.getenv("FISH_API_KEY") and not fish.api_key else "config.yaml",
+                )
+            ],
+            owner="Video generation",
+        ),
+        _integration(
+            integration_id="cos",
+            name="Tencent COS",
+            group="publish",
+            description="发布前公共视频素材上传与外链承载。",
+            required={
+                "Region": bool(publish.cos.region.strip()),
+                "Bucket": bool(publish.cos.bucket.strip()),
+                "SecretId": bool(publish.cos.secret_id.strip()),
+                "SecretKey": bool(publish.cos.secret_key.strip()),
+                "Public Base URL": bool(publish.cos.public_base_url.strip()),
+            },
+            fields=[
+                ("Region", publish.cos.region),
+                ("Bucket", publish.cos.bucket),
+                ("Public Base URL", publish.cos.public_base_url),
+                ("Endpoint URL", publish.cos.endpoint_url),
+            ],
+            secrets=[
+                ("COS SecretId", bool(publish.cos.secret_id.strip()), "config.yaml"),
+                ("COS SecretKey", bool(publish.cos.secret_key.strip()), "config.yaml"),
+            ],
+            owner="Publish preparation",
+        ),
+        _integration(
+            integration_id="buffer",
+            name="Buffer",
+            group="publish",
+            description="后续真实发布自动化的候选连接；P1 只展示配置状态，不触发发布。",
+            required={
+                "API Key": bool(publish.buffer.api_key.strip()),
+                "At least one channel": any(bool(value.strip()) for value in buffer_channels.values()),
+            },
+            fields=[
+                ("已配置渠道数", sum(1 for value in buffer_channels.values() if value.strip())),
+                ("支持平台", ", ".join(platform for platform, value in buffer_channels.items() if value.strip())),
+            ],
+            secrets=[("Buffer API Key", bool(publish.buffer.api_key.strip()), "config.yaml")],
+            owner="Publish preparation",
+        ),
+    ]
+
+
+def _integration(
+    *,
+    integration_id: str,
+    name: str,
+    group: str,
+    description: str,
+    required: dict[str, bool],
+    fields: list[tuple[str, object]],
+    secrets: list[tuple[str, bool, str]],
+    owner: str,
+) -> dict:
+    missing = [label for label, configured in required.items() if not configured]
+    configured_count = len(required) - len(missing)
+    if not required or configured_count == len(required):
+        status = "configured"
+    elif configured_count:
+        status = "partial"
+    else:
+        status = "missing"
+    return {
+        "id": integration_id,
+        "name": name,
+        "group": group,
+        "status": status,
+        "description": description,
+        "owner": owner,
+        "missing_fields": missing,
+        "safe_fields": [
+            {"label": label, "value": _safe_display_value(value)}
+            for label, value in fields
+            if _safe_display_value(value)
+        ],
+        "secret_refs": [
+            {"label": label, "configured": configured, "source": source}
+            for label, configured, source in secrets
+        ],
+    }
+
+
+def _safe_display_value(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return text if text else ""

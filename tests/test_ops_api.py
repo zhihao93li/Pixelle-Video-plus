@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from api.app import app
@@ -297,6 +299,71 @@ def test_ops_api_updates_channel_account_with_ui_source(tmp_path, monkeypatch):
     assert body["channel_account"]["source"]["kind"] == "ui"
     assert body["channel_account"]["credential_ref"]["buffer_channel_id"] == "buffer-channel-douyin"
     assert projects["projects"][0]["channel_accounts"][0]["account_name"] == "PetWoods Douyin"
+
+
+def test_ops_api_lists_integrations_without_plaintext_secrets(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text(
+        """
+project_name: Pixelle-Video
+llm:
+  api_key: sk-test-secret
+  base_url: https://example.test/v1
+  model: test-model
+comfyui:
+  comfyui_url: http://127.0.0.1:8188
+  comfyui_api_key: comfy-secret
+  runninghub_api_key: runninghub-secret
+  runninghub_concurrent_limit: 2
+  image:
+    default_workflow: runninghub/image.json
+  video:
+    default_workflow: runninghub/video.json
+  tts:
+    inference_mode: fish
+    fish_audio:
+      api_key: fish-secret
+      base_url: https://api.fish.audio
+      model: s2-pro
+      reference_id: fish-voice
+publish:
+  buffer:
+    api_key: buffer-secret
+    channels:
+      x: buffer-x-channel
+  cos:
+    region: ap-singapore
+    bucket: pixelle-1300000000
+    secret_id: cos-secret-id
+    secret_key: cos-secret-key
+    public_base_url: https://pixelle.example.test
+""",
+        encoding="utf-8",
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/ops/integrations")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["capabilities"]["returns_plaintext_secrets"] is False
+    integrations = {item["id"]: item for item in body["integrations"]}
+    assert integrations["llm"]["status"] == "configured"
+    assert integrations["buffer"]["status"] == "configured"
+    assert integrations["cos"]["status"] == "configured"
+    assert integrations["buffer"]["safe_fields"][0]["label"] == "已配置渠道数"
+    rendered = json.dumps(body, ensure_ascii=False)
+    for secret in (
+        "sk-test-secret",
+        "comfy-secret",
+        "runninghub-secret",
+        "fish-secret",
+        "buffer-secret",
+        "cos-secret-id",
+        "cos-secret-key",
+    ):
+        assert secret not in rendered
 
 
 def test_ops_api_lists_project_cycles_with_experiment_evidence(tmp_path, monkeypatch):

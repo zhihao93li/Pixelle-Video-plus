@@ -384,7 +384,7 @@ UI 模块边界分三层：
 | --- | --- | --- | --- |
 | Ops | `ops-web` / `/ops` | 运营状态、证据链、资产、下一步提示 | 发起推荐、生成、发布、指标、复盘 |
 | Video | Streamlit `Create / History` | 视频生成工作台和生成历史 | 自动把 sandbox 生成写成运营事实 |
-| Settings / Integrations | Streamlit `Settings` | LLM、RunningHub、ComfyUI、Fish Audio、COS、Buffer 等生成服务配置 | 把系统配置归属到单个运营实验 |
+| Settings / Integrations | `ops-web` / `/ops` + Streamlit `Settings` | 全局能力脱敏状态、高级配置入口；编辑明文 key 仍走旧 Settings | 把系统配置归属到单个运营实验；向 Ops UI 返回明文 secret |
 
 P1-A 最小可接受方式：
 
@@ -404,7 +404,7 @@ P1-A 独立 Ops 前端导航固定为：
 Ops / Projects / Create / History / Settings / Help
 ```
 
-`Ops` 是独立前端默认页；`Create`、`History` 和 `Settings` 属于 Streamlit Video 工具模块，在 Ops 前端中只作为跳转入口。
+`Ops` 是独立前端默认页；`Projects` 和 `Settings / Integrations` 是 Ops 前端内的配置与状态页；`Create`、`History` 属于 Streamlit Video 工具模块，在 Ops 前端中只作为跳转入口。`Settings / Integrations` 的高级编辑仍跳到 Streamlit `Settings`。
 
 P1-A 当前 UI demo 位于：
 
@@ -933,11 +933,14 @@ GET /api/ops/current
 GET /api/ops/projects
 GET /api/ops/projects/{project_id}/cycles
 GET /api/ops/experiments/{experiment_id}
+GET /api/ops/integrations
 POST /api/ops/projects/{project_id}/channel-accounts
 PATCH /api/ops/channel-accounts/{channel_account_id}
 ```
 
 `GET /api/ops/projects/{project_id}/cycles` 是 P1-A 支撑 `Ops` 历史轮次轨道的只读 query。它只组装已有 Project、Cycle、Experiment、ContentItem 和 OpsEvent 视图，不创建、不更新、不删除任何运营对象。
+
+`GET /api/ops/integrations` 是 P1-D 支撑 `Settings / Integrations` 的只读 query。它读取全局配置并返回脱敏状态：服务是否 configured / partial / missing、非敏感元数据、缺失字段和 secret 是否配置。它不得返回 API Key、SecretId、SecretKey、token 或平台密码原文，不得写入运营事实。
 
 `POST /api/ops/projects/{project_id}/channel-accounts` 只能写入：
 

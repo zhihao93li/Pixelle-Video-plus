@@ -369,7 +369,7 @@ P1-A 只做轻量定位：
 
 目的：管理全局系统能力配置入口。
 
-P1-A 最小内容：
+P1 最小内容：
 
 1. LLM 配置状态。
 2. RunningHub / ComfyUI 配置状态。
@@ -379,7 +379,7 @@ P1-A 最小内容：
 6. 平台账号 credential reference 说明。
 7. 不支持自动授权的平台提示。
 
-如果现有 Settings 已经管理这些配置，P1-A 不重复造一套，只改标题和说明。
+`ops-web` 内的 `Settings / Integrations` 只做脱敏状态页和高级配置入口；如果用户需要编辑明文 key、Secret 或高级参数，仍跳到旧 Streamlit `Settings`。Ops UI 不返回、不展示、不保存明文 secret。
 
 P1-A 低保真线框：
 
@@ -553,6 +553,24 @@ GET /api/ops/projects
 POST /api/ops/projects/{project_id}/channel-accounts
 PATCH /api/ops/channel-accounts/{channel_account_id}
 ```
+
+### Settings / Integrations
+
+依赖：
+
+```text
+GET /api/ops/integrations
+```
+
+返回内容只能包含：
+
+1. 服务 `configured / partial / missing` 状态。
+2. 非敏感字段，例如 model、base_url、workflow、bucket、public_base_url、已配置渠道数。
+3. secret 是否已配置和来源，例如 `config.yaml` 或 `env:FISH_API_KEY`。
+4. 缺失字段。
+5. 高级配置入口。
+
+禁止返回 API Key、SecretId、SecretKey、token、平台密码或 OAuth refresh token 原文。
 
 P1-B 账号配置交互规则：
 

@@ -127,6 +127,37 @@ export interface CurrentResponse {
   next_action: NextAction;
 }
 
+export interface IntegrationSafeField {
+  label: string;
+  value: string;
+}
+
+export interface IntegrationSecretRef {
+  label: string;
+  configured: boolean;
+  source: string;
+}
+
+export interface IntegrationStatus {
+  id: string;
+  name: string;
+  group: "generation" | "publish" | string;
+  status: "configured" | "partial" | "missing" | string;
+  description: string;
+  owner: string;
+  missing_fields: string[];
+  safe_fields: IntegrationSafeField[];
+  secret_refs: IntegrationSecretRef[];
+}
+
+export interface IntegrationsResponse {
+  status: string;
+  config_source: JsonObject;
+  integrations: IntegrationStatus[];
+  capabilities: JsonObject;
+  next_action: NextAction;
+}
+
 export interface CreateChannelAccountInput {
   platform: string;
   account_name: string;

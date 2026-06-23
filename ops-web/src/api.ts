@@ -2,6 +2,7 @@ import type {
   CreateChannelAccountInput,
   CreateChannelAccountResponse,
   CurrentResponse,
+  IntegrationsResponse,
   ProjectCyclesResponse,
   ProjectsResponse,
   UpdateChannelAccountInput,
@@ -35,6 +36,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function listProjects(): Promise<ProjectsResponse> {
   return request<ProjectsResponse>("/api/ops/projects");
+}
+
+export function listIntegrations(): Promise<IntegrationsResponse> {
+  return request<IntegrationsResponse>("/api/ops/integrations");
 }
 
 export function listProjectCycles(projectId: string): Promise<ProjectCyclesResponse> {

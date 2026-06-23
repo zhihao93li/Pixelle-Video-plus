@@ -85,9 +85,9 @@ P1 UI 不能直接把内容改成已发布、已完成复盘或表现良好。
 | --- | --- | --- | --- |
 | Ops | `ops-web` / `/ops` | 运营状态、证据链、资产、下一步提示 | 新增独立前端 |
 | Projects | `ops-web` / `/ops` | 项目和平台账号配置 | 新增独立前端内页面 |
+| Settings / Integrations | `ops-web` / `/ops` + Streamlit `Settings` | 全局能力状态、脱敏配置概览、高级配置入口 | 新增只读状态页，编辑仍走旧 Settings |
 | Video | Streamlit `Create` | 视频生成工作台 / sandbox | 保留，不改造成运营首页 |
 | Video History | `History` | 生成历史和已有生成包 | 保留，不作为运营证据链 |
-| Settings / Integrations | Streamlit `Settings` | LLM、RunningHub、ComfyUI、Fish Audio、COS、Buffer 等生成服务配置 | 保留为旧工具配置入口 |
 
 关键边界：
 
@@ -95,7 +95,8 @@ P1 UI 不能直接把内容改成已发布、已完成复盘或表现良好。
 2. 用户在独立 `ops-web` 里看运营状态和证据。
 3. 用户在独立 `ops-web` 的 `Projects` 里配置项目下的平台账号。
 4. 用户在 Streamlit `Create` 里可以手工试生成，但手工生成不会自动进入运营闭环。
-5. 用户在 Streamlit `Settings` 里配置 LLM、RunningHub、ComfyUI、Fish Audio、COS、Buffer key 等生成服务能力。
+5. 用户在独立 `ops-web` 的 `Settings / Integrations` 里查看 LLM、RunningHub、ComfyUI、Fish Audio、COS、Buffer 的脱敏配置状态。
+6. 用户需要编辑明文 key 或高级参数时，仍跳到 Streamlit `Settings`；Ops UI 不展示、不保存明文 secret。
 
 ### 3.5 Ops 页面信息职责
 
@@ -332,7 +333,7 @@ Ops / Projects / Create / History / Settings / Help
 2. `Projects`：项目和平台账号配置。
 3. `Create`：跳转到旧 Streamlit 视频生成工作台 / sandbox，不是运营首页。
 4. `History`：跳转到旧 Streamlit 生成历史，不等于运营证据链。
-5. `Settings / Integrations`：跳转到旧 Streamlit 配置入口。
+5. `Settings / Integrations`：在 `ops-web` 展示全局能力脱敏状态，并提供旧 Streamlit 配置入口。
 6. `Help`：后续可保留现有帮助入口。
 
 P1-A 不新增顶层 `Assets` 或 `Experiment Detail` 页面。实验详情和资产先折叠在 `Ops` 中展示；如果 P1-A 使用中证明需要独立页面，再进入 P1-B。
@@ -348,6 +349,7 @@ P1-A 需要在 P0 API 基础上补充：
 ```text
 GET /api/ops/current
 GET /api/ops/experiments/{experiment_id}
+GET /api/ops/integrations
 ```
 
 新增/补齐：
@@ -360,6 +362,8 @@ PATCH /api/ops/channel-accounts/{channel_account_id}
 ```
 
 `GET /api/ops/projects/{project_id}/cycles` 只读返回项目下的运营轮次、每轮内容实验、事件、内容资产和 `next_action`，用于支撑 `Ops` 左侧历史轮次轨道。它不写入运营事实，也不替代 Codex 插件。
+
+`GET /api/ops/integrations` 只读返回全局服务配置状态。它只能返回 `configured / partial / missing`、非敏感元数据、缺失字段和 secret 是否已配置，不能返回 API Key、SecretId、SecretKey、token 或平台密码原文。
 
 P1-A/P1-B 暂不新增：
 
