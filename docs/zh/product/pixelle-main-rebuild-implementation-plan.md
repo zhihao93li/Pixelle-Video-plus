@@ -261,7 +261,7 @@ pixelle_write_memory
 
 新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先调用 `pixelle_get_capabilities`。当前期望协议版本和对话契约版本都是 `p0.9.20260622`，并且 `conversation_contract.requires_capability_first = true`，项目选择、平台账号选择、内容形态选择、已有成片处理、pipeline 选择、文案审批、异步生成状态、资产检查这些 conversation gates 必须全部可用；否则停止，不走旧的直接生成流程。
 
-P0.9 对话体验收口要求 capability 返回 `intent_routes`：项目选择、平台账号选择、状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。Codex 应该用这些 route 解释自然语言请求，避免要求用户发送长工具清单。
+P0.9 对话体验收口要求 capability 返回 `intent_routes`：Codex 自然语言入口、UI 兜底上下文、项目选择、平台账号选择、状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。Codex 应该用这些 route 解释自然语言请求，避免要求用户发送长工具清单；UI 复制内容只能作为新对话、多项目、多账号或历史轮次定位不清时的兜底上下文。
 
 mock P0 收口只用于验收闭环，不代表真实发布或真实平台数据。mock 发布证据和 mock metrics 必须同时带 `mock: true` 和非空 `mock_label`；普通确认备注不能被当作发布证据。
 

@@ -57,6 +57,12 @@ def main():
 
     st.markdown(f"### {tr('create.title', fallback='Create Video')}")
     render_config_status_bar()
+    st.caption(
+        tr(
+            "create.sandbox.caption",
+            fallback="This is the video generation workspace / sandbox. Start operating experiments from Codex and inspect status in Ops.",
+        )
+    )
     
     # ========================================================================
     # Pipeline Selection & Delegation

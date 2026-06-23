@@ -1,10 +1,10 @@
 # Pixelle 从 main 重做技术架构方案
 
-版本：v1.0  
-日期：2026-06-20  
-状态：PRD 配套技术方案  
-关联文档：`docs/zh/product/pixelle-main-rebuild-prd.md`  
-实施计划：`docs/zh/product/pixelle-main-rebuild-implementation-plan.md`  
+版本：v1.2
+日期：2026-06-23
+状态：PRD 配套技术方案，含 P1-A UI 边界收敛
+关联文档：`docs/zh/product/pixelle-main-rebuild-prd.md`
+实施计划：`docs/zh/product/pixelle-main-rebuild-implementation-plan.md`
 
 ## 1. 架构目标
 
@@ -20,8 +20,8 @@
 2. `cheat-on-content` 继续做 Codex 方法论和校准工作流。
 3. Pixelle Codex Plugin 作为 Codex 的工具入口。
 4. Pixelle 新增的运营模块只做产品状态、证据链、闭环编排和受控写入。
-5. API 主要做只读查询和调试入口，不承载核心规则。
-6. Pixelle UI 只做只读展示，不做运营入口。
+5. API 主要做查询、调试和有限配置写入入口，不承载核心规则。
+6. Pixelle UI 默认做展示和配置，不做运营入口。
 
 技术上的正确分层不是先拆服务，而是先拆依赖方向、数据所有权和写入权限。
 
@@ -344,10 +344,11 @@ ops/adapters/
 
 ### 3.7 API 层
 
-API 是薄入口。P0 默认只作为只读查询和调试入口；运营写入只走 Pixelle Codex Plugin。
+API 是薄入口。P0 默认只作为只读查询和调试入口；P1-A 允许 UI 通过 API 写入平台账号元数据和 credential reference 这类配置对象。运营事实写入仍只走 Pixelle Codex Plugin。
 
-1. UI query API：给 Pixelle UI 做只读展示。
+1. UI query API：给 Pixelle UI 做状态和证据展示。
 2. Debug query API：给本地排查状态和证据链。
+3. UI config API：给 Pixelle UI 写入项目下的平台账号配置。
 
 建议新增：
 
@@ -370,22 +371,58 @@ api/schemas/ops.py
 2. 在 schema 里写业务不变量。
 3. 直接操作 `pixelle_video`。
 4. 直接修改 cheat workspace。
-5. 为 UI 暴露绕过 Plugin/Ops 的状态修改入口。
+5. 为 UI 暴露绕过 Plugin/Ops 的运营状态修改入口。
+6. 为 UI 暴露生成、发布、指标、复盘或 memory 写入口。
 
 ### 3.8 UI 层
 
-P0 不需要新建大型前端应用。UI 的定位是只读展示面板。
+P0 不需要新建大型前端应用。P1-A UI 的定位是运营状态与配置工作台；实现形态采用独立 `ops-web`，不再把完整 Ops app 嵌进 Streamlit。
 
-最小可接受方式：
+UI 模块边界分三层：
 
-1. 继续使用现有 `web/` 或简单本地页面展示状态。
+| 层 | 用户入口 | 责任 | 禁止 |
+| --- | --- | --- | --- |
+| Ops | `ops-web` / `/ops` | 运营状态、证据链、资产、下一步提示 | 发起推荐、生成、发布、指标、复盘 |
+| Video | Streamlit `Create / History` | 视频生成工作台和生成历史 | 自动把 sandbox 生成写成运营事实 |
+| Settings / Integrations | Streamlit `Settings` | LLM、RunningHub、ComfyUI、Fish Audio、COS、Buffer 等生成服务配置 | 把系统配置归属到单个运营实验 |
+
+P1-A 最小可接受方式：
+
+1. 使用独立 `ops-web/` 展示状态，开发时可由 Vite 运行，构建后可由 FastAPI 挂载到 `/ops`。
 2. 展示当前项目、当前周期、当前阻断、下一步和最近 Codex 动作。
 3. 展示生成资产、发布证据、指标快照、复盘和项目记忆。
-4. 只调用 query API。
+4. 查询只调用 query API。
 5. 不在前端复制核心规则。
 6. 不提供候选、预测、发布、复盘和记忆写入的主操作表单。
+7. 允许写入平台账号元数据、账号状态、credential reference 和 Buffer channel 映射。
 
-后续可以在 UI 中增加平台账号绑定，但它的边界是配置入口：写入账号元数据和 credential reference，供 Codex/Pixelle Ops 选择项目下的分发账号。UI 账号绑定不改变运营入口，不直接触发推荐、生成、发布、指标或复盘写入。
+UI 账号绑定的边界是配置入口：写入账号元数据和 credential reference，供 Codex/Pixelle Ops 选择项目下的分发账号。UI 账号绑定不改变运营入口，不直接触发推荐、生成、发布、指标或复盘写入。
+
+P1-A 独立 Ops 前端导航固定为：
+
+```text
+Ops / Projects / Create / History / Settings / Help
+```
+
+`Ops` 是独立前端默认页；`Create`、`History` 和 `Settings` 属于 Streamlit Video 工具模块，在 Ops 前端中只作为跳转入口。
+
+P1-A 当前 UI demo 位于：
+
+```text
+docs/zh/product/pixelle-p1-ops-loop-demo.html
+```
+
+该 demo 是信息架构和交互验收物，只约束页面职责、字段披露和状态联动；它不进入 Pixelle Ops 数据库，不作为运营事实、生成资产、发布证据、指标或复盘记录。
+
+`ops-web` 实现必须遵守：
+
+1. 左侧轮次闭环只做定位，不承载长详情。
+2. 中间工作面展示选中步骤的真实业务对象。
+3. Inspector 嵌入中间工作面，只展示判断辅助。
+4. 底部证据区默认折叠，只做审计追溯。
+5. 点击轮次或步骤时，中间工作面、Inspector 和证据区同步变化。
+
+服务层状态机必须保持同一闭环语义：`generation_completed` 之后的下一步是 `check_generation_asset`；只有通过 `asset_checked`，才能进入 `record_publish`。旧数据里即使缺少 `generation_requested`，只要存在生成完成证据，也不能跳过资产检查。
 
 如果后续要恢复 `apps/console`，必须作为单独阶段进入，不应作为 P0 必须项。
 
@@ -414,7 +451,7 @@ Pixelle Ops 只保存 `MediaAssetRef`：
 }
 ```
 
-不把大文件、截图、demo HTML 放进主线分支。
+不把大文件、运行截图、临时 demo HTML 放进产品状态或资产存储。P1-A 设计验收 demo 可以放在 `docs/zh/product/` 下，但只能作为文档产物，不能被 Ops 当成资产、证据或运行时依赖。
 
 ## 4. 依赖方向
 
@@ -437,11 +474,11 @@ flowchart TD
   Assets[("asset files")]
 
   User --> Codex
-  User -.查看状态.-> UI
+  User -.查看状态和配置.-> UI
   Codex --> CheatWS
   Codex --> Plugin
   Plugin --> App
-  UI -.只读查询.-> API
+  UI -.查询和配置写入.-> API
   API --> App
   App --> Domain
   App --> DB
@@ -457,7 +494,7 @@ flowchart TD
 1. `pixelle_video` 不能依赖 `ops`。
 2. `ops.domain` 不能依赖 `api`、`web`、`apps`、`pixelle_video`。
 3. `api` 可以依赖 `ops.application`，但不能绕过它访问 repository。
-4. UI 只能调用 API 或 query service，不能直接写数据库。
+4. UI 只能调用 API 或 query/config service，不能直接写数据库。
 5. Codex 只能通过 Pixelle Codex Plugin 提交命令或 draft，不能直接写产品表。
 6. UI 不能调用 Pixelle Codex Plugin 写工具。
 
@@ -885,18 +922,64 @@ Codex 写入必须额外保留：
 
 ## 9. Plugin 与 API 设计
 
-P0 的写入口是 Pixelle Codex Plugin。HTTP API 只围绕 UI 只读展示和本地调试，不做后台 CRUD。
+P0 的运营写入口是 Pixelle Codex Plugin。HTTP API 围绕 UI 查询、本地调试和 P1-A 有限配置写入，不做后台 CRUD，不承载运营状态机。
 
-### 9.1 UI Query API
+### 9.1 UI Query / Config API
 
-UI 只能使用 query API。
+UI 默认使用 query API。P1-A 额外允许创建平台账号配置。
 
 ```text
 GET /api/ops/current
+GET /api/ops/projects
+GET /api/ops/projects/{project_id}/cycles
+GET /api/ops/experiments/{experiment_id}
+POST /api/ops/projects/{project_id}/channel-accounts
+PATCH /api/ops/channel-accounts/{channel_account_id}
+```
+
+`GET /api/ops/projects/{project_id}/cycles` 是 P1-A 支撑 `Ops` 历史轮次轨道的只读 query。它只组装已有 Project、Cycle、Experiment、ContentItem 和 OpsEvent 视图，不创建、不更新、不删除任何运营对象。
+
+`POST /api/ops/projects/{project_id}/channel-accounts` 只能写入：
+
+1. platform。
+2. account_name。
+3. account_handle。
+4. external_account_id。
+5. status。
+6. credential_ref。
+7. Buffer channel 映射。
+
+`PATCH /api/ops/channel-accounts/{channel_account_id}` 从 P1-B 起支持同一组字段的全量更新。它只能更新平台账号配置，不能更新运营事实。
+
+它必须写入：
+
+```json
+{
+  "kind": "ui",
+  "surface": "p1_ops_ui",
+  "confirmed_by_user": true
+}
+```
+
+它不能改变 operation cycle、content experiment、content item、publish record、metrics snapshot、retro 或 memory。
+
+P1-A 不新增：
+
+```text
+POST /api/ops/experiments
+POST /api/ops/generation
+POST /api/ops/publish
+POST /api/ops/metrics
+POST /api/ops/retro
+```
+
+以下 query 是否补齐进入 P1-B，由 P1-A 真实使用反馈决定：
+
+```text
 GET /api/ops/projects/{project_id}
+GET /api/ops/projects/{project_id}/channel-accounts
 GET /api/ops/projects/{project_id}/context-export
 GET /api/ops/projects/{project_id}/cheat-workspace-summary
-GET /api/ops/experiments/{experiment_id}
 ```
 
 ### 9.2 Pixelle Codex Plugin 工具入口
@@ -926,7 +1009,9 @@ pixelle_write_memory
 
 `pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先读取它；如果缺失、`protocol_version` 不是 `p0.9.20260622`、`conversation_contract_version` 不是 `p0.9.20260622`、`conversation_contract.requires_capability_first` 不为 true，或必需 conversation gates / intent routes 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
 
-P0.9 的 `intent_routes` 覆盖：项目选择、平台账号选择、状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。它不是新的业务状态机，只是把 Codex 对话层的自然语言路由显式化，减少用户手写工具步骤的需要。
+P0.9 的 `intent_routes` 覆盖：Codex 自然语言入口、UI 兜底上下文、项目选择、平台账号选择、状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。它不是新的业务状态机，只是把 Codex 对话层的自然语言路由显式化，减少用户手写工具步骤的需要。
+
+Codex 自然语言入口是主路径：用户应该能直接问“下一步做什么”“查看当前状态”“下一条内容适合做什么”。UI 复制上下文只是兜底，不是授权机制；即使收到 UI 复制的 project/account/cycle/experiment ID，Codex 也必须先读取 capability 和实时状态，发现缺失或冲突时先让用户确认。
 
 当存在多个运营项目或多个平台账号时，Codex 必须先调用 `pixelle_list_projects`，再由用户选择 `project_id` 或 `channel_account_id`。`pixelle_get_current(project_id=...)` / `pixelle_get_current(channel_account_id=...)` 是明确选择读取；默认最近项目只能用于单项目场景，不能驱动推荐或写入。
 
@@ -1058,7 +1143,7 @@ P0 是当前唯一执行范围。
 7. Pixelle Codex Plugin 记录发布证据。
 8. Pixelle Codex Plugin 录入 metrics。
 9. Pixelle Codex Plugin 写 retro 和 memory。
-10. UI query API 只读展示当前状态。
+10. UI query API 展示当前状态。
 
 验收：
 
@@ -1091,16 +1176,16 @@ P0 是当前唯一执行范围。
 2. Codex 不直接写产品状态。
 3. cheat workspace 不被 Pixelle 自动污染。
 
-### P2：只读展示界面
+### P1-A：运营状态与配置 UI
 
 产出：
 
-1. 当前项目页。
-2. 当前状态页。
-3. 证据链结果页。
-4. 生成资产预览。
-5. Codex draft/apply 审计记录。
-6. 平台账号绑定配置页，只写账号元数据和 credential reference。
+1. 独立 `ops-web` 的 `Ops` 默认页。
+2. `Projects` 页面。
+3. 当前状态、证据链和生成资产预览。
+4. 平台账号创建配置，只写账号元数据和 credential reference。
+5. 旧 Streamlit `Create / History` 保留为 Video 模块。
+6. 旧 Streamlit `Settings` 保留为生成服务配置入口。
 
 不做：
 
@@ -1109,6 +1194,13 @@ P0 是当前唯一执行范围。
 3. 大型 dashboard。
 4. 运营操作表单。
 5. 从 UI 触发推荐、生成、发布、指标或复盘写入。
+6. 重写视频生成前端。
+7. 顶层 `Assets` 页面。
+8. 独立 `Experiment Detail` 页面。
+
+### P2：UI 技术栈和体验升级
+
+只有在 P1-A 真实使用验证信息架构有效后，再决定是否进入独立实验详情、资产中心或更完整账号管理。
 
 ### P3：证据自动化
 
@@ -1169,7 +1261,7 @@ P0 是当前唯一执行范围。
 1. `apps/console`
 2. 多个后台页面
 3. audit 产物
-4. demo HTML
+4. 临时 demo HTML
 5. 大量 screenshots
 
 ## 13. 防止再次失控的硬约束
@@ -1192,7 +1284,7 @@ P0 推荐规模：
 3. `ops/adapters`：500 行以内。
 4. API schema/router：400 行以内。
 5. 测试：1,500 行以内。
-6. UI 只读展示代码：500 行以内。
+6. UI 查询和配置代码：800 行以内。
 
 超过这些数字时，优先拆阶段，不要继续堆。
 
@@ -1202,7 +1294,7 @@ P0 推荐规模：
 
 1. 临时实验运行产物。
 2. `audits/` 截图。
-3. demo HTML。
+3. 非文档验收用途的 demo HTML。
 4. 大量静态 assets。
 5. 和 P0 闭环无关的前端页面。
 6. 临时迁移脚本。
@@ -1256,11 +1348,11 @@ main
   -> 新建 ops/application，提供 use case
   -> 新建 ops/infrastructure，保存产品状态
   -> 新建 codex_plugin/server.py，暴露 Pixelle Codex Plugin 工具入口
-  -> 新建 api/routers/ops.py，只暴露 UI query/debug API
+  -> 新建 api/routers/ops.py，先暴露 UI query/debug API
   -> 新建 ops/adapters/generation_pixelle_video.py，接现有生成核心
   -> 新建 ops/adapters/cheat_workspace.py，只读摘要
   -> 新建 ops/adapters/codex_writeback.py，draft + validate + apply
-  -> 最后才做只读展示 UI
+  -> 最后才做状态展示 UI
 ```
 
 这条路线对现有功能的影响最小：

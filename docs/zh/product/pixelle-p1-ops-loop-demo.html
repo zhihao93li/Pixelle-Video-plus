@@ -1,0 +1,1769 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f6f3" />
+    <title>Pixelle P1 Ops Loop Demo</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f6f3;
+        --panel: #ffffff;
+        --soft: #f9faf7;
+        --ink: #17201b;
+        --muted: #667269;
+        --line: #dfe4dd;
+        --line-soft: #edf0eb;
+        --accent: #2f6f5e;
+        --accent-ink: #17493e;
+        --accent-soft: #e3f1eb;
+        --warn: #8b5c13;
+        --warn-soft: #fff3d8;
+        --mock: #7255a3;
+        --shadow: 0 24px 70px rgba(31, 41, 34, 0.1);
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(90deg, rgba(47, 111, 94, 0.08), transparent 34%),
+          linear-gradient(180deg, #fff 0, var(--bg) 48%);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        letter-spacing: 0;
+        overflow-x: hidden;
+        -webkit-tap-highlight-color: rgba(47, 111, 94, 0.16);
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .skip-link {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 10;
+        transform: translateY(-160%);
+        padding: 8px 10px;
+        border-radius: 7px;
+        background: var(--ink);
+        color: #fff;
+        text-decoration: none;
+      }
+
+      .skip-link:focus-visible {
+        transform: translateY(0);
+        outline: 3px solid rgba(47, 111, 94, 0.28);
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+        min-height: 100svh;
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100svh;
+        padding: 26px 18px;
+        border-right: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.72);
+        backdrop-filter: blur(20px);
+      }
+
+      .brand {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 30px;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 7px;
+        background: var(--ink);
+        color: #fff;
+        font-weight: 800;
+      }
+
+      .brand-title {
+        font-weight: 760;
+      }
+
+      .brand-subtitle {
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .nav {
+        display: grid;
+        gap: 4px;
+      }
+
+      .nav a,
+      .nav-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 38px;
+        padding: 0 10px;
+        color: var(--muted);
+        text-decoration: none;
+        border-radius: 7px;
+        font-size: 14px;
+      }
+
+      .nav-item {
+        opacity: 0.72;
+      }
+
+      .nav a.active {
+        background: var(--accent-soft);
+        color: var(--accent-ink);
+        font-weight: 700;
+      }
+
+      .sidebar-footer {
+        position: absolute;
+        right: 18px;
+        bottom: 24px;
+        left: 18px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .main {
+        min-width: 0;
+        padding: 26px 32px 36px;
+      }
+
+      .topbar {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 22px;
+      }
+
+      .project-line {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .project-title {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.2;
+        font-weight: 780;
+      }
+
+      .page-note {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.8);
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .pill.strong {
+        border-color: transparent;
+        background: var(--accent-soft);
+        color: var(--accent-ink);
+        font-weight: 720;
+      }
+
+      .pill.mock {
+        border-color: rgba(114, 85, 163, 0.18);
+        background: rgba(114, 85, 163, 0.1);
+        color: var(--mock);
+        font-weight: 680;
+      }
+
+      .actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .button {
+        min-height: 34px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: #fff;
+        color: var(--ink);
+        cursor: pointer;
+        touch-action: manipulation;
+        transition:
+          background-color 160ms ease,
+          border-color 160ms ease,
+          color 160ms ease,
+          transform 160ms ease;
+      }
+
+      .button.primary {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #fff;
+        font-weight: 720;
+      }
+
+      .button.primary:hover:not(:disabled) {
+        border-color: var(--accent-ink);
+        background: var(--accent-ink);
+        color: #fff;
+      }
+
+      .button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .button:hover:not(:disabled),
+      .cycle-button:hover,
+      .tab:hover,
+      .load-more:hover,
+      .step:hover {
+        border-color: rgba(47, 111, 94, 0.32);
+        background-color: var(--accent-soft);
+        color: var(--accent-ink);
+      }
+
+      .button:active:not(:disabled),
+      .cycle-button:active,
+      .tab:active,
+      .step:active {
+        transform: translateY(1px);
+      }
+
+      .button:focus-visible,
+      .cycle-button:focus-visible,
+      .tab:focus-visible,
+      .step:focus-visible,
+      .load-more:focus-visible {
+        outline: 3px solid rgba(47, 111, 94, 0.2);
+        outline-offset: 2px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 300px minmax(560px, 1fr);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: var(--shadow);
+      }
+
+      .panel.flat {
+        box-shadow: none;
+      }
+
+      .panel-header {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 16px 16px 12px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .panel-title {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 760;
+      }
+
+      .panel-note {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .cycle-rail {
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .cycle-button {
+        display: grid;
+        grid-template-columns: 42px minmax(0, 1fr);
+        gap: 10px;
+        width: 100%;
+        padding: 10px;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius);
+        background: var(--soft);
+        color: var(--ink);
+        text-align: left;
+        cursor: pointer;
+        touch-action: manipulation;
+        transition:
+          background-color 160ms ease,
+          border-color 160ms ease,
+          color 160ms ease,
+          transform 160ms ease;
+      }
+
+      .cycle-button.active {
+        border-color: rgba(47, 111, 94, 0.36);
+        background: var(--accent-soft);
+      }
+
+      .cycle-number {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 999px;
+        background: #fff;
+        color: var(--accent-ink);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .cycle-topic {
+        display: -webkit-box;
+        overflow: hidden;
+        font-size: 13px;
+        font-weight: 740;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+
+      .cycle-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .load-more {
+        min-height: 34px;
+        border: 1px dashed var(--line);
+        border-radius: var(--radius);
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 12px;
+        touch-action: manipulation;
+        transition:
+          background-color 160ms ease,
+          border-color 160ms ease,
+          color 160ms ease;
+      }
+
+      .loop {
+        padding: 10px 12px 14px;
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 10px;
+        position: relative;
+        width: 100%;
+        padding: 8px 6px 8px 0;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        touch-action: manipulation;
+        transition:
+          background-color 160ms ease,
+          border-color 160ms ease,
+          color 160ms ease,
+          transform 160ms ease;
+      }
+
+      .step:not(:last-child)::before {
+        position: absolute;
+        top: 34px;
+        bottom: -10px;
+        left: 13px;
+        width: 2px;
+        background: var(--line);
+        content: "";
+      }
+
+      .dot {
+        z-index: 1;
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .step.done .dot {
+        border-color: transparent;
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .step.mock .dot {
+        border-color: transparent;
+        background: var(--mock);
+        color: #fff;
+      }
+
+      .step.current .dot {
+        border: 2px solid var(--accent);
+        background: #fff;
+        color: var(--accent-ink);
+      }
+
+      .step.missing .dot {
+        border-style: dashed;
+        background: #fff;
+        color: var(--muted);
+      }
+
+      .step.selected {
+        border-color: rgba(47, 111, 94, 0.22);
+        background: var(--accent-soft);
+      }
+
+      .step.mock.selected {
+        border-color: rgba(114, 85, 163, 0.22);
+        background: rgba(114, 85, 163, 0.08);
+      }
+
+      .step-title {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        justify-content: space-between;
+        margin: 1px 0 3px;
+        font-size: 13px;
+        font-weight: 730;
+      }
+
+      .step-badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 18px;
+        padding: 0 6px;
+        border-radius: 999px;
+        background: #fff;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 760;
+        white-space: nowrap;
+      }
+
+      .step.mock .step-badge {
+        background: rgba(114, 85, 163, 0.12);
+        color: var(--mock);
+      }
+
+      .step-body {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .step.current .step-title {
+        color: var(--accent-ink);
+      }
+
+      .workspace {
+        min-height: 430px;
+      }
+
+      .workspace-hero {
+        padding: 20px 20px 18px;
+      }
+
+      .stage-kicker {
+        margin-bottom: 8px;
+        color: var(--accent-ink);
+        font-size: 13px;
+        font-weight: 760;
+      }
+
+      .stage-title {
+        margin: 0;
+        max-width: 660px;
+        font-size: 30px;
+        line-height: 1.15;
+        font-weight: 820;
+        overflow-wrap: anywhere;
+        text-wrap: balance;
+      }
+
+      .stage-summary {
+        margin: 14px 0 0;
+        max-width: 700px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.65;
+      }
+
+      .object-detail {
+        display: grid;
+        gap: 12px;
+        padding: 0 20px 18px;
+      }
+
+      .object-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(190px, 0.55fr);
+        gap: 12px;
+      }
+
+      .object-card {
+        padding: 14px;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius);
+        background: var(--soft);
+      }
+
+      .object-card.wide {
+        grid-column: 1 / -1;
+      }
+
+      .object-card-title {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .object-card-value {
+        margin-top: 8px;
+        font-size: 20px;
+        font-weight: 800;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+      }
+
+      .object-card-body {
+        margin-top: 8px;
+        color: #26312b;
+        font-size: 13px;
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+
+      .inspector-panel {
+        margin: 0 20px 18px;
+        border: 1px solid rgba(47, 111, 94, 0.18);
+        border-radius: var(--radius);
+        background: linear-gradient(180deg, #fff, var(--soft));
+      }
+
+      .inspector-panel[hidden] {
+        display: none;
+      }
+
+      .inspector-head {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 14px 14px 10px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .inspector-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .mini-preview {
+        display: grid;
+        gap: 10px;
+        min-height: 170px;
+        place-items: center;
+        padding: 12px;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.2)),
+          repeating-linear-gradient(
+            45deg,
+            #eef2ed 0,
+            #eef2ed 10px,
+            #f8faf7 10px,
+            #f8faf7 20px
+          );
+      }
+
+      .mini-phone {
+        display: grid;
+        width: 84px;
+        height: 136px;
+        place-items: center;
+        padding: 10px 8px;
+        border: 6px solid #202722;
+        border-radius: 16px;
+        background: #fff;
+        box-shadow: 0 14px 34px rgba(31, 41, 34, 0.14);
+      }
+
+      .mini-phone-title {
+        text-align: center;
+        font-size: 10px;
+        font-weight: 760;
+        line-height: 1.3;
+      }
+
+      .mini-phone-line {
+        width: 44px;
+        height: 3px;
+        margin: 8px auto 0;
+        border-radius: 999px;
+        background: var(--accent);
+      }
+
+      .mini-preview-label {
+        justify-self: start;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .next-box {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        align-items: center;
+        margin: 0 20px 18px;
+        padding: 16px;
+        border: 1px solid rgba(139, 92, 19, 0.18);
+        border-radius: var(--radius);
+        background: var(--warn-soft);
+      }
+
+      .readonly .next-box {
+        border-color: rgba(114, 85, 163, 0.2);
+        background: rgba(114, 85, 163, 0.08);
+      }
+
+      .next-label {
+        color: var(--warn);
+        font-size: 12px;
+        font-weight: 760;
+      }
+
+      .readonly .next-label {
+        color: var(--mock);
+      }
+
+      .next-title {
+        margin-top: 3px;
+        font-size: 16px;
+        font-weight: 780;
+        line-height: 1.45;
+      }
+
+      .evidence-checklist {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 14px 20px 0;
+      }
+
+      .status-chip {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+        min-height: 28px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .status-chip.done {
+        border-color: rgba(47, 111, 94, 0.18);
+        background: var(--accent-soft);
+        color: var(--accent-ink);
+      }
+
+      .status-chip.mock {
+        border-color: rgba(114, 85, 163, 0.18);
+        background: rgba(114, 85, 163, 0.1);
+        color: var(--mock);
+      }
+
+      .status-chip.pending {
+        border-color: rgba(139, 92, 19, 0.22);
+        background: var(--warn-soft);
+        color: var(--warn);
+      }
+
+      .evidence-strip {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        padding: 18px 20px 20px;
+      }
+
+      .metric {
+        padding: 12px;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius);
+        background: var(--soft);
+      }
+
+      .metric-label {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .metric-value {
+        margin-top: 8px;
+        font-size: 18px;
+        font-weight: 790;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .context-list {
+        display: grid;
+        gap: 10px;
+        padding: 14px 16px 16px;
+      }
+
+      .context-row {
+        display: grid;
+        gap: 3px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .context-row:last-child {
+        padding-bottom: 0;
+        border-bottom: 0;
+      }
+
+      .context-label {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .context-value {
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .context-row.blocker .context-value {
+        color: var(--warn);
+        font-weight: 720;
+      }
+
+      .context-row.pass .context-value {
+        color: var(--accent-ink);
+        font-weight: 720;
+      }
+
+      .detail-tabs {
+        margin-top: 18px;
+      }
+
+      .detail-tabs summary {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 58px;
+        padding: 0 16px;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      .detail-tabs summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .drawer-title {
+        font-size: 15px;
+        font-weight: 760;
+      }
+
+      .drawer-meta {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .detail-tabs:not([open]) {
+        box-shadow: none;
+      }
+
+      .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 12px 14px 0;
+      }
+
+      .tab {
+        min-height: 32px;
+        padding: 0 10px;
+        border: 1px solid transparent;
+        border-radius: 7px 7px 0 0;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 13px;
+        touch-action: manipulation;
+        transition:
+          background-color 160ms ease,
+          border-color 160ms ease,
+          color 160ms ease;
+      }
+
+      .tab.active {
+        border-color: var(--line);
+        border-bottom-color: #fff;
+        background: #fff;
+        color: var(--ink);
+        font-weight: 740;
+      }
+
+      .tab-body {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 18px;
+        padding: 16px;
+        border-top: 1px solid var(--line);
+      }
+
+      .copy-block {
+        margin: 0;
+        padding: 14px;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius);
+        background: var(--soft);
+        color: #26312b;
+        font-size: 13px;
+        line-height: 1.65;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+
+      .asset-preview {
+        display: grid;
+        min-height: 210px;
+        place-items: center;
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.2)),
+          repeating-linear-gradient(
+            45deg,
+            #eef2ed 0,
+            #eef2ed 10px,
+            #f8faf7 10px,
+            #f8faf7 20px
+          );
+      }
+
+      .phone {
+        display: grid;
+        width: 118px;
+        height: 186px;
+        place-items: center;
+        padding: 14px 10px;
+        border: 8px solid #202722;
+        border-radius: 20px;
+        background: #fff;
+        box-shadow: 0 18px 40px rgba(31, 41, 34, 0.16);
+      }
+
+      .phone-title {
+        text-align: center;
+        font-size: 12px;
+        font-weight: 760;
+        line-height: 1.35;
+      }
+
+      .phone-line {
+        width: 64px;
+        height: 4px;
+        margin: 10px auto 0;
+        border-radius: 999px;
+        background: var(--accent);
+      }
+
+      @media (max-width: 1180px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 860px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          position: static;
+          height: auto;
+          padding: 16px;
+        }
+
+        .sidebar-footer {
+          position: static;
+          margin-top: 18px;
+        }
+
+        .main {
+          padding: 18px 16px 28px;
+        }
+
+        .topbar,
+        .next-box {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .layout,
+        .tab-body,
+        .object-grid,
+        .inspector-list,
+        .evidence-strip {
+          grid-template-columns: 1fr;
+        }
+
+        .stage-title {
+          font-size: 24px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        *,
+        *::before,
+        *::after {
+          transition-duration: 0.01ms !important;
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#mainContent">跳到主要内容</a>
+    <div class="shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark">P</div>
+          <div>
+            <div class="brand-title">Pixelle Ops</div>
+            <div class="brand-subtitle">Codex-first content loop</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <a class="active" href="#mainContent" aria-current="page">Ops <span>轮次闭环</span></a>
+          <span class="nav-item" aria-disabled="true">Projects <span>账号配置</span></span>
+          <span class="nav-item" aria-disabled="true">Create <span>视频沙盒</span></span>
+          <span class="nav-item" aria-disabled="true">History <span>生成记录</span></span>
+          <span class="nav-item" aria-disabled="true">Settings <span>Integrations</span></span>
+          <span class="nav-item" aria-disabled="true">Help</span>
+        </nav>
+        <div class="sidebar-footer">
+          选题、文案、生成、发布登记仍通过 Codex +
+          pixelle-ops 执行。
+        </div>
+      </aside>
+
+      <main id="mainContent" class="main">
+        <div id="statusLive" class="sr-only" aria-live="polite"></div>
+        <div class="topbar">
+          <div>
+            <div class="project-line">
+              <h1 class="project-title">PetWoods · 小红书短视频测试</h1>
+              <span id="currentPill" class="pill strong"></span>
+              <span id="viewPill" class="pill"></span>
+              <span class="pill">平台：小红书</span>
+              <span id="modePill" class="pill"></span>
+            </div>
+            <div class="page-note">
+              当前轮缺发布证据；历史轮提供本轮依据。
+            </div>
+          </div>
+          <div class="actions">
+            <button id="copyAction" class="button">复制兜底上下文</button>
+            <button class="button primary">刷新状态</button>
+          </div>
+        </div>
+
+        <div class="layout">
+          <section class="panel flat" aria-label="轮次轨道与闭环">
+            <div class="panel-header">
+              <div>
+                <h2 class="panel-title">轮次轨道</h2>
+                <div class="panel-note">当前轮在最上方，历史轮按最近运营顺序排列。</div>
+              </div>
+            </div>
+            <div id="cycleRail" class="cycle-rail"></div>
+
+            <div class="panel-header">
+              <div>
+                <h2 class="panel-title">本轮 6 步闭环</h2>
+                <div id="loopNote" class="panel-note"></div>
+              </div>
+            </div>
+            <div id="loopSteps" class="loop"></div>
+          </section>
+
+          <section id="workspace" class="panel workspace" aria-label="选中轮次工作区" tabindex="-1">
+            <div class="workspace-hero">
+              <div id="stageKicker" class="stage-kicker"></div>
+              <h2 id="stageTitle" class="stage-title"></h2>
+              <p id="stageSummary" class="stage-summary"></p>
+            </div>
+            <div class="next-box">
+              <div>
+                <div id="nextLabel" class="next-label"></div>
+                <div id="nextTitle" class="next-title"></div>
+              </div>
+              <button id="nextButton" class="button primary"></button>
+            </div>
+            <div id="objectDetail" class="object-detail"></div>
+            <section id="inspectorPanel" class="inspector-panel" aria-label="选中步骤判断">
+              <div class="inspector-head">
+                <div>
+                  <h3 id="inspectorTitle" class="panel-title"></h3>
+                  <div id="inspectorNote" class="panel-note"></div>
+                </div>
+                <span id="inspectorBadge" class="pill"></span>
+              </div>
+              <div id="inspectorRows" class="context-list inspector-list"></div>
+            </section>
+          </section>
+        </div>
+
+        <details class="panel detail-tabs" aria-label="证据记录">
+          <summary>
+            <span class="drawer-title">证据记录</span>
+            <span id="drawerMeta" class="drawer-meta"></span>
+          </summary>
+          <div id="tabPanel" class="tab-body" tabindex="0">
+            <pre id="detailCopy" class="copy-block"></pre>
+          </div>
+        </details>
+      </main>
+    </div>
+
+    <script>
+      const steps = [
+        { tab: "prediction", title: "复盘与选题判断", body: "引用历史结论，锁定本轮方向。" },
+        { tab: "draft", title: "生成/提交内容草稿", body: "生成或提交待审字幕稿。" },
+        { tab: "review", title: "人工审核定稿", body: "人工确认文案，不允许系统绕过。" },
+        { tab: "asset", title: "生成并检查资产", body: "用已审文案生成视频资产。" },
+        { tab: "publish", title: "发布并记录证据", body: "确认资产后登记真实或 mock 发布。" },
+        { tab: "retro", title: "观测数据并复盘沉淀", body: "记录指标，把结论沉淀回项目记忆。" },
+      ];
+
+      const tabs = [
+        { id: "prediction", label: "预测" },
+        { id: "draft", label: "草稿" },
+        { id: "review", label: "审核" },
+        { id: "asset", label: "内容资产" },
+        { id: "publish", label: "发布证据" },
+        { id: "retro", label: "复盘" },
+      ];
+
+      const stepViews = {
+        prediction: {
+          step: 1,
+          label: "复盘与选题判断",
+          evidence: "预测",
+          title: "的选题与预测依据",
+          summary:
+            "判断这条选题是否有历史依据、是否和上一轮形成连续验证，而不是临时凭感觉开题。",
+          actionLabel: "结论",
+          action: "预测已锁定，可以进入草稿；后续不得跳过人工审核定稿。",
+          contextTitle: "预测依据",
+          contextNote: "依据是否足够支撑下一步",
+          rows: [
+            ["上一轮信号", "上一轮复盘会影响本轮题材选择，但不能替代本轮预测。"],
+            ["主要风险", "只看历史表现容易重复选题，需要确认本轮有新的判断点。"],
+            ["下一步", "预测锁定后进入草稿，不应跳过人工确认。"],
+          ],
+        },
+        draft: {
+          step: 2,
+          label: "生成/提交内容草稿",
+          evidence: "草稿",
+          title: "的草稿状态",
+          summary:
+            "确认待审稿是否只包含用户要看的字幕或口播内容，避免把生成指令混进文案。",
+          actionLabel: "结论",
+          action: "草稿干净后才能进入审核；不允许直接生成。",
+          contextTitle: "草稿边界",
+          contextNote: "草稿是否可以进入审核",
+          rows: [
+            ["关键边界", "generation draft 只能放最终上屏字幕。"],
+            ["常见错误", "把视频目标、发布标题、正文、标签一起塞进 draft。"],
+            ["下一步", "草稿干净后才进入审核，不直接生成。"],
+          ],
+        },
+        review: {
+          step: 3,
+          label: "人工审核定稿",
+          evidence: "审核",
+          title: "的审核结果",
+          summary:
+            "确认用户是否已经看过并接受这版文案。没有审核证据，就不能进入生成。",
+          actionLabel: "结论",
+          action: "文案通过后才允许生成；未通过时回到草稿修改。",
+          contextTitle: "审核约束",
+          contextNote: "生成门槛是否满足",
+          rows: [
+            ["产品原则", "用户审核文案是固定流程。"],
+            ["系统风险", "绕过审核会让 Codex 自造文案或混入错误指令。"],
+            ["下一步", "审核通过后才允许进入视频生成。"],
+          ],
+        },
+        asset: {
+          step: 4,
+          label: "生成并检查资产",
+          evidence: "资产",
+          title: "的内容资产",
+          summary:
+            "确认视频资产真实存在、可打开、可进入发布前审核。生成完成不等于闭环完成。",
+          actionLabel: "结论",
+          action: "资产可用，可以进入发布证据登记。",
+          contextTitle: "资产判断",
+          contextNote: "资产是否能往下走",
+          rows: [
+            ["最低证据", "必须有本地文件、asset check、基本时长信息。"],
+            ["不是完成", "视频生成只是第 4 步，不代表发布或复盘完成。"],
+            ["下一步", "资产确认后进入发布证据登记。"],
+          ],
+        },
+        publish: {
+          step: 5,
+          label: "发布并记录证据",
+          evidence: "发布",
+          title: "的发布证据",
+          summary:
+            "当前轮卡在发布证据。没有平台链接或 post id，就不能进入真实观测和复盘。",
+          actionLabel: "当前卡点",
+          action: "缺真实发布证据。下一步登记小红书链接或 post id；如果只是验流程，必须标记为 mock。",
+          contextTitle: "发布证据",
+          contextNote: "发布是否真实完成",
+          rows: [
+            ["真实完成", "需要平台链接、post id、Buffer id 或平台返回结果。"],
+            ["Mock 完成", "只能证明链路通，不代表真实发布。"],
+            ["下一步", "发布后才能进入真实指标观测。"],
+          ],
+        },
+        retro: {
+          step: 6,
+          label: "观测数据并复盘沉淀",
+          evidence: "复盘",
+          title: "的复盘结论",
+          summary:
+            "确认指标是否足够支撑复盘，以及哪些结论应该进入下一轮选题依据。",
+          actionLabel: "结论",
+          action: "复盘必须写回项目记忆，才能影响下一轮选题。",
+          contextTitle: "复盘影响",
+          contextNote: "这一轮如何影响下一轮",
+          rows: [
+            ["沉淀对象", "复盘结论应该写回项目记忆，而不是只留在视频历史里。"],
+            ["核心问题", "预测是否命中，以及为什么命中或没命中。"],
+            ["下一步", "用复盘结论驱动下一轮选题和预测。"],
+          ],
+        },
+      };
+
+      const cycles = [
+        {
+          id: "round-5",
+          round: 5,
+          topic: "母猫配完后，多久能看出怀孕？",
+          mode: "current",
+          stage: 5,
+          completed: 4,
+          status: "当前轮 · 等待发布证据",
+          defaultTab: "publish",
+          mockSteps: [],
+          stageTitle: "《母猫配完后，多久能看出怀孕？》已经生成，下一步是登记发布证据",
+          summary:
+            "当前轮已经生成视频，但缺少真实发布证据。",
+          nextButton: "复制下一步指令",
+          evidence: [
+            ["预测", "done", "已锁定"],
+            ["草稿", "done", "已提交"],
+            ["审核", "done", "已通过"],
+            ["资产", "done", "已生成"],
+            ["发布", "pending", "待登记"],
+            ["复盘", "pending", "待观测"],
+          ],
+          details: {
+            prediction:
+              "预测：\n承接上一轮“配种后判断”系列，目标是验证用户是否愿意继续看怀孕判断题。\n\n风险：\n医学风险需要外部依据，不能暗示 1 天内就能准确判断。",
+            draft:
+              "草稿：\n字幕稿已经确认，生成时只能传最终上屏字幕。\n\n边界：\n不要把发布标题、正文、标签混入 generation draft。",
+            review:
+              "审核：\n文案已通过人工审核。\n\n产品约束：\n不能绕过审核直接生成，这是 P0.5 已确认的固定链路。",
+            asset:
+              "当前资产：\nfinal.mp4\n\n资产检查：\n本地文件存在，已通过 basic asset check。\n\n发布前提示：\n这版更像中长科普短视频，真实发布前建议确认封面、标题和字幕节奏。",
+            publish:
+              "发布证据：\n当前缺真实发布证据。\n\n下一步：\n如果已经发布，登记小红书链接或 post id；如果还没发布，先 mock 收口，不伪装成真实发布。",
+            retro:
+              "复盘：\n待发布和观测后生成。\n\n当前结论：生成链路完成，但内容表现尚未成立。",
+          },
+        },
+        {
+          id: "round-4",
+          round: 4,
+          topic: "母猫打滚就是想配了吗？",
+          mode: "history",
+          stage: 6,
+          completed: 6,
+          status: "历史轮 · mock 收口",
+          defaultTab: "retro",
+          mockSteps: [5, 6],
+          stageTitle: "《母猫打滚就是想配了吗？》已完成 mock 闭环，可作为本轮依据",
+          summary:
+            "上一轮可复用题材方向，但 mock 数据不能当作真实表现。",
+          historyImpact: "保留“打滚判断链路成立”的方向，但 mock 数据不能证明真实表现；当前轮应重点补真实发布证据。",
+          nextButton: "回到当前轮",
+          evidence: [
+            ["预测", "done", "已锁定"],
+            ["草稿", "done", "已提交"],
+            ["审核", "done", "已通过"],
+            ["资产", "done", "已生成"],
+            ["发布", "mock", "Mock"],
+            ["复盘", "mock", "Mock"],
+          ],
+          details: {
+            prediction:
+              "预测：\n用“打滚是否代表想配”验证判断链题材能否连续承接。\n\n预期：\n评论区会继续问“怎么判断是否愿意”。",
+            draft:
+              "草稿：\n已按屏幕字幕版提交，未混入视频目标、发布标题、正文或标签。",
+            review:
+              "审核：\n文案已确认后才进入生成。此轮证明审核链路有效。",
+            asset:
+              "内容资产：\n已生成视频资产。\n\n注意：\n视频资产完成不等于运营闭环完成。",
+            publish:
+              "发布证据：\nMock 发布证据已写入。\n\n限制：\n没有真实小红书链接、post id 或平台返回结果，不能算真实发布。",
+            retro:
+              "复盘结论：\n1. “打滚判断”适合作为系列题材，但容易和上一条重复。\n2. 视频生成链路已经跑通，文案审核链路需要保持强约束。\n3. 如果继续做配种判断链，下一条应该换成“配完后多久看出怀孕”。\n4. mock 收口只证明链路连通，不代表真实发布表现。",
+          },
+        },
+        {
+          id: "round-3",
+          round: 3,
+          topic: "同一窝小猫，可能不是一个爹吗？",
+          mode: "history",
+          stage: 5,
+          completed: 4,
+          status: "历史轮 · 生成链路完成",
+          defaultTab: "asset",
+          mockSteps: [],
+          stageTitle: "《同一窝小猫，可能不是一个爹吗？》已完成生成链路验证",
+          summary:
+            "这一轮验证了人工审核定稿和 standard pipeline 的稳定性，但没有进入真实发布和复盘。",
+          historyImpact: "这轮只证明生成链路稳定，不能作为内容表现依据；可复用的是人工审核定稿和 clean draft 规则。",
+          nextButton: "回到当前轮",
+          evidence: [
+            ["预测", "done", "已锁定"],
+            ["草稿", "done", "已提交"],
+            ["审核", "done", "已通过"],
+            ["资产", "done", "已生成"],
+            ["发布", "pending", "缺失"],
+            ["复盘", "pending", "缺失"],
+          ],
+          details: {
+            prediction:
+              "预测：\n验证“同窝不同父”这种猎奇科普题是否适合作为配种系列的第三条。",
+            draft:
+              "草稿：\n这轮暴露过 draft 污染风险，最终结论是只提交上屏字幕。",
+            review:
+              "审核：\n必须先让用户确认草稿；没有审核工具就停止。",
+            asset:
+              "链路结论：\n1. 新实验必须干净创建，不复用污染实验。\n2. 先锁预测，再提交字幕草稿。\n3. 草稿必须由用户审核。\n4. 只有审核后才能进入视频生成。",
+            publish:
+              "发布证据：\n缺失。\n\n产品含义：\n这一轮不能算运营闭环，只能算生成链路样本。",
+            retro:
+              "复盘：\n缺失。\n\n可沉淀的只有链路规则，不能沉淀内容表现判断。",
+          },
+        },
+      ];
+
+      const byId = new Map(cycles.map((cycle) => [cycle.id, cycle]));
+      const tabIds = new Set(tabs.map((tab) => tab.id));
+      let selectedCycleId = cycles[0].id;
+      let activeTab = cycles[0].defaultTab;
+
+      function getInitialState() {
+        const params = new URLSearchParams(window.location.search);
+        const roundParam = params.get("round");
+        const cycle =
+          cycles.find((item) => String(item.round) === roundParam || item.id === roundParam) ||
+          cycles[0];
+        const tabParam = params.get("tab");
+        return {
+          cycleId: cycle.id,
+          tabId: tabIds.has(tabParam) ? tabParam : cycle.defaultTab,
+        };
+      }
+
+      function syncUrl(selected) {
+        const params = new URLSearchParams();
+        params.set("round", String(selected.round));
+        params.set("tab", activeTab);
+        const nextUrl = `${window.location.pathname}?${params.toString()}`;
+        window.history.replaceState(null, "", nextUrl);
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      function getEvidenceStatus(selected, label) {
+        const item = selected.evidence.find(([name]) => name === label);
+        if (!item) return ["missing", "缺失"];
+        return [item[1], item[2]];
+      }
+
+      function getObjectCards(selected, stepView) {
+        const [status, statusText] = getEvidenceStatus(selected, stepView.evidence);
+        const readonly = selected.mode === "history";
+        const topic = `《${selected.topic}》`;
+
+        if (activeTab === "prediction") {
+          return [
+            {
+              title: "本轮选题",
+              value: topic,
+              body: readonly ? "回看当时为什么选这个题。" : "只判断这轮题材是否值得进入草稿。",
+            },
+            {
+              title: "引用依据",
+              value: readonly ? "当轮预测记录" : "上一轮复盘",
+              body:
+                selected.round === 5
+                  ? "承接 R4 的结论：配种判断链路成立，但要避免继续重复“打滚”。"
+                  : "查看当轮引用了哪些复盘、候选题或项目记忆。",
+            },
+            {
+              title: "预测判断",
+              value: statusText,
+              body: "预测锁定后才进入草稿。资产和发布证据等到后续环节处理。",
+            },
+          ];
+        }
+
+        if (activeTab === "draft") {
+          return [
+            {
+              title: "待审字幕稿",
+              value: "v1 / screen text",
+              body:
+                selected.details.draft ||
+                "草稿应只包含可审核文本，不能混入视频目标、标题、正文、标签。",
+              wide: true,
+            },
+            {
+              title: "边界检查",
+              value: statusText,
+              body: "草稿通过边界检查后，再交给用户审核。",
+            },
+          ];
+        }
+
+        if (activeTab === "review") {
+          return [
+            {
+              title: "审核结论",
+              value: statusText,
+              body: readonly
+                ? "历史轮保留当时审核结果，不能继续改写。"
+                : "文案已通过人工审核后，才允许进入生成。未通过时必须返回草稿。",
+            },
+            {
+              title: "审核证据",
+              value: "用户确认文本",
+              body: "需要审核来源、审核时间和确认版本。完整草稿留在草稿环节。",
+            },
+          ];
+        }
+
+        if (activeTab === "asset") {
+          return [
+            {
+              title: "视频文件",
+              value: selected.round === 5 ? "final.mp4" : "final.mp4 / history asset",
+              body:
+                selected.round === 5
+                  ? "本地文件存在，asset check 已通过。时长 71.9s。"
+                  : "这条历史资产证明当时已完成生成。",
+            },
+            {
+              title: "预览",
+              value: "",
+              body: "",
+              preview: true,
+            },
+            {
+              title: "生成来源",
+              value: "standard pipeline",
+              body: "pipeline 和时长只在资产步骤有判断价值，不出现在发布、复盘等步骤。",
+            },
+          ];
+        }
+
+        if (activeTab === "publish") {
+          return [
+            {
+              title: "当前发布证据",
+              value: status === "mock" ? "Mock 发布" : status === "pending" ? "缺失" : "已登记",
+              body:
+                status === "mock"
+                  ? "这只能证明链路通，不能当作真实小红书发布。"
+                  : status === "pending"
+                    ? "缺小红书链接、post id、Buffer id 或平台返回结果。"
+                    : "已经有真实平台证据，可以进入观测。",
+            },
+            {
+              title: "需要补齐",
+              value: "平台 URL 或 Post ID",
+              body: "Buffer ID 或平台返回结果可作为辅助证据；发布登记只看平台侧证据。",
+            },
+          ];
+        }
+
+        if (activeTab === "retro") {
+          return [
+            {
+              title: "指标快照",
+              value: status === "mock" ? "Mock 指标" : status === "pending" ? "待观测" : "已回收",
+              body: status === "pending" ? "没有发布证据时，不给出表现判断。" : "只保留能支撑复盘的关键指标。",
+            },
+            {
+              title: "复盘结论",
+              value: status === "mock" ? "Mock 复盘" : status === "pending" ? "待复盘" : "已写入",
+              body: selected.details.retro || "复盘应该回答预测是否命中，以及为什么。",
+              wide: true,
+            },
+            {
+              title: "写回项目记忆",
+              value: readonly ? "影响下一轮" : "待观测后写回",
+              body: "复盘的真正价值是驱动下一轮选题和预测，不是单条视频归档。",
+            },
+          ];
+        }
+
+        return [];
+      }
+
+      function renderObjectDetails(selected, stepView) {
+        const cards = getObjectCards(selected, stepView);
+        document.querySelector("#objectDetail").innerHTML = `
+          <div class="object-grid">
+            ${cards
+              .map((card) => {
+                if (card.preview) {
+                  return `
+                    <div class="mini-preview" aria-label="${escapeHtml(card.title)}">
+                      <div class="mini-preview-label">${escapeHtml(card.title)}</div>
+                      <div class="mini-phone">
+                        <div>
+                          <div class="mini-phone-title">${escapeHtml(selected.topic).replace("，", "<br />")}</div>
+                          <div class="mini-phone-line"></div>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }
+
+                return `
+                  <div class="object-card${card.wide ? " wide" : ""}">
+                    <div class="object-card-title">${escapeHtml(card.title)}</div>
+                    <div class="object-card-value">${escapeHtml(card.value)}</div>
+                    <div class="object-card-body">${escapeHtml(card.body)}</div>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        `;
+      }
+
+      function getStepView(selected) {
+        const view = stepViews[activeTab] || stepViews[selected.defaultTab] || stepViews.publish;
+        const [status, statusText] = getEvidenceStatus(selected, view.evidence);
+        const isReadonly = selected.mode === "history";
+        const statusPrefix =
+          status === "mock" ? "Mock" : status === "pending" ? "缺口" : status === "done" ? "已完成" : "缺失";
+        const action =
+          isReadonly && selected.round !== cycles[0].round
+            ? selected.historyImpact || "这轮已经结束；继续处理请回到当前轮。"
+            : view.action;
+        const actionLabel =
+          isReadonly && selected.round !== cycles[0].round ? "对当前轮影响" : view.actionLabel;
+
+        return {
+          ...view,
+          status,
+          statusText,
+          isReadonly,
+          statusPrefix,
+          action,
+          actionLabel,
+          title: `《${selected.topic}》${view.title}`,
+          kicker: `${isReadonly ? "历史轮" : "当前轮"} · 步骤 ${view.step} · ${view.label}`,
+          inspectorRows: [...view.rows],
+        };
+      }
+
+      function renderCycleRail(selected) {
+        const rail = document.querySelector("#cycleRail");
+        if (!cycles.length) {
+          rail.innerHTML = '<div class="page-note">暂无内容轮次。先在 Codex 里创建新一轮。</div>';
+          return;
+        }
+
+        rail.innerHTML = cycles
+          .map((cycle) => {
+            const active = cycle.id === selected.id ? " active" : "";
+            const mode = cycle.mode === "current" ? "当前" : "历史";
+            return `
+              <button class="cycle-button${active}" type="button" data-cycle="${cycle.id}" aria-pressed="${cycle.id === selected.id}">
+                <span class="cycle-number">R${cycle.round}</span>
+                <span>
+                  <span class="cycle-topic">${escapeHtml(cycle.topic)}</span>
+                  <span class="cycle-meta">
+                    <span>${mode}</span>
+                    <span>${escapeHtml(cycle.status)}</span>
+                  </span>
+                </span>
+              </button>
+            `;
+          })
+          .join("");
+        rail.insertAdjacentHTML("beforeend", '<button class="load-more" type="button">加载更早轮次</button>');
+        rail.querySelectorAll("[data-cycle]").forEach((button) => {
+          button.addEventListener("click", () => {
+            selectedCycleId = button.getAttribute("data-cycle");
+            activeTab = byId.get(selectedCycleId)?.defaultTab || tabs[0].id;
+            render();
+          });
+        });
+      }
+
+      function renderLoop(selected) {
+        document.querySelector("#loopNote").textContent =
+          selected.mode === "current"
+            ? `当前卡在第 ${selected.stage} 步：${steps[selected.stage - 1].title}`
+            : selected.completed >= 6
+              ? `历史第 ${selected.round} 轮已收口，6 步证据完整`
+              : `历史第 ${selected.round} 轮停在第 ${selected.stage} 步，缺口直接显示`;
+
+        document.querySelector("#loopSteps").innerHTML = steps
+          .map((step, index) => {
+            const number = index + 1;
+            const isMock = selected.mockSteps.includes(number);
+            const isDone = number <= selected.completed && !isMock;
+            const isCurrent = selected.mode === "current" && number === selected.stage;
+            const isMissing = number > selected.completed && !isCurrent && !isMock;
+            const isSelected = activeTab === step.tab;
+            let state = "";
+            if (isMock) state = "mock";
+            else if (isCurrent) state = "current";
+            else if (isDone) state = "done";
+            else if (isMissing) state = "missing";
+
+            const badge = isMock
+              ? "Mock"
+              : isCurrent
+                ? "当前"
+                : isMissing
+                  ? "缺失"
+                  : "";
+
+            return `
+              <button class="step ${state}${isSelected ? " selected" : ""}" type="button" data-tab="${step.tab}" aria-pressed="${isSelected}">
+                <div class="dot">${number}</div>
+                <div>
+                  <div class="step-title">
+                    <span>${step.title}</span>
+                    ${badge ? `<span class="step-badge">${badge}</span>` : ""}
+                  </div>
+                  <div class="step-body">${step.body}</div>
+                </div>
+              </button>
+            `;
+          })
+          .join("");
+
+        document.querySelectorAll("#loopSteps [data-tab]").forEach((button) => {
+          button.addEventListener("click", () => {
+            activeTab = button.getAttribute("data-tab");
+            render();
+            document.querySelector("#workspace").focus({ preventScroll: true });
+          });
+        });
+      }
+
+      function renderWorkspace(selected) {
+        const readonly = selected.mode === "history";
+        const stepView = getStepView(selected);
+        document.querySelector("#currentPill").textContent = `当前运营轮：R${cycles[0].round}`;
+        document.querySelector("#viewPill").textContent = `正在查看：R${selected.round}`;
+        document.querySelector("#modePill").textContent = readonly ? "历史轮已结束" : "当前可操作轮";
+        document.querySelector("#modePill").className = readonly ? "pill mock" : "pill";
+        document.querySelector("#workspace").classList.toggle("readonly", readonly);
+        document.querySelector("#copyAction").disabled = readonly;
+        document.querySelector("#stageKicker").textContent = stepView.kicker;
+        document.querySelector("#stageTitle").textContent = stepView.title;
+        document.querySelector("#stageSummary").textContent = stepView.summary;
+        renderObjectDetails(selected, stepView);
+        document.querySelector("#nextLabel").textContent = stepView.actionLabel;
+        document.querySelector("#nextTitle").textContent = stepView.action;
+        document.querySelector("#nextButton").textContent = readonly ? "回到当前轮" : "复制下一步指令";
+        document.querySelector("#nextButton").onclick = () => {
+          if (readonly) {
+            selectedCycleId = cycles[0].id;
+            activeTab = cycles[0].defaultTab;
+            render();
+            window.scrollTo({ top: 0, behavior: "smooth" });
+            return;
+          }
+
+          document.querySelector("#statusLive").textContent =
+            "可直接回 Codex 询问下一步；兜底上下文只用于定位当前轮。";
+        };
+        document.querySelector("#nextButton").className = "button primary";
+        document.querySelector("#copyAction").onclick = () => {
+          document.querySelector("#statusLive").textContent =
+            readonly ? "这轮已经结束，直接回 Codex 查看后续状态。" : "已复制当前轮兜底上下文。";
+        };
+      }
+
+      function renderInspector(selected) {
+        const stepView = getStepView(selected);
+        const panel = document.querySelector("#inspectorPanel");
+        const rows = stepView.inspectorRows || [];
+        panel.hidden = rows.length === 0;
+        if (!rows.length) return;
+
+        document.querySelector("#inspectorTitle").textContent = stepView.contextTitle;
+        document.querySelector("#inspectorNote").textContent = stepView.contextNote;
+        document.querySelector("#inspectorBadge").textContent =
+          `${stepView.statusPrefix} · ${stepView.statusText}`;
+        document.querySelector("#inspectorBadge").className =
+          stepView.status === "mock"
+            ? "pill mock"
+            : stepView.status === "done"
+              ? "pill strong"
+              : "pill";
+        document.querySelector("#inspectorRows").innerHTML = rows
+          .map(([label, value]) => {
+            const isBlocker = /阻塞|缺口|风险|不能|Mock/.test(`${label}${value}`);
+            const isPass = /标准|通过|真实完成|已完成|可信/.test(`${label}${value}`);
+            return `
+              <div class="context-row ${isBlocker ? "blocker" : isPass ? "pass" : ""}">
+                <div class="context-label">${escapeHtml(label)}</div>
+                <div class="context-value">${escapeHtml(value)}</div>
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      function renderDetails(selected) {
+        const detail = selected.details[activeTab] || selected.details[selected.defaultTab];
+        document.querySelector("#detailCopy").textContent = detail;
+      }
+
+      function render() {
+        const selected = byId.get(selectedCycleId) || cycles[0];
+        if (!tabIds.has(activeTab)) activeTab = selected.defaultTab;
+        syncUrl(selected);
+        renderCycleRail(selected);
+        renderLoop(selected);
+        renderWorkspace(selected);
+        renderInspector(selected);
+        renderDetails(selected);
+        document.querySelector("#statusLive").textContent =
+          `正在查看第 ${selected.round} 轮，当前证据标签是 ${tabs.find((tab) => tab.id === activeTab)?.label || "详情"}。`;
+      }
+
+      const initial = getInitialState();
+      selectedCycleId = initial.cycleId;
+      activeTab = initial.tabId;
+      render();
+    </script>
+  </body>
+</html>

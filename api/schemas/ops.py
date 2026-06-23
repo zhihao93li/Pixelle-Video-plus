@@ -24,3 +24,40 @@ class OpsExperimentResponse(BaseModel):
     content_items: list[dict[str, Any]] = Field(default_factory=list)
     events: list[dict[str, Any]] = Field(default_factory=list)
     next_action: dict[str, Any]
+
+
+class OpsProjectsResponse(BaseModel):
+    status: str
+    projects: list[dict[str, Any]] = Field(default_factory=list)
+    next_action: dict[str, Any]
+
+
+class OpsProjectCyclesResponse(BaseModel):
+    status: str
+    project: dict[str, Any]
+    cycles: list[dict[str, Any]] = Field(default_factory=list)
+    next_action: dict[str, Any]
+
+
+class OpsChannelAccountCreateRequest(BaseModel):
+    platform: str
+    account_name: str
+    account_handle: str | None = None
+    external_account_id: str | None = None
+    status: str = "configured"
+    credential_ref: dict[str, Any] = Field(default_factory=dict)
+    buffer_channel_id: str | None = None
+
+
+class OpsChannelAccountUpdateRequest(OpsChannelAccountCreateRequest):
+    pass
+
+
+class OpsChannelAccountCreateResponse(BaseModel):
+    status: str
+    channel_account: dict[str, Any]
+    next_action: dict[str, Any]
+
+
+class OpsChannelAccountUpdateResponse(OpsChannelAccountCreateResponse):
+    pass

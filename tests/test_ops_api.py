@@ -153,6 +153,242 @@ def test_ops_api_current_view_can_be_filtered_by_channel_account(tmp_path, monke
     assert selected.json()["context"]["channel_account_id"] == first["id"]
 
 
+def test_ops_api_lists_projects_with_channel_accounts(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    account = service.create_channel_account(
+        project_id=project["id"],
+        platform="xiaohongshu",
+        account_name="PetWoods 宠物森友会",
+        account_handle="petwoods",
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/ops/projects")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["projects"][0]["id"] == project["id"]
+    assert body["projects"][0]["channel_accounts"][0]["id"] == account["id"]
+    assert body["projects"][0]["social_accounts"][0]["id"] == account["id"]
+
+
+def test_ops_api_creates_channel_account_with_ui_source(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/ops/projects/{project['id']}/channel-accounts",
+        json={
+            "platform": "xiaohongshu",
+            "account_name": "PetWoods 宠物森友会",
+            "account_handle": "petwoods",
+            "external_account_id": "xhs-petwoods",
+            "status": "configured",
+            "credential_ref": {"provider": "manual", "key": "pixelle/petwoods/xhs"},
+            "buffer_channel_id": "buffer-channel-petwoods",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["channel_account"]["project_id"] == project["id"]
+    assert body["channel_account"]["source"]["kind"] == "ui"
+    assert body["channel_account"]["credential_ref"]["provider"] == "manual"
+    assert body["channel_account"]["credential_ref"]["buffer_channel_id"] == "buffer-channel-petwoods"
+    assert body["next_action"]["kind"] == "select_channel_account"
+
+
+def test_ops_api_updates_channel_account_with_ui_source(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    account = service.create_channel_account(
+        project_id=project["id"],
+        platform="xiaohongshu",
+        account_name="PetWoods 宠物森友会",
+        account_handle="petwoods",
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    response = client.patch(
+        f"/api/ops/channel-accounts/{account['id']}",
+        json={
+            "platform": "douyin",
+            "account_name": "PetWoods Douyin",
+            "account_handle": "petwoods_dy",
+            "external_account_id": "dy-petwoods",
+            "status": "connected",
+            "credential_ref": {"provider": "manual", "key": "pixelle/petwoods/douyin"},
+            "buffer_channel_id": "buffer-channel-douyin",
+        },
+    )
+    projects = client.get("/api/ops/projects").json()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["channel_account"]["id"] == account["id"]
+    assert body["channel_account"]["platform"] == "douyin"
+    assert body["channel_account"]["source"]["kind"] == "ui"
+    assert body["channel_account"]["credential_ref"]["buffer_channel_id"] == "buffer-channel-douyin"
+    assert projects["projects"][0]["channel_accounts"][0]["account_name"] == "PetWoods Douyin"
+
+
+def test_ops_api_lists_project_cycles_with_experiment_evidence(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    first_cycle = service.create_cycle(
+        project_id=project["id"],
+        name="R1",
+        goal="First loop",
+        source=_source(),
+    )
+    first_experiment = service.create_experiment(
+        project_id=project["id"],
+        cycle_id=first_cycle["id"],
+        title="母猫打滚就是想配了吗？",
+        hypothesis="打滚判断题能承接配种系列。",
+        source=_source(),
+    )
+    service.lock_prediction(
+        experiment_id=first_experiment["id"],
+        prediction={"expected": "comments"},
+        source=_source(),
+    )
+    second_cycle = service.create_cycle(
+        project_id=project["id"],
+        name="R2",
+        goal="Second loop",
+        source=_source(),
+    )
+    second_experiment = service.create_experiment(
+        project_id=project["id"],
+        cycle_id=second_cycle["id"],
+        title="同一窝小猫，可能不是一个爹吗？",
+        hypothesis="遗传猎奇题能带来收藏。",
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    response = client.get(f"/api/ops/projects/{project['id']}/cycles")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["project"]["id"] == project["id"]
+    assert [cycle_view["cycle"]["name"] for cycle_view in body["cycles"]] == ["R2", "R1"]
+    assert body["cycles"][0]["experiments"][0]["experiment"]["id"] == second_experiment["id"]
+    assert body["cycles"][0]["experiments"][0]["next_action"]["kind"] == "lock_prediction"
+    assert body["cycles"][1]["experiments"][0]["experiment"]["id"] == first_experiment["id"]
+    assert body["cycles"][1]["experiments"][0]["events"][0]["event_type"] == "prediction_locked"
+    assert body["cycles"][1]["experiments"][0]["next_action"]["kind"] == "submit_generation_draft"
+
+
+def test_ops_api_adds_preview_url_for_local_output_video(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+    video_path = tmp_path / "output" / "task-123" / "final.mp4"
+    video_path.parent.mkdir(parents=True)
+    video_path.write_bytes(b"mp4")
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = service.create_cycle(
+        project_id=project["id"],
+        name="R1",
+        goal="Preview generated asset",
+        source=_source(),
+    )
+    experiment = service.create_experiment(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        title="母猫配完后，多久能看出怀孕？",
+        hypothesis="孕早期判断题能承接配种系列。",
+        source=_source(),
+    )
+    content_item = store.create_content_item(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        kind="video",
+        title=experiment["title"],
+        status="generated",
+        asset_ref={"video_path": str(video_path), "duration": 71.904},
+    )
+    store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=content_item["id"],
+        event_type="asset_checked",
+        payload={"status": "passed"},
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    response = client.get(f"/api/ops/projects/{project['id']}/cycles")
+
+    assert response.status_code == 200
+    item = response.json()["cycles"][0]["experiments"][0]["content_items"][0]
+    assert item["asset_url"] == "/api/files/output/task-123/final.mp4"
+    assert item["asset_media_type"] == "video"
+    assert item["asset_preview_available"] is True
+    assert client.get(item["asset_url"]).status_code == 200
+
+
 def test_ops_api_returns_404_for_missing_experiment(tmp_path, monkeypatch):
     monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(tmp_path / "ops.db"))
 

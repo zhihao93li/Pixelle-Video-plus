@@ -89,6 +89,41 @@ class OpsService:
             },
         }
 
+    def list_project_cycles(self, project_id: str) -> dict[str, Any]:
+        project = self.store.get_project(project_id)
+        if not project:
+            raise OpsError("project_not_found", "Project cycles require an existing project.")
+
+        cycles = []
+        for cycle in self.store.list_cycles_for_project(project_id):
+            experiment_views = []
+            for experiment in self.store.list_experiments_for_cycle(cycle["id"]):
+                events = self.store.list_events_for_experiment(experiment["id"])
+                experiment_views.append(
+                    {
+                        "experiment": experiment,
+                        "content_items": self.store.list_content_items_for_experiment(experiment["id"]),
+                        "events": events,
+                        "next_action": _next_action_for_events(events),
+                    }
+                )
+            cycles.append(
+                {
+                    "cycle": cycle,
+                    "experiments": experiment_views,
+                    "next_action": experiment_views[0]["next_action"]
+                    if experiment_views
+                    else {"kind": "create_experiment", "blocked": False},
+                }
+            )
+
+        return {
+            "status": "ok",
+            "project": project,
+            "cycles": cycles,
+            "next_action": cycles[0]["next_action"] if cycles else {"kind": "create_cycle", "blocked": False},
+        }
+
     def create_channel_account(
         self,
         *,
@@ -104,6 +139,7 @@ class OpsService:
         _require_confirmed_source(source)
         if not self.store.get_project(project_id):
             raise OpsError("project_not_found", "Channel account requires an existing project.")
+        _reject_plaintext_credential_ref(credential_ref or {})
         return self.store.create_channel_account(
             project_id=project_id,
             platform=platform,
@@ -117,6 +153,37 @@ class OpsService:
 
     def create_social_account(self, **kwargs: Any) -> dict[str, Any]:
         return self.create_channel_account(**kwargs)
+
+    def update_channel_account(
+        self,
+        *,
+        channel_account_id: str,
+        platform: str,
+        account_name: str,
+        source: dict[str, Any],
+        account_handle: str | None = None,
+        external_account_id: str | None = None,
+        status: str = "configured",
+        credential_ref: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        _require_confirmed_source(source)
+        account = self.store.get_channel_account(channel_account_id)
+        if not account:
+            raise OpsError("channel_account_not_found", "Channel account update requires an existing account.")
+        _reject_plaintext_credential_ref(credential_ref or {})
+        updated = self.store.update_channel_account(
+            channel_account_id=channel_account_id,
+            platform=platform,
+            account_name=account_name,
+            account_handle=account_handle,
+            external_account_id=external_account_id,
+            status=status,
+            credential_ref=credential_ref,
+            source=source,
+        )
+        if updated is None:
+            raise OpsError("channel_account_not_found", "Channel account update requires an existing account.")
+        return updated
 
     def create_cycle(
         self,
@@ -695,6 +762,17 @@ def _require_confirmed_source(source: dict[str, Any]) -> None:
         raise OpsError("source_not_confirmed", "Codex writes require explicit user confirmation.")
 
 
+def _reject_plaintext_credential_ref(credential_ref: dict[str, Any]) -> None:
+    blocked_names = ("password", "secret", "token", "api_key", "apikey", "access_key", "private_key")
+    for key, value in credential_ref.items():
+        normalized_key = str(key).lower().replace("-", "_")
+        if any(blocked_name in normalized_key for blocked_name in blocked_names) and value:
+            raise OpsError(
+                "credential_ref_must_be_reference",
+                "Credential reference must point to a secret manager entry; do not store plaintext credentials.",
+            )
+
+
 def _has_event(events: list[dict[str, Any]], *event_types: OpsEventType) -> bool:
     values = {event_type.value for event_type in event_types}
     return any(event["event_type"] in values for event in events)
@@ -911,7 +989,7 @@ def _require_passed_asset_check_before_publish(
     events: list[dict[str, Any]],
     content_item_id: str | None,
 ) -> None:
-    if not _has_event(events, OpsEventType.GENERATION_REQUESTED):
+    if not _has_event(events, OpsEventType.GENERATION_REQUESTED, OpsEventType.GENERATION_COMPLETED):
         return
     asset_check = _latest_asset_check(events, content_item_id)
     if asset_check is None:
@@ -973,8 +1051,6 @@ def _next_action_for_events(events: list[dict[str, Any]]) -> dict[str, Any]:
 def _next_action_after_generation_completed(events: list[dict[str, Any]]) -> dict[str, Any]:
     asset_check = _latest_asset_check(events, None)
     if asset_check is None:
-        if not _has_event(events, OpsEventType.GENERATION_REQUESTED):
-            return {"kind": "record_publish", "blocked": False}
         return {"kind": "check_generation_asset", "blocked": False}
     if asset_check["payload"].get("status") != "passed":
         return {"kind": "resolve_asset_issue", "blocked": True, "reason": "asset_check_failed"}

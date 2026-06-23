@@ -173,6 +173,45 @@ class OpsStore:
     def create_social_account(self, **kwargs: Any) -> dict[str, Any]:
         return self.create_channel_account(**kwargs)
 
+    def update_channel_account(
+        self,
+        *,
+        channel_account_id: str,
+        platform: str,
+        account_name: str,
+        source: dict[str, Any],
+        account_handle: str | None = None,
+        external_account_id: str | None = None,
+        status: str = "configured",
+        credential_ref: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE channel_accounts
+                SET
+                    platform = ?,
+                    account_name = ?,
+                    account_handle = ?,
+                    external_account_id = ?,
+                    status = ?,
+                    credential_ref_json = ?,
+                    source_json = ?
+                WHERE id = ?
+                """,
+                (
+                    platform,
+                    account_name,
+                    account_handle,
+                    external_account_id,
+                    status,
+                    _to_json(credential_ref or {}),
+                    _to_json(source),
+                    channel_account_id,
+                ),
+            )
+        return self.get_channel_account(channel_account_id)
+
     def list_channel_accounts(self, project_id: str | None = None) -> list[dict[str, Any]]:
         sql = """
             SELECT * FROM channel_accounts
@@ -311,6 +350,30 @@ class OpsStore:
 
     def get_experiment(self, experiment_id: str) -> dict[str, Any] | None:
         return self._fetch_one("SELECT * FROM content_experiments WHERE id = ?", (experiment_id,))
+
+    def list_cycles_for_project(self, project_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM operation_cycles
+                WHERE project_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (project_id,),
+            ).fetchall()
+        return [_decode(dict(row)) for row in rows]
+
+    def list_experiments_for_cycle(self, cycle_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM content_experiments
+                WHERE cycle_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (cycle_id,),
+            ).fetchall()
+        return [_decode(dict(row)) for row in rows]
 
     def list_events_for_experiment(self, experiment_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:

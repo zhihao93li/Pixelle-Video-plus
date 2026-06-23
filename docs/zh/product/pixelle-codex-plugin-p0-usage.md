@@ -112,6 +112,8 @@ pixelle_get_current
 P0.9 起，capability 还必须返回 `intent_routes`，用于把自然语言请求收敛到稳定分支：
 
 ```text
+codex_natural_language_entry
+ui_context_copy_fallback
 project_selection
 channel_account_selection
 status_check
@@ -126,7 +128,9 @@ mock_p0_closeout
 metrics_and_retro
 ```
 
-用户不应该再需要发送长工具清单。Codex 必须根据这些 route 决定是先选择项目/平台账号、只读状态、推荐选题、先问内容形态、进入文案审核链、处理已有成片、记录发布证据，还是执行 mock P0 收口。
+用户不应该再需要发送长工具清单，也不应该把 UI 复制内容当成日常入口。主路径是用户在 Codex 里用自然语言直接问 `@pixelle-ops`，例如“下一步做什么”“查看当前状态”“下一条内容适合做什么”。Codex 必须根据这些 route 决定是先选择项目/平台账号、只读状态、推荐选题、先问内容形态、进入文案审核链、处理已有成片、记录发布证据，还是执行 mock P0 收口。
+
+`ui_context_copy_fallback` 只用于新对话、多项目、多账号或历史轮次定位不清时。即使用户粘贴了 UI 兜底上下文，Codex 也必须先按正常流程读取 capability 和当前状态，并在上下文缺失或冲突时向用户确认，不能把复制内容当成绕过项目/账号选择的授权。
 
 P0.7-B 起，`video_generation.requires_user_pipeline_choice` 和 `video_generation.default_pipeline_requires_user_acceptance` 必须为 true。默认 pipeline 只是推荐，不等于用户已经选择；用户说“直接生成视频”只表示认可已审核稿进入生成，不表示自动选择 `standard`。除非同一句或前文明确指定已注册 pipeline，例如“用 standard 生成”，否则必须先问 pipeline。
 

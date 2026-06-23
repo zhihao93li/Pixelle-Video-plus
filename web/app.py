@@ -14,8 +14,10 @@
 Pixelle-Video Web UI - Main Entry Point
 
 This is the entry point for the Streamlit multi-page application.
-Uses st.navigation to define pages and set the default page to Home.
+Uses st.navigation to define pages for the existing video-generation workbench.
 """
+
+# ruff: noqa: E402,I001
 
 import sys
 from pathlib import Path
@@ -45,12 +47,11 @@ def main():
     init_session_state()
     init_i18n()
 
-    # Define pages using st.Page
     create_page = st.Page(
         "pages/1_🎬_Home.py",
         title=tr("nav.create", fallback="Create"),
         icon="🎬",
-        default=True
+        default=True,
     )
     
     history_page = st.Page(

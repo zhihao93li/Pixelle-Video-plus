@@ -48,8 +48,23 @@ PIXELLE_OPS_CONVERSATION_CONTRACT = {
     "requires_capability_first": True,
     "first_tool": "pixelle_get_capabilities",
     "no_tool_before_capabilities": True,
+    "primary_entry": "codex_natural_language",
+    "ui_context_copy": "fallback_only",
 }
 PIXELLE_OPS_INTENT_ROUTES = {
+    "codex_natural_language_entry": {
+        "primary_entry": True,
+        "first_tools": ["pixelle_get_capabilities"],
+        "ask_user_for_project_or_account_when_ambiguous": True,
+        "user_should_not_send_tool_checklist": True,
+        "writes_state": False,
+    },
+    "ui_context_copy_fallback": {
+        "fallback_only": True,
+        "use_when": ["new_thread", "historical_cycle", "ambiguous_project_or_channel_account"],
+        "must_verify_against_current_state": True,
+        "writes_state": False,
+    },
     "project_selection": {
         "required_when_multiple_projects": True,
         "first_tools": ["pixelle_get_capabilities", "pixelle_list_projects"],

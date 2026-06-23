@@ -43,11 +43,11 @@ def main():
     init_i18n()
 
     render_header()
-    st.markdown(f"### {tr('settings.page.title', fallback='Settings')}")
+    st.markdown(f"### {tr('settings.page.title', fallback='Settings / Integrations')}")
     st.caption(
         tr(
             "settings.page.description",
-            fallback="Configure model, media generation, TTS, and publishing services.",
+            fallback="Configure global LLM, RunningHub, ComfyUI, Fish Audio, COS, and Buffer capabilities shared by Ops and Video.",
         )
     )
     render_advanced_settings(default_expanded=True)

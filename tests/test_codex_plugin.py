@@ -136,6 +136,12 @@ async def test_plugin_reports_capabilities(plugin_service):
     assert result["conversation_contract_version"] == "p0.9.20260622"
     assert result["conversation_contract"]["requires_capability_first"] is True
     assert result["conversation_contract"]["first_tool"] == "pixelle_get_capabilities"
+    assert result["conversation_contract"]["primary_entry"] == "codex_natural_language"
+    assert result["conversation_contract"]["ui_context_copy"] == "fallback_only"
+    assert result["intent_routes"]["codex_natural_language_entry"]["primary_entry"] is True
+    assert result["intent_routes"]["codex_natural_language_entry"]["ask_user_for_project_or_account_when_ambiguous"] is True
+    assert result["intent_routes"]["ui_context_copy_fallback"]["fallback_only"] is True
+    assert result["intent_routes"]["ui_context_copy_fallback"]["must_verify_against_current_state"] is True
     assert result["intent_routes"]["status_check"]["first_tools"] == [
         "pixelle_get_capabilities",
         "pixelle_get_current",

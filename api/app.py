@@ -22,6 +22,8 @@ Or with custom settings:
     uv run python api/app.py --host 0.0.0.0 --port 8080 --reload
 """
 
+# ruff: noqa: E402,I001
+
 import sys
 from pathlib import Path
 
@@ -36,6 +38,7 @@ import argparse
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from api.config import api_config
@@ -136,6 +139,10 @@ app.include_router(resources_router, prefix=api_config.api_prefix)
 app.include_router(frame_router, prefix=api_config.api_prefix)
 app.include_router(ops_router, prefix=api_config.api_prefix)
 
+ops_web_dist = _project_root / "ops-web" / "dist"
+if ops_web_dist.exists():
+    app.mount("/ops", StaticFiles(directory=ops_web_dist, html=True), name="pixelle-ops-web")
+
 
 @app.get("/")
 async def root():
@@ -156,7 +163,11 @@ async def root():
             "resources": f"{api_config.api_prefix}/resources",
             "frame": f"{api_config.api_prefix}/frame",
             "ops": f"{api_config.api_prefix}/ops",
-        }
+        },
+        "ui": {
+            "ops": "/ops" if ops_web_dist.exists() else None,
+            "video_streamlit": "http://localhost:8501",
+        },
     }
 
 

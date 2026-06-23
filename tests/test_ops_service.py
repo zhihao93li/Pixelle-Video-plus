@@ -60,7 +60,7 @@ def test_generation_draft_rejects_instruction_wrappers(service):
         )
 
 
-def test_legacy_generated_experiment_next_action_records_publish(service):
+def test_generated_experiment_next_action_requires_asset_check(service):
     project, cycle, experiment = _seed_experiment(service)
     service.lock_prediction(
         experiment_id=experiment["id"],
@@ -89,7 +89,15 @@ def test_legacy_generated_experiment_next_action_records_publish(service):
 
     view = service.get_experiment_view(experiment["id"])
 
-    assert view["next_action"]["kind"] == "record_publish"
+    assert view["next_action"]["kind"] == "check_generation_asset"
+
+    with pytest.raises(OpsError, match="asset_check_required"):
+        service.record_publish(
+            experiment_id=experiment["id"],
+            content_item_id=content_item["id"],
+            evidence={"platform_url": "https://example.com/post/legacy"},
+            source=_source(),
+        )
 
 
 def test_create_cycle_requires_existing_project(service):
@@ -109,6 +117,53 @@ def test_codex_writes_require_user_confirmation(service):
             product="PetWoods",
             channel="xiaohongshu",
             source=_source(confirmed=False),
+        )
+
+
+def test_channel_account_update_is_configuration_only(service):
+    project, _, experiment = _seed_experiment(service)
+    account = service.create_channel_account(
+        project_id=project["id"],
+        platform="xiaohongshu",
+        account_name="PetWoods XHS",
+        account_handle="petwoods",
+        status="configured",
+        credential_ref={"provider": "manual", "key": "pixelle/petwoods/xhs"},
+        source={"kind": "ui", "surface": "test", "confirmed_by_user": True},
+    )
+
+    updated = service.update_channel_account(
+        channel_account_id=account["id"],
+        platform="douyin",
+        account_name="PetWoods Douyin",
+        account_handle="petwoods_dy",
+        external_account_id="dy-petwoods",
+        status="connected",
+        credential_ref={"provider": "manual", "key": "pixelle/petwoods/douyin"},
+        source={"kind": "ui", "surface": "test", "confirmed_by_user": True},
+    )
+
+    assert updated["id"] == account["id"]
+    assert updated["platform"] == "douyin"
+    assert updated["account_name"] == "PetWoods Douyin"
+    assert updated["account_handle"] == "petwoods_dy"
+    assert updated["external_account_id"] == "dy-petwoods"
+    assert updated["status"] == "connected"
+    assert updated["credential_ref"]["key"] == "pixelle/petwoods/douyin"
+    assert updated["source"]["kind"] == "ui"
+    assert service.store.get_experiment(experiment["id"])["stage"] == experiment["stage"]
+
+
+def test_channel_account_credential_ref_rejects_plaintext_secret_fields(service):
+    project, _, _ = _seed_experiment(service)
+
+    with pytest.raises(OpsError, match="credential_ref_must_be_reference"):
+        service.create_channel_account(
+            project_id=project["id"],
+            platform="xiaohongshu",
+            account_name="PetWoods XHS",
+            credential_ref={"access_token": "plaintext"},
+            source={"kind": "ui", "surface": "test", "confirmed_by_user": True},
         )
 
 
