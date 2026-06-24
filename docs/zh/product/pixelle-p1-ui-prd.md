@@ -12,6 +12,7 @@
 4. `docs/zh/product/pixelle-p1-ui-implementation-plan.md`
 5. `docs/zh/product/pixelle-p1-ui-information-architecture.md`
 6. `docs/zh/product/pixelle-p1-ops-loop-demo.html`
+7. `docs/zh/product/pixelle-p2-cheat-on-content-prd.md`
 
 ## 1. 一句话目标
 
@@ -27,6 +28,8 @@ P0 已经证明：
 4. 多项目和多平台账号不能默认混用最近上下文，必须显式选择。
 
 P1 不应该推翻这个方向。P1 的核心不是把运营流程搬到 UI，而是让 UI 成为用户理解、配置和检查 Pixelle 状态的稳定界面。
+
+P1 不承担 cheat-on-content 深度集成。P2 才开始展示 cheat workspace 的健康、rubric 摘要、persona 摘要、候选池摘要、来源引用和 writeback draft 状态；展示边界以 `docs/zh/product/pixelle-p2-cheat-on-content-prd.md` 为准。
 
 P1-A 默认采用独立 Ops 前端：
 

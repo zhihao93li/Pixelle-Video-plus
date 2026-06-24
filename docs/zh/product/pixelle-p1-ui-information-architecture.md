@@ -6,12 +6,15 @@
 关联 PRD：`docs/zh/product/pixelle-p1-ui-prd.md`
 关联计划：`docs/zh/product/pixelle-p1-ui-implementation-plan.md`
 关联 demo：`docs/zh/product/pixelle-p1-ops-loop-demo.html`
+后续 P2：`docs/zh/product/pixelle-p2-cheat-on-content-prd.md`
 
 ## 1. 设计定位
 
 Pixelle P1 UI 是运营状态和配置工作台。
 
 它不承担“做内容”的主流程，也不承担“决定下一条内容”的主流程。用户真正做判断、确认、生成和复盘仍然在 Codex 里完成。UI 的价值是让这些动作的结果变得可见、可查、可配置。
+
+P1 信息架构不展示完整 cheat workspace 内容。P2 会在同一套 Ops 框架里增加 cheat-on-content 的摘要、来源、冲突和写回状态，但不改变 P1 已确认的主结构：左侧轮次地图、中间工作面、条件式 Inspector 和折叠证据区。
 
 ## 2. 信息架构原则
 

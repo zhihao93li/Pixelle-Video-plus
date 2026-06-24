@@ -1,15 +1,16 @@
 # Pixelle 从 main 重做 PRD
 
-版本：v1.0  
-日期：2026-06-20  
-状态：重做基准稿  
-适用范围：从 `main` 新开干净分支后的产品重建  
-目标读者：产品、后端、前端、Codex/自动化执行者  
-配套技术方案：`docs/zh/product/pixelle-main-rebuild-technical-architecture.md`  
-配套实施计划：`docs/zh/product/pixelle-main-rebuild-implementation-plan.md`  
+版本：v1.1
+日期：2026-06-24
+状态：重做基准稿，已补充 P2 cheat-on-content 集成方向
+适用范围：从 `main` 新开干净分支后的产品重建
+目标读者：产品、后端、前端、Codex/自动化执行者
+配套技术方案：`docs/zh/product/pixelle-main-rebuild-technical-architecture.md`
+配套实施计划：`docs/zh/product/pixelle-main-rebuild-implementation-plan.md`
 P1 UI PRD：`docs/zh/product/pixelle-p1-ui-prd.md`
 P1 UI 信息架构：`docs/zh/product/pixelle-p1-ui-information-architecture.md`
 P1 UI 实施计划：`docs/zh/product/pixelle-p1-ui-implementation-plan.md`
+P2 cheat-on-content 集成 PRD：`docs/zh/product/pixelle-p2-cheat-on-content-prd.md`
 
 ## 1. 一句话目标
 
@@ -43,6 +44,8 @@ Pixelle 要成为 Codex 插件化的个人内容运营闭环系统：用户通�
 Pixelle 的默认对象不是 Campaign、页面、任务或媒体文件，而是一个持续运营的项目。
 
 Pixelle 的默认操作场所也不是 UI，而是 Codex 对话。用户在 Codex 里讨论、判断、确认和发起动作；Codex 通过 Pixelle 插件工具调用 Pixelle Ops；Pixelle 保存状态、校验证据、触发生成，并把结果展示出来。
+
+P1 已经把 Ops UI 做成状态和配置面板。P2 的主线不是继续扩 UI，而是把 `cheat-on-content` 作为 Codex 方法论层接入 Pixelle：Pixelle 负责产品事实，cheat workspace 负责 rubric、候选、预测、persona、复盘和写作 pattern 等方法论文件，两者通过只读摘要和受控 writeback draft 协作。
 
 示例：
 
@@ -370,6 +373,17 @@ UI 的默认原则：
 4. 不复制 Codex/cheat-on-content 的方法论。
 5. 只展示状态、证据、资产、阻断原因和审计记录。
 
+P2 增加一个展示边界：UI 可以展示 cheat workspace 的健康状态、摘要、已应用来源和一致性状态，但不成为 cheat workspace 浏览器，也不展示所有 markdown 原文。
+
+P2 UI 信息披露分四档：
+
+| 披露档位 | UI 行为 | 示例 |
+|---|---|---|
+| 主展示 | 当前步骤必须直接看到 | workspace health、rubric version、confidence、source hash、pending draft、conflict |
+| 二级详情 | 点开后可看 | persona 摘要、benchmark 状态、candidate count、validation errors |
+| 只做引用 | 不展开全文，只保存路径/hash/mtime | `predictions/*.md`、`rubric_notes.md`、`script_patterns.md` |
+| 不展示 | UI 不展示，最多做健康检测 | `.cheat-cache/*`、登录态、cookie、API key、blind 污染源全文 |
+
 ### 8.1 首页
 
 首页只回答：
@@ -590,6 +604,7 @@ Codex 根据项目状态提议 5 条内容候选和预测草稿。
 3. ContentExperiment 是否必须一开始就是独立表，还是可以先由现有内容字段承载一部分？
 4. 发布证据是否允许 legacy `ContentItem.platform_url` 临时迁移为 PublishRecord？
 5. 项目记忆是否只写结构化事件，还是同时写 cheat workspace 文件？
+   结论：P2 采用主从分层。Pixelle 写结构化 ProjectMemoryEvent，并保存 cheat source 引用；是否同步写回 cheat workspace 只能通过 cheat 协议产生新的 draft，不能自动覆盖文件。
 
 ## 15. 本 PRD 的硬边界
 

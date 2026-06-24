@@ -16,6 +16,8 @@ P1-A 交付独立 Ops 前端，而不是在 Streamlit 里嵌入完整 Ops app。
 4. Ops 前端通过现有 `/api/ops/*` 读取状态，只允许写入平台账号配置。
 5. 构建后的 `ops-web/dist` 可由 FastAPI 挂载到 `/ops`，避免生产上强制拆成两个正式产品服务。
 
+P1-A 完成后，后续最高优先级进入 P2 cheat-on-content 集成。P2 不推翻 P1-A 的 UI 主结构，只在 Ops 中增加 cheat workspace 绑定、摘要、来源、冲突和 writeback draft 状态；详细需求见 `docs/zh/product/pixelle-p2-cheat-on-content-prd.md`。
+
 ## 2. 不做
 
 1. 不重写视频生成前端。

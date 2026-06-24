@@ -1,12 +1,13 @@
 # Pixelle 从 main 重做实施计划
 
-版本：v1.0  
-日期：2026-06-20  
-状态：收敛版执行计划  
+版本：v1.1
+日期：2026-06-24
+状态：收敛版执行计划，已补充 P2 cheat-on-content 集成
 依据文档：
 
 1. `docs/zh/product/pixelle-main-rebuild-prd.md`
 2. `docs/zh/product/pixelle-main-rebuild-technical-architecture.md`
+3. `docs/zh/product/pixelle-p2-cheat-on-content-prd.md`
 
 ## 1. 本计划的目标
 
@@ -106,7 +107,7 @@ P0 不做 legacy 迁移。
 
 P0 只写 Pixelle Ops 状态库。
 
-是否同步写入 cheat workspace 文件，放到 P1。
+cheat-on-content 的集成放到 P2。P2 不直接把 Pixelle 状态同步写入 cheat workspace 源文件，而是通过只读摘要、联合上下文和 `writeback draft -> validate -> apply` 把 Codex/cheat 产出的结论受控写回 Pixelle。
 
 ## 5. 最小代码结构
 
@@ -650,48 +651,61 @@ Pixelle 能保存状态和证据，
 
 ## 14. P0 后路线图
 
-本节只用于防止范围漂移，不是 P0 执行计划。
+本节只用于防止范围漂移。当前实际进度已经完成 P1 Ops UI，下一阶段优先级固定为 P2 `cheat-on-content` 集成。
 
-真正执行时只做 Step 0 到 Step 7。下面内容必须等 P0 验收通过后再拆成新的实施计划。
-
-### P1：cheat-on-content 深度接入
-
-目标：
-
-让 Codex 使用 `cheat-on-content` 时，可以稳定读取 Pixelle 当前运营上下文，并通过受控 draft/apply 写回 Pixelle。
-
-范围：
-
-1. `ContextExport`。
-2. `CheatWorkspaceSummary`。
-3. `CodexWritebackDraft`。
-4. draft validate/apply。
-5. 更完整的 `ProjectMemory` 同步。
-
-不做：
-
-1. 不自动扫描 cheat workspace 后直接写产品状态。
-2. 不让 Codex 绕过 Pixelle Plugin 和 `ops.service`。
-
-### P2：Pixelle 只读展示 UI
+### P1：Ops UI 展示与配置（已完成）
 
 目标：
 
 Pixelle UI 只展示 Codex 运营动作的结果，不承担运营入口。
 
-范围：
+已完成范围：
 
-1. 当前项目页。
-2. 当前状态页。
-3. 证据链结果页。
-4. 生成资产预览。
-5. Codex 操作审计记录。
+1. 独立 `ops-web` 的 `Ops` 默认页。
+2. `Projects` 页面。
+3. 运营闭环、轮次、证据链和生成资产预览。
+4. 平台账号配置。
+5. `Settings / Integrations` 脱敏配置状态。
+6. 旧 Streamlit `Create / History / Settings` 保留为 Video 模块和高级配置入口。
 
 不做：
 
 1. 不做运营表单。
 2. 不做多页面营销后台。
 3. 不恢复 `apps/console`。
+4. 不从 UI 触发推荐、预测、生成、发布、指标或复盘写入。
+
+### P2：cheat-on-content 深度集成与学习闭环
+
+目标：
+
+让 Codex 使用 `cheat-on-content` 时，可以稳定读取 Pixelle 当前运营上下文和 cheat workspace 摘要，并通过受控 `writeback draft -> validate -> apply` 写回 Pixelle。ProjectMemory、rubric/persona 建议和 retro 学习同步属于同一阶段，不能后移拆开。
+
+范围：
+
+1. 项目绑定 `cheat_workspace_path`。
+2. `CheatWorkspaceSummary` 只读摘要。
+3. `ContextExport` 联合上下文。
+4. `CodexWritebackDraft`。
+5. draft validate/apply/reject。
+6. prediction、generation draft、publish、metrics、retro、memory 的受控写回。
+7. source file/hash/mtime 一致性检测。
+8. ProjectMemoryEvent 与 cheat retro/persona/rubric 建议的结构化同步。
+9. UI 展示 cheat workspace 健康状态、摘要、来源和冲突状态。
+
+不做：
+
+1. 不自动扫描 cheat workspace 后直接写产品状态。
+2. 不把 cheat workspace 整体迁入 Pixelle DB。
+3. 不自动执行 `cheat-bump`。
+4. 不让 UI 执行 seed、predict、retro 或 bump。
+5. 不让 Codex 绕过 Pixelle Plugin 和 `ops.service`。
+
+执行文档：
+
+```text
+docs/zh/product/pixelle-p2-cheat-on-content-prd.md
+```
 
 ### P3：证据自动化
 
@@ -711,20 +725,20 @@ Pixelle UI 只展示 Codex 运营动作的结果，不承担运营入口。
 1. 不把自动回读当成唯一证据来源。
 2. 不在没有真实平台返回时伪造成功。
 
-### P4：长期学习层
+### P4：长期产品化学习层
 
 目标：
 
-把多轮运营结果沉淀成可复用的账号经验、判断校准和内容策略。
+在 P2 已经建立 ProjectMemoryEvent 和 cheat 学习同步之后，再考虑更长期、更自动化的学习产品化。
 
 范围：
 
-1. ProjectMemory 结构升级。
-2. rubric 与实际表现的长期校准。
-3. 跨周期复盘摘要。
-4. 可解释的下一轮建议。
+1. 跨周期复盘摘要。
+2. 更复杂的 ProjectMemory 结构升级。
+3. rubric/persona 趋势可视化。
+4. 可解释的下一轮建议看板。
 
 不做：
 
-1. 不在 P0 阶段提前设计复杂记忆系统。
-2. 不在没有真实运营数据前固化复杂评分模型。
+1. 不在没有真实运营数据前固化复杂评分模型。
+2. 不把 P2 的基础 memory 同步后移到 P4。

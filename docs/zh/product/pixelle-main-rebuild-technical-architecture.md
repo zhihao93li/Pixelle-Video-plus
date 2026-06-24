@@ -1,10 +1,11 @@
 # Pixelle 从 main 重做技术架构方案
 
-版本：v1.2
-日期：2026-06-23
-状态：PRD 配套技术方案，含 P1-A UI 边界收敛
+版本：v1.3
+日期：2026-06-24
+状态：PRD 配套技术方案，含 P1 Ops UI 和 P2 cheat-on-content 集成边界
 关联文档：`docs/zh/product/pixelle-main-rebuild-prd.md`
 实施计划：`docs/zh/product/pixelle-main-rebuild-implementation-plan.md`
+P2 PRD：`docs/zh/product/pixelle-p2-cheat-on-content-prd.md`
 
 ## 1. 架构目标
 
@@ -320,6 +321,13 @@ Pixelle 对 cheat workspace 的使用方式分两类：
 
 Pixelle 不应该把 cheat workspace 当成可随意改写的数据库。尤其不能扫描文件后自动把所有内容写入产品状态。
 
+P2 采用主从分层，而不是物理合库：
+
+1. Pixelle Ops DB 是产品事实主库。
+2. cheat workspace 是方法论工作区。
+3. Pixelle 保存 cheat 输出的结构化快照、source file、source hash、rubric version 和 apply 审计。
+4. cheat 文件变化不能自动覆盖 Pixelle 已应用事实，只能产生 stale/conflict/pending draft。
+
 ### 3.6 Codex Integration
 
 Codex Integration 是 Pixelle Plugin、Pixelle Ops 和 `cheat-on-content` 之间的主操作适配层。
@@ -385,6 +393,17 @@ UI 模块边界分三层：
 | Ops | `ops-web` / `/ops` | 运营状态、证据链、资产、下一步提示 | 发起推荐、生成、发布、指标、复盘 |
 | Video | Streamlit `Create / History` | 视频生成工作台和生成历史 | 自动把 sandbox 生成写成运营事实 |
 | Settings / Integrations | `ops-web` / `/ops` + Streamlit `Settings` | 全局能力脱敏状态、高级配置入口；编辑明文 key 仍走旧 Settings | 把系统配置归属到单个运营实验；向 Ops UI 返回明文 secret |
+
+P2 增加 cheat workspace 信息披露规则。UI 可以展示 cheat workspace 的健康状态、摘要、已应用来源和一致性状态，但不能成为 cheat workspace 浏览器。
+
+| cheat 内容 | UI 展示方式 | 禁止 |
+| --- | --- | --- |
+| workspace health / schema / summary | 主展示或二级详情 | 自动迁移或自动导入 |
+| rubric version / confidence / calibration samples | 主展示或二级详情 | 展示 `rubric-memo.md` 全文作为主信息 |
+| applied prediction / retro / memory | 展示 Pixelle 快照、source file、source hash | 直接把未 apply markdown 当产品事实 |
+| persona / benchmark / script patterns | 二级摘要和 source 引用 | 喂给 blind scoring 或主界面平铺全文 |
+| candidates / scripts / predictions 原文 | source preview 或引用 | 把全量候选池做成 UI 主入口 |
+| `.cheat-cache`、登录态、cookie、secret | 不展示 | 返回给 API 或 UI |
 
 P1-A 最小可接受方式：
 
@@ -981,9 +1000,20 @@ POST /api/ops/retro
 ```text
 GET /api/ops/projects/{project_id}
 GET /api/ops/projects/{project_id}/channel-accounts
-GET /api/ops/projects/{project_id}/context-export
-GET /api/ops/projects/{project_id}/cheat-workspace-summary
 ```
+
+P2 固定新增以下 query/config API：
+
+```text
+GET /api/ops/projects/{project_id}/cheat-workspace
+PUT /api/ops/projects/{project_id}/cheat-workspace
+GET /api/ops/projects/{project_id}/cheat-workspace-summary
+GET /api/ops/context-export
+GET /api/ops/writeback-drafts
+GET /api/ops/writeback-drafts/{draft_id}
+```
+
+这些 API 不能让 UI 绕过 Pixelle Codex Plugin apply 运营事实。UI 可以配置 workspace path、查看摘要和 draft 状态；运营写入仍走 Codex Plugin 和 `ops.service`。
 
 ### 9.2 Pixelle Codex Plugin 工具入口
 
@@ -1010,7 +1040,36 @@ pixelle_write_retro
 pixelle_write_memory
 ```
 
-`pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先读取它；如果缺失、`protocol_version` 不是 `p0.9.20260622`、`conversation_contract_version` 不是 `p0.9.20260622`、`conversation_contract.requires_capability_first` 不为 true，或必需 conversation gates / intent routes 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
+P2 在保持 Codex 为运营主入口的前提下，补齐 cheat-on-content 集成工具：
+
+```text
+pixelle_set_project_cheat_workspace
+pixelle_get_cheat_workspace_summary
+pixelle_get_context_export
+pixelle_submit_writeback_draft
+pixelle_validate_writeback_draft
+pixelle_apply_writeback_draft
+pixelle_reject_writeback_draft
+pixelle_list_writeback_drafts
+```
+
+这些工具只处理两类事情：
+
+1. 读：把 Pixelle 当前项目、轮次、实验、资产、发布、指标、复盘和 cheat workspace 摘要导出给 Codex。
+2. 写：接收 Codex 产出的结构化 writeback draft，经校验后写入 Pixelle Ops 产品状态。
+
+P2 工具不得让 Pixelle 直接改写 cheat workspace 的源文件。`cheat-on-content` 的技能文件、rubric、memo、persona、candidate、prediction 和 retro 仍由 Codex skill 按自己的规则维护；Pixelle 只记录来源摘要、引用、hash、mtime、apply audit 和已进入产品状态的事实。
+
+`pixelle_get_capabilities` 是 Codex 线程进入 Pixelle Ops 的自检工具。新线程、P0 验证、状态查看、续跑、推荐、生成和恢复必须先读取它；如果缺失、`protocol_version` 不是当前插件协议版本、`conversation_contract_version` 不是当前对话契约版本、`conversation_contract.requires_capability_first` 不为 true，或必需 conversation gates / intent routes 不全，Codex 必须停止并提示重新加载插件，不能降级到旧的直接生成流程。
+
+进入 P2 后，`pixelle_get_capabilities` 必须显式暴露：
+
+1. `cheat_workspace_summary` 读取能力。
+2. `context_export` 读取能力。
+3. `writeback_draft` 提交、校验、应用、拒绝能力。
+4. Pixelle 产品状态为唯一运营事实源。
+5. cheat workspace 为方法论源，Pixelle 不自动覆盖源文件。
+6. UI 只展示 summary、source 和 draft 状态，不替代 Codex skill 执行 seed / predict / retro / bump。
 
 P0.9 的 `intent_routes` 覆盖：Codex 自然语言入口、UI 兜底上下文、项目选择、平台账号选择、状态查看、内容推荐、模糊文案请求、已明确文案请求、完整运营实验、视频生成、已有成片处理、发布证据、mock P0 收口、metrics/retro。它不是新的业务状态机，只是把 Codex 对话层的自然语言路由显式化，减少用户手写工具步骤的需要。
 
@@ -1164,22 +1223,7 @@ P0 是当前唯一执行范围。
 4. 自动指标拉取。
 5. 正式远程插件包装。
 
-### P1：cheat-on-content 深度接入
-
-产出：
-
-1. ContextExport。
-2. CheatWorkspaceSummary。
-3. CodexWritebackDraft。
-4. validate/apply。
-
-验收：
-
-1. Codex 可以辅助运营。
-2. Codex 不直接写产品状态。
-3. cheat workspace 不被 Pixelle 自动污染。
-
-### P1-A：运营状态与配置 UI
+### P1：Ops UI 展示与配置
 
 产出：
 
@@ -1201,28 +1245,78 @@ P0 是当前唯一执行范围。
 7. 顶层 `Assets` 页面。
 8. 独立 `Experiment Detail` 页面。
 
-### P2：UI 技术栈和体验升级
+验收：
 
-只有在 P1-A 真实使用验证信息架构有效后，再决定是否进入独立实验详情、资产中心或更完整账号管理。
+1. 默认进入 `Ops`，不是旧视频生成工作台。
+2. 单项目单账号可以直接展示当前闭环。
+3. 多项目或多平台账号时必须先选择，不能混用最近上下文。
+4. 六步闭环能看出当前轮次、当前步骤、下一步和已完成证据。
+5. 已生成资产可以预览，mock 发布和 mock 指标有明确标识。
+6. UI 不参与运营写入也能展示完整状态。
+
+### P2：cheat-on-content 深度集成与学习闭环
+
+P2 是当前后续最高优先级。目标不是把 cheat workspace 迁入 Pixelle，也不是让 UI 执行 cheat skill，而是让 Codex 在运营时同时拿到 Pixelle 的产品事实和 cheat-on-content 的方法论上下文，并把 Codex 产出的关键结论通过可审计 draft 写回 Pixelle。
+
+产出：
+
+1. `ProjectCheatWorkspaceBinding`：项目绑定一个 cheat workspace。
+2. `CheatWorkspaceSummary`：只读摘要，不展示完整源文件。
+3. `ContextExport`：给 Codex 的项目、账号、轮次、实验、资产、证据、cheat 摘要上下文。
+4. `CodexWritebackDraft`：Codex 产出的预测、草稿、发布、指标、复盘、memory 写回草案。
+5. `validate / apply / reject`：写回前校验，应用后记录来源和审计信息。
+6. source file / hash / mtime 一致性检查。
+7. UI 展示 workspace 健康、摘要、引用、冲突和 pending draft 状态。
+
+验收：
+
+1. Codex 可以在推荐、预测、文案、复盘时使用 cheat-on-content 的 rubric、校准、persona、候选和历史模式。
+2. Pixelle 产品状态仍是运营事实源，UI 展示和 API 查询都以 Pixelle DB 为准。
+3. cheat workspace 仍是方法论源，Pixelle 不自动扫描导入、不自动覆盖、不吞掉 skill 边界。
+4. 两边出现 hash 变化、缺文件、schema 不匹配或 pending draft 时，系统显示真实冲突状态，而不是静默覆盖。
+5. 写入 Pixelle 的结论都有 `source.kind = "codex"`、skill 名称、workspace path、source file、hash、draft id、apply audit。
+6. UI 不展示完整 `rubric_notes.md`、完整 `audience.md`、完整 `candidates.md`、全部脚本、全部预测、缓存、cookie、secret 或完整本地路径。
+
+详细产品边界见 `docs/zh/product/pixelle-p2-cheat-on-content-prd.md`。
 
 ### P3：证据自动化
 
-只有在 P0 稳定后再考虑：
+只有在 P2 的 Codex + cheat 集成稳定后，再考虑真实外部数据自动化：
 
-1. 平台数据 readback。
+1. 平台发布状态 readback。
 2. Buffer 发布状态回读。
-3. 多平台指标适配。
-4. 更完整的内容队列。
-5. 更复杂的资源设置。
+3. 小红书、抖音、YouTube 等平台指标适配。
+4. 定时观测任务。
+5. 更完整的多平台内容队列。
+6. 发布后指标和复盘的半自动写入。
 
-### P4：长期学习层
+这些能力不应该抢在 P2 前做。否则系统只有更多数据入口，却没有稳定的方法论上下文和写回契约，容易再次变成大而散的后台。
 
-只有在 P0/P1 有真实运营数据后再考虑：
+### P4：长期产品化学习层
+
+只有在 P0/P1/P2 都有真实使用数据后再考虑：
 
 1. ProjectMemory 结构升级。
 2. rubric 与实际表现的长期校准。
-3. 跨周期复盘摘要。
+3. persona 和内容模式的跨周期演化。
 4. 可解释的下一轮建议。
+5. 独立实验详情、资产中心或更完整账号管理。
+6. UI 技术栈是否继续升级。
+
+P4 的前提是：P2 已证明 cheat-on-content 的上下文接入和写回闭环有价值，P3 已证明真实数据回收能稳定进入系统。
+
+### 阶段边界
+
+P2 不做：
+
+1. UI 里直接运行 cheat seed / predict / retro / bump。
+2. 自动发布。
+3. 自动平台指标抓取。
+4. 自动 Buffer readback。
+5. React/前端技术栈重写。
+6. 大型 dashboard。
+7. 把 cheat workspace 文件迁入 Pixelle 数据库。
+8. 让 Pixelle 自动覆盖 cheat workspace 源文件。
 
 ## 12. 从 main 重做时的代码策略
 
