@@ -1,12 +1,14 @@
 import type {
   CreateChannelAccountInput,
   CreateChannelAccountResponse,
+  ContextExportResponse,
   CurrentResponse,
   IntegrationsResponse,
   ProjectCyclesResponse,
   ProjectsResponse,
   UpdateChannelAccountInput,
   UpdateChannelAccountResponse,
+  WritebackDraftsResponse,
 } from "./types";
 
 const API_BASE = (import.meta.env.VITE_PIXELLE_API_BASE || "").replace(/\/$/, "");
@@ -52,6 +54,18 @@ export function getCurrent(projectId?: string, channelAccountId?: string): Promi
   if (channelAccountId) params.set("channel_account_id", channelAccountId);
   const query = params.toString();
   return request<CurrentResponse>(`/api/ops/current${query ? `?${query}` : ""}`);
+}
+
+export function getContextExport(projectId?: string, channelAccountId?: string): Promise<ContextExportResponse> {
+  const params = new URLSearchParams();
+  if (projectId) params.set("project_id", projectId);
+  if (channelAccountId) params.set("channel_account_id", channelAccountId);
+  const query = params.toString();
+  return request<ContextExportResponse>(`/api/ops/context-export${query ? `?${query}` : ""}`);
+}
+
+export function listWritebackDrafts(): Promise<WritebackDraftsResponse> {
+  return request<WritebackDraftsResponse>("/api/ops/writeback-drafts");
 }
 
 export function createChannelAccount(

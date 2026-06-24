@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 from collections.abc import Iterable
 from pathlib import Path
@@ -47,6 +48,10 @@ PIPELINE_DESCRIPTIONS = {
 WRITEBACK_OPERATIONS = {
     "lock_content_prediction",
     "submit_generation_draft",
+    "record_publish_evidence",
+    "record_metrics_snapshot",
+    "record_retro_observation",
+    "write_project_memory_event",
 }
 
 
@@ -635,6 +640,8 @@ class OpsService:
                     "channel_account_project_mismatch",
                     "Publish channel account must belong to the same project as the experiment.",
                 )
+        if content_item_id:
+            self._require_content_item_for_experiment(experiment_id, content_item_id)
         if not _has_publish_evidence(evidence):
             raise OpsError("publish_evidence_required", "Publish evidence requires a URL, post id, Buffer id, or API response.")
         events = self.store.list_events_for_experiment(experiment_id)
@@ -679,6 +686,7 @@ class OpsService:
                 "published_content_required",
                 "Metrics must reference the content item that has publish evidence.",
             )
+        self._require_content_item_for_experiment(experiment_id, content_item_id)
         publish_event = _publish_event_for_content(events, content_item_id)
         if publish_event and _is_mock_evidence(publish_event["payload"].get("evidence", {})):
             if not _is_mock_evidence(metrics):
@@ -832,11 +840,12 @@ class OpsService:
         _require_confirmed_source(source)
         if operation not in WRITEBACK_OPERATIONS:
             raise OpsError("unsupported_writeback_operation", f"Unsupported writeback operation: {operation}.")
+        tracked_source = _source_with_fingerprint(source)
         draft = self.store.create_writeback_draft(
             operation=operation,
             target=target,
             payload=payload,
-            source=source,
+            source=tracked_source,
         )
         return {
             "status": "ok",
@@ -892,8 +901,16 @@ class OpsService:
                 "writeback_draft_not_validated",
                 "Writeback draft must pass validation before apply.",
             )
-        # Revalidate immediately before applying so stale target changes cannot slip through.
-        self._validate_writeback_payload(draft)
+        # Revalidate immediately before applying so stale source or target changes cannot slip through.
+        try:
+            self._validate_writeback_payload(draft)
+        except OpsError as exc:
+            self.store.update_writeback_draft(
+                draft_id=draft_id,
+                status="validation_failed",
+                validation_result={"status": "error", "error": {"code": exc.code, "message": exc.message}},
+            )
+            raise
         apply_source = {
             **draft["source"],
             **source,
@@ -913,6 +930,34 @@ class OpsService:
                 pipeline=draft["payload"].get("pipeline", "standard"),
                 title=draft["payload"].get("title"),
                 generation_params=draft["payload"].get("generation_params"),
+            )
+        elif draft["operation"] == "record_publish_evidence":
+            result = self.record_publish(
+                experiment_id=draft["target"]["experiment_id"],
+                content_item_id=draft["target"].get("content_item_id"),
+                channel_account_id=draft["target"].get("channel_account_id"),
+                account_id=draft["target"].get("account_id"),
+                evidence=draft["payload"]["evidence"],
+                source=apply_source,
+            )
+        elif draft["operation"] == "record_metrics_snapshot":
+            result = self.record_metrics(
+                experiment_id=draft["target"]["experiment_id"],
+                content_item_id=draft["target"].get("content_item_id"),
+                metrics=draft["payload"]["metrics"],
+                source=apply_source,
+            )
+        elif draft["operation"] == "record_retro_observation":
+            result = self.write_retro(
+                experiment_id=draft["target"]["experiment_id"],
+                retro=draft["payload"]["retro"],
+                source=apply_source,
+            )
+        elif draft["operation"] == "write_project_memory_event":
+            result = self.write_memory(
+                experiment_id=draft["target"]["experiment_id"],
+                memory=draft["payload"]["memory"],
+                source=apply_source,
             )
         else:
             raise OpsError(
@@ -1031,6 +1076,22 @@ class OpsService:
             raise OpsError("writeback_draft_not_found", "Writeback draft was not found.")
         return draft
 
+    def _require_content_item_for_experiment(self, experiment_id: str, content_item_id: str) -> dict[str, Any]:
+        content_item = next(
+            (
+                item
+                for item in self.store.list_content_items_for_experiment(experiment_id)
+                if item["id"] == content_item_id
+            ),
+            None,
+        )
+        if content_item is None:
+            raise OpsError(
+                "content_item_not_found",
+                "Content item must exist and belong to the target experiment.",
+            )
+        return content_item
+
     def _validate_writeback_payload(self, draft: dict[str, Any]) -> None:
         target = draft.get("target", {})
         payload = draft.get("payload", {})
@@ -1038,6 +1099,7 @@ class OpsService:
         if not experiment_id:
             raise OpsError("writeback_target_required", "Writeback draft requires target.experiment_id.")
         self._get_experiment_or_raise(experiment_id)
+        _require_source_fingerprint_synced(draft.get("source", {}))
         events = self.store.list_events_for_experiment(experiment_id)
         operation = draft.get("operation")
         if operation == "lock_content_prediction":
@@ -1054,12 +1116,114 @@ class OpsService:
                 raise OpsError("generation_draft_invalid", "Generation draft text must be a string.")
             _require_clean_generation_draft_text(text)
             return
+        if operation == "record_publish_evidence":
+            evidence = payload.get("evidence")
+            if not isinstance(evidence, dict) or not _has_publish_evidence(evidence):
+                raise OpsError(
+                    "publish_evidence_required",
+                    "Publish writeback requires URL, post id, Buffer id, API response, or explicit mock evidence.",
+                )
+            content_item_id = target.get("content_item_id")
+            if content_item_id:
+                self._require_content_item_for_experiment(experiment_id, content_item_id)
+            return
+        if operation == "record_metrics_snapshot":
+            metrics = payload.get("metrics")
+            if not isinstance(metrics, dict) or not metrics:
+                raise OpsError("metrics_required", "Metrics writeback requires a metrics payload.")
+            if not _has_event(events, OpsEventType.PUBLISH_RECORDED):
+                raise OpsError("publish_required", "Metrics writeback requires publish evidence first.")
+            content_item_id = target.get("content_item_id")
+            if not content_item_id or not _has_published_content(events, content_item_id):
+                raise OpsError(
+                    "published_content_required",
+                    "Metrics writeback must reference the published content item.",
+                )
+            self._require_content_item_for_experiment(experiment_id, content_item_id)
+            publish_event = _publish_event_for_content(events, content_item_id)
+            if publish_event and _is_mock_evidence(publish_event["payload"].get("evidence", {})):
+                if not _is_mock_evidence(metrics):
+                    raise OpsError(
+                        "mock_metrics_label_required",
+                        "Mock publish evidence requires mock metrics to carry mock=true and mock_label.",
+                    )
+            return
+        if operation == "record_retro_observation":
+            retro = payload.get("retro")
+            if not isinstance(retro, dict) or not retro:
+                raise OpsError("retro_required", "Retro writeback requires a retro payload.")
+            if not _has_event(events, OpsEventType.METRICS_RECORDED):
+                raise OpsError("metrics_required", "Retro writeback requires metrics evidence first.")
+            return
+        if operation == "write_project_memory_event":
+            memory = payload.get("memory")
+            if not isinstance(memory, dict) or not memory:
+                raise OpsError("memory_required", "Memory writeback requires a memory payload.")
+            if not _has_event(events, OpsEventType.RETRO_WRITTEN, OpsEventType.OBSERVATION_WRITTEN):
+                raise OpsError("retro_required", "Memory writeback requires a retro or observation first.")
+            return
         raise OpsError("unsupported_writeback_operation", f"Unsupported writeback operation: {operation}.")
 
 
 def _require_confirmed_source(source: dict[str, Any]) -> None:
     if source.get("kind") == "codex" and source.get("confirmed_by_user") is not True:
         raise OpsError("source_not_confirmed", "Codex writes require explicit user confirmation.")
+
+
+def _source_with_fingerprint(source: dict[str, Any]) -> dict[str, Any]:
+    if not source.get("workspace_path") or not source.get("source_file"):
+        return source
+    return {
+        **source,
+        **_source_fingerprint(source),
+    }
+
+
+def _require_source_fingerprint_synced(source: dict[str, Any]) -> None:
+    if not source.get("workspace_path") or not source.get("source_file"):
+        return
+    current = _source_fingerprint(source)
+    if current.get("source_status") == "source_untracked_remote":
+        return
+    if current.get("source_status") == "source_missing":
+        raise OpsError("source_missing", "Writeback source file is missing.")
+    if current.get("source_status") == "source_unreadable":
+        raise OpsError("source_unreadable", "Writeback source file cannot be read.")
+    expected_hash = source.get("source_hash")
+    if not expected_hash:
+        raise OpsError("source_hash_required", "Writeback source tracking requires source_hash.")
+    if expected_hash != current.get("source_hash"):
+        raise OpsError("source_hash_changed", "Writeback source file changed after the draft was created.")
+
+
+def _source_fingerprint(source: dict[str, Any]) -> dict[str, Any]:
+    source_path = _resolve_source_path(source)
+    if source_path is None:
+        return {"source_status": "source_untracked_remote"}
+    if not source_path.is_file():
+        return {"source_status": "source_missing"}
+    try:
+        data = source_path.read_bytes()
+        stat = source_path.stat()
+    except OSError:
+        return {"source_status": "source_unreadable"}
+    digest = hashlib.sha256(data).hexdigest()
+    return {
+        "source_status": "source_synced",
+        "source_hash": f"sha256:{digest}",
+        "source_mtime": stat.st_mtime,
+    }
+
+
+def _resolve_source_path(source: dict[str, Any]) -> Path | None:
+    workspace_path = str(source.get("workspace_path") or "")
+    source_file = str(source.get("source_file") or "")
+    if is_remote_workspace_path(workspace_path) or is_remote_workspace_path(source_file):
+        return None
+    path = Path(source_file).expanduser()
+    if path.is_absolute():
+        return path
+    return Path(workspace_path).expanduser() / path
 
 
 def _reject_plaintext_credential_ref(credential_ref: dict[str, Any]) -> None:

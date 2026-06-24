@@ -127,6 +127,44 @@ export interface CurrentResponse {
   next_action: NextAction;
 }
 
+export interface ContextExport {
+  project: OpsProject | null;
+  channel_account: ChannelAccount | null;
+  current_cycle: OperationCycle | null;
+  current_experiment: ContentExperiment | null;
+  next_action: NextAction;
+  recent_ops_events: OpsEvent[];
+  content_items: ContentItem[];
+  project_memory_summary?: JsonObject;
+  cheat_workspace_summary?: JsonObject | null;
+  sync_status?: JsonObject;
+}
+
+export interface ContextExportResponse {
+  status: string;
+  context_export: ContextExport;
+  next_action?: NextAction | null;
+}
+
+export interface WritebackDraft {
+  id: string;
+  operation: string;
+  target: JsonObject;
+  payload: JsonObject;
+  status: string;
+  validation_result?: JsonObject;
+  applied_result?: JsonObject;
+  source?: JsonObject;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface WritebackDraftsResponse {
+  status: string;
+  drafts: WritebackDraft[];
+  next_action?: NextAction | null;
+}
+
 export interface IntegrationSafeField {
   label: string;
   value: string;

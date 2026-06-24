@@ -14,10 +14,12 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   createChannelAccount,
+  getContextExport,
   getCurrent,
   listIntegrations,
   listProjectCycles,
   listProjects,
+  listWritebackDrafts,
   updateChannelAccount,
 } from "./api";
 import {
@@ -28,6 +30,7 @@ import {
   latestEvent,
   missingEvents,
   nextActionLabel,
+  pendingWritebackDraftsForExperiment,
   previewContentItem,
   stageSummary,
   stageTitle,
@@ -35,11 +38,13 @@ import {
   stepState,
   summarizeEvidence,
   summarizeValue,
+  writebackDraftsForStep,
   type StepKey,
 } from "./opsModel";
 import type {
   ChannelAccount,
   ContentItem,
+  ContextExportResponse,
   CurrentResponse,
   CycleView,
   ExperimentView,
@@ -52,6 +57,8 @@ import type {
   OpsProject,
   ProjectCyclesResponse,
   ProjectsResponse,
+  WritebackDraft,
+  WritebackDraftsResponse,
 } from "./types";
 
 const VIDEO_BASE = (import.meta.env.VITE_PIXELLE_VIDEO_BASE || "http://localhost:8501").replace(/\/$/, "");
@@ -62,6 +69,8 @@ interface LoadState {
   projects?: ProjectsResponse;
   current?: CurrentResponse;
   cycles?: ProjectCyclesResponse;
+  contextExport?: ContextExportResponse;
+  writebackDrafts?: WritebackDraftsResponse;
   integrations?: IntegrationsResponse;
   loading: boolean;
   error: string | null;
@@ -104,19 +113,24 @@ export function App() {
   async function refresh(projectId = selectedProject?.id || selectedProjectId, accountId = selectedAccount?.id || selectedAccountId) {
     setState((prev) => ({ ...prev, loading: true, error: null }));
     try {
-      const [projectsResponse, integrationsResponse] = await Promise.all([listProjects(), listIntegrations()]);
+      const [projectsResponse, integrationsResponse, writebackDraftsResponse] = await Promise.all([
+        listProjects(),
+        listIntegrations(),
+        listWritebackDrafts(),
+      ]);
       const nextProject =
         projectsResponse.projects.find((project) => project.id === projectId)
         || (projectsResponse.projects.length === 1 ? projectsResponse.projects[0] : null);
       const nextAccounts = nextProject?.channel_accounts || [];
       const nextAccount =
         nextAccounts.find((account) => account.id === accountId) || (nextAccounts.length === 1 ? nextAccounts[0] : null);
-      const [currentResponse, cyclesResponse] = nextProject
+      const [currentResponse, cyclesResponse, contextExportResponse] = nextProject
         ? await Promise.all([
             getCurrent(nextProject.id, nextAccount?.id),
             listProjectCycles(nextProject.id),
+            getContextExport(nextProject.id, nextAccount?.id),
           ])
-        : [undefined, undefined];
+        : [undefined, undefined, undefined];
 
       if (nextProject && nextProject.id !== selectedProjectId) setSelectedProjectId(nextProject.id);
       if (!nextProject && selectedProjectId) setSelectedProjectId("");
@@ -125,6 +139,8 @@ export function App() {
         projects: projectsResponse,
         current: currentResponse,
         cycles: cyclesResponse,
+        contextExport: contextExportResponse,
+        writebackDrafts: writebackDraftsResponse,
         integrations: integrationsResponse,
         loading: false,
         error: null,
@@ -212,6 +228,8 @@ export function App() {
               selectedExperiment={selectedExperiment}
               nextAction={nextAction}
               hasMock={hasMockEvidence(selectedExperiment)}
+              contextExport={state.contextExport}
+              writebackDrafts={state.writebackDrafts?.drafts || []}
               onProjectChange={(id) => void handleProjectChange(id)}
               onAccountChange={(id) => void handleAccountChange(id)}
               onCopy={() => void copyPrompt()}
@@ -227,6 +245,8 @@ export function App() {
                 selectedExperiment={selectedExperiment}
                 selectedStep={selectedStep}
                 nextAction={nextAction}
+                contextExport={state.contextExport}
+                writebackDrafts={state.writebackDrafts?.drafts || []}
                 onConfigureAccounts={() => setScreen("projects")}
                 onCopyPrompt={() => void copyPrompt()}
                 onSelectCycle={setSelectedCycleId}
@@ -297,6 +317,8 @@ function Topbar({
   selectedExperiment,
   nextAction,
   hasMock,
+  contextExport,
+  writebackDrafts,
   copyState,
   onProjectChange,
   onAccountChange,
@@ -311,6 +333,8 @@ function Topbar({
   selectedExperiment?: ExperimentView | null;
   nextAction?: NextAction | null;
   hasMock: boolean;
+  contextExport?: ContextExportResponse;
+  writebackDrafts: WritebackDraft[];
   copyState: "idle" | "done" | "error";
   onProjectChange: (id: string) => void;
   onAccountChange: (id: string) => void;
@@ -334,6 +358,11 @@ function Topbar({
           {hasMock ? <span className="pill mock">Mock 证据</span> : null}
         </div>
         <CodexPrimaryCallout nextAction={nextAction} />
+        <CheatSyncStrip
+          contextExport={contextExport}
+          selectedExperiment={selectedExperiment || null}
+          writebackDrafts={writebackDrafts}
+        />
         <div className="context-grid">
           <ContextItem label="项目" value={selectedProject?.name || "未选择"} meta={selectedProject?.id} warn={!selectedProject} />
           <ContextItem
@@ -425,6 +454,44 @@ function CodexPrimaryCallout({ nextAction }: { nextAction?: NextAction | null })
   );
 }
 
+function CheatSyncStrip({
+  contextExport,
+  selectedExperiment,
+  writebackDrafts,
+}: {
+  contextExport?: ContextExportResponse;
+  selectedExperiment: ExperimentView | null;
+  writebackDrafts: WritebackDraft[];
+}) {
+  const context = contextExport?.context_export;
+  const summary = objectValue(context?.cheat_workspace_summary);
+  const sync = objectValue(context?.sync_status);
+  const cheatStatus = textValue(sync?.cheat_workspace) || "not_configured";
+  const pendingDrafts = pendingWritebackDraftsForExperiment(writebackDrafts, selectedExperiment);
+  const sourceIssue = firstSourceIssue(pendingDrafts);
+  const healthTone = cheatStatus === "valid" ? "good" : "warn";
+  return (
+    <section className="cheat-sync" aria-label="cheat-on-content 同步状态">
+      <div className={`sync-item ${healthTone}`}>
+        <span>方法论工作区</span>
+        <strong>{cheatStatusLabel(cheatStatus)}</strong>
+      </div>
+      <div className="sync-item">
+        <span>Rubric / 信心</span>
+        <strong>{textValue(summary?.rubric_version) || "-"} · {textValue(summary?.confidence) || "-"}</strong>
+      </div>
+      <div className={pendingDrafts.length ? "sync-item warn" : "sync-item good"}>
+        <span>待确认写回</span>
+        <strong>{pendingDrafts.length ? `${pendingDrafts.length} 条` : "无"}</strong>
+      </div>
+      <div className={sourceIssue ? "sync-item warn" : "sync-item good"}>
+        <span>来源一致性</span>
+        <strong>{sourceIssue ? sourceStatusLabel(sourceIssue) : "当前无阻断"}</strong>
+      </div>
+    </section>
+  );
+}
+
 async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
@@ -461,6 +528,8 @@ function OpsScreen({
   selectedExperiment,
   selectedStep,
   nextAction,
+  contextExport,
+  writebackDrafts,
   onConfigureAccounts,
   onCopyPrompt,
   onSelectCycle,
@@ -473,6 +542,8 @@ function OpsScreen({
   selectedExperiment: ExperimentView | null;
   selectedStep: StepKey;
   nextAction?: NextAction | null;
+  contextExport?: ContextExportResponse;
+  writebackDrafts: WritebackDraft[];
   onConfigureAccounts: () => void;
   onCopyPrompt: () => void;
   onSelectCycle: (cycleId: string) => void;
@@ -523,7 +594,13 @@ function OpsScreen({
           onSelectCycle={onSelectCycle}
           onSelectStep={onSelectStep}
         />
-        <StepWorkspace step={activeStep} experiment={selectedExperiment} nextAction={nextAction} />
+        <StepWorkspace
+          contextExport={contextExport}
+          experiment={selectedExperiment}
+          nextAction={nextAction}
+          step={activeStep}
+          writebackDrafts={writebackDrafts}
+        />
       </section>
       <EvidenceDrawer step={activeStep} experiment={selectedExperiment} />
     </>
@@ -599,15 +676,23 @@ function CycleRail({
 }
 
 function StepWorkspace({
+  contextExport,
   step,
   experiment,
   nextAction,
+  writebackDrafts,
 }: {
+  contextExport?: ContextExportResponse;
   step: (typeof LOOP_STEPS)[number];
   experiment: ExperimentView | null;
   nextAction?: NextAction | null;
+  writebackDrafts: WritebackDraft[];
 }) {
   const missing = missingEvents(step, experiment);
+  const stepDrafts = writebackDraftsForStep(writebackDrafts, experiment, step.key);
+  const pendingStepDrafts = stepDrafts.filter((draft) => !["applied", "rejected"].includes(draft.status));
+  const context = contextExport?.context_export;
+  const summary = objectValue(context?.cheat_workspace_summary);
   return (
     <section className="workspace panel">
       <div className="workspace-head">
@@ -627,6 +712,7 @@ function StepWorkspace({
       <div className="workspace-grid">
         <section className="detail-card">
           <StepDetail stepKey={step.key} experiment={experiment} />
+          <StepSourceSummary experiment={experiment} stepKey={step.key} writebackDrafts={writebackDrafts} />
         </section>
         <section className="inspector-card">
           <h3>本步骤检查</h3>
@@ -642,6 +728,15 @@ function StepWorkspace({
             <span>阻塞下一步</span>
             <strong>{nextAction?.blocked ? "是" : "否"}</strong>
           </div>
+          <div className="inspect-row">
+            <span>方法论摘要</span>
+            <strong>{summary ? `rubric ${textValue(summary.rubric_version) || "-"} · confidence ${textValue(summary.confidence) || "-"}` : "未绑定或不可读"}</strong>
+          </div>
+          <div className={`inspect-row ${pendingStepDrafts.length ? "warn" : "good"}`}>
+            <span>待确认写回</span>
+            <strong>{pendingStepDrafts.length ? `${pendingStepDrafts.length} 条待处理` : "本步骤无待处理 draft"}</strong>
+          </div>
+          <DraftList drafts={pendingStepDrafts} />
         </section>
       </div>
     </section>
@@ -656,6 +751,57 @@ function StepDetail({ stepKey, experiment }: { stepKey: StepKey; experiment: Exp
   if (stepKey === "asset") return <AssetDetail experiment={experiment} />;
   if (stepKey === "publish") return <PublishDetail experiment={experiment} />;
   return <RetroDetail experiment={experiment} />;
+}
+
+function StepSourceSummary({
+  experiment,
+  stepKey,
+  writebackDrafts,
+}: {
+  experiment: ExperimentView | null;
+  stepKey: StepKey;
+  writebackDrafts: WritebackDraft[];
+}) {
+  const source = sourceForStep(experiment, stepKey, writebackDrafts);
+  if (!source) return null;
+  const status = sourceStatusFromSource(source);
+  return (
+    <section className={`source-summary ${sourceStatusTone(status)}`}>
+      <div>
+        <span>来源</span>
+        <strong>{textValue(source.source_file) || textValue(source.draft_id) || "事件来源"}</strong>
+      </div>
+      <div>
+        <span>一致性</span>
+        <strong>{sourceStatusLabel(status)}</strong>
+      </div>
+      <div>
+        <span>hash</span>
+        <strong>{shortHash(textValue(source.source_hash))}</strong>
+      </div>
+    </section>
+  );
+}
+
+function DraftList({ drafts }: { drafts: WritebackDraft[] }) {
+  if (!drafts.length) return null;
+  return (
+    <div className="draft-list">
+      {drafts.slice(0, 3).map((draft) => {
+        const error = objectValue(draft.validation_result?.error);
+        const sourceStatus = firstSourceIssue([draft]) || textValue(draft.source?.source_status) || "source_untracked";
+        return (
+          <article className="draft-chip" key={draft.id}>
+            <div>
+              <strong>{writebackOperationLabel(draft.operation)}</strong>
+              <span>{draft.status}{error ? ` · ${textValue(error.code)}` : ""}</span>
+            </div>
+            <em>{sourceStatusLabel(sourceStatus)}</em>
+          </article>
+        );
+      })}
+    </div>
+  );
 }
 
 function PredictionDetail({ experiment }: { experiment: ExperimentView }) {
@@ -961,6 +1107,89 @@ function EvidenceDrawer({ step, experiment }: { step: (typeof LOOP_STEPS)[number
       )}
     </details>
   );
+}
+
+function sourceForStep(
+  experiment: ExperimentView | null,
+  stepKey: StepKey,
+  writebackDrafts: WritebackDraft[],
+): JsonObject | null {
+  const stepDrafts = writebackDraftsForStep(writebackDrafts, experiment, stepKey);
+  const draftSource = stepDrafts.find((draft) => draft.source?.source_file || draft.source?.source_hash || draft.source?.draft_id);
+  if (draftSource?.source) {
+    const issue = firstSourceIssue([draftSource]);
+    return issue ? { ...draftSource.source, source_status: issue } : draftSource.source;
+  }
+  if (!experiment) return null;
+  const step = LOOP_STEPS.find((item) => item.key === stepKey);
+  const event = step
+    ? [...experiment.events].reverse().find((item) => step.events.includes(item.event_type) && item.source)
+    : null;
+  const source = objectValue(event?.source);
+  if (!source?.source_file && !source?.source_hash && !source?.draft_id) return null;
+  return source;
+}
+
+function firstSourceIssue(drafts: WritebackDraft[]): string {
+  for (const draft of drafts) {
+    const error = objectValue(draft.validation_result?.error);
+    const code = textValue(error?.code);
+    if (code.startsWith("source_")) return code;
+    const sourceStatus = textValue(draft.source?.source_status);
+    if (["source_missing", "source_hash_changed", "source_unreadable", "source_hash_required"].includes(sourceStatus)) {
+      return sourceStatus;
+    }
+  }
+  return "";
+}
+
+function sourceStatusFromSource(source: JsonObject): string {
+  return textValue(source.source_status) || (source.source_hash ? "source_synced" : "source_untracked");
+}
+
+function sourceStatusTone(status: string): "good" | "warn" {
+  return status === "source_synced" ? "good" : "warn";
+}
+
+function sourceStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    source_synced: "已同步",
+    source_hash_changed: "来源已变化",
+    source_missing: "来源缺失",
+    source_unreadable: "来源不可读",
+    source_hash_required: "缺少 hash",
+    source_untracked: "未追踪",
+    source_untracked_remote: "远程来源",
+  };
+  return labels[status] || status || "未追踪";
+}
+
+function cheatStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    valid: "已绑定",
+    not_configured: "未绑定",
+    missing: "路径缺失",
+    invalid_workspace: "路径无效",
+    schema_mismatch: "需要迁移",
+  };
+  return labels[status] || status;
+}
+
+function writebackOperationLabel(operation: string): string {
+  const labels: Record<string, string> = {
+    lock_content_prediction: "锁定预测",
+    submit_generation_draft: "提交草稿",
+    record_publish_evidence: "登记发布",
+    record_metrics_snapshot: "记录指标",
+    record_retro_observation: "写复盘",
+    write_project_memory_event: "写记忆",
+  };
+  return labels[operation] || operation;
+}
+
+function shortHash(value: string): string {
+  if (!value) return "-";
+  return value.length > 18 ? `${value.slice(0, 15)}...` : value;
 }
 
 function findEventById(events: OpsEvent[], eventId: string): OpsEvent | null {

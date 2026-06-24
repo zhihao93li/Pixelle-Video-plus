@@ -8,6 +8,7 @@ import type {
   NextAction,
   OpsEvent,
   OpsProject,
+  WritebackDraft,
 } from "./types";
 
 export type StepKey = "prediction" | "draft" | "review" | "asset" | "publish" | "retro";
@@ -114,6 +115,15 @@ export const NEXT_ACTION_TO_STEP: Record<string, StepKey> = {
   done: "retro",
 };
 
+export const WRITEBACK_OPERATION_TO_STEP: Record<string, StepKey> = {
+  lock_content_prediction: "prediction",
+  submit_generation_draft: "draft",
+  record_publish_evidence: "publish",
+  record_metrics_snapshot: "retro",
+  record_retro_observation: "retro",
+  write_project_memory_event: "retro",
+};
+
 export function nextActionLabel(nextAction?: NextAction | null): string {
   const kind = nextAction?.kind;
   return kind ? NEXT_ACTION_LABELS[kind] || "回 Codex 查看下一步" : "回 Codex 查看下一步";
@@ -122,6 +132,10 @@ export function nextActionLabel(nextAction?: NextAction | null): string {
 export function stepForNextAction(nextAction?: NextAction | null): StepKey {
   const kind = nextAction?.kind;
   return kind ? NEXT_ACTION_TO_STEP[kind] || "prediction" : "prediction";
+}
+
+export function stepForWritebackOperation(operation: string): StepKey {
+  return WRITEBACK_OPERATION_TO_STEP[operation] || "prediction";
 }
 
 export function firstExperiment(cycle?: CycleView | null): ExperimentView | null {
@@ -172,6 +186,31 @@ export function stepState(
 
 export function hasMockEvidence(experiment: ExperimentView | null): boolean {
   return Boolean(experiment?.events.some(eventHasMock));
+}
+
+export function writebackDraftsForExperiment(
+  drafts: WritebackDraft[],
+  experiment: ExperimentView | null,
+): WritebackDraft[] {
+  if (!experiment) return [];
+  return drafts.filter((draft) => draft.target?.experiment_id === experiment.experiment.id);
+}
+
+export function pendingWritebackDraftsForExperiment(
+  drafts: WritebackDraft[],
+  experiment: ExperimentView | null,
+): WritebackDraft[] {
+  return writebackDraftsForExperiment(drafts, experiment).filter((draft) => !["applied", "rejected"].includes(draft.status));
+}
+
+export function writebackDraftsForStep(
+  drafts: WritebackDraft[],
+  experiment: ExperimentView | null,
+  stepKey: StepKey,
+): WritebackDraft[] {
+  return writebackDraftsForExperiment(drafts, experiment).filter(
+    (draft) => stepForWritebackOperation(draft.operation) === stepKey,
+  );
 }
 
 export function eventHasMock(event: OpsEvent): boolean {
