@@ -44,6 +44,11 @@ PIPELINE_DESCRIPTIONS = {
     "asset_based": "Generation pipeline that starts from existing source assets.",
 }
 
+WRITEBACK_OPERATIONS = {
+    "lock_content_prediction",
+    "submit_generation_draft",
+}
+
 
 class OpsService:
     def __init__(
@@ -816,6 +821,148 @@ class OpsService:
             "next_action": view.get("next_action"),
         }
 
+    def submit_writeback_draft(
+        self,
+        *,
+        operation: str,
+        target: dict[str, Any],
+        payload: dict[str, Any],
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        _require_confirmed_source(source)
+        if operation not in WRITEBACK_OPERATIONS:
+            raise OpsError("unsupported_writeback_operation", f"Unsupported writeback operation: {operation}.")
+        draft = self.store.create_writeback_draft(
+            operation=operation,
+            target=target,
+            payload=payload,
+            source=source,
+        )
+        return {
+            "status": "ok",
+            "draft": draft,
+            "next_action": {"kind": "validate_writeback_draft", "blocked": False},
+        }
+
+    def validate_writeback_draft(self, draft_id: str) -> dict[str, Any]:
+        draft = self._get_writeback_draft_or_raise(draft_id)
+        try:
+            self._validate_writeback_payload(draft)
+        except OpsError as exc:
+            validation_result = {"status": "error", "error": {"code": exc.code, "message": exc.message}}
+            updated = self.store.update_writeback_draft(
+                draft_id=draft_id,
+                status="validation_failed",
+                validation_result=validation_result,
+            )
+            return {
+                "status": "ok",
+                "draft": updated,
+                "next_action": {"kind": "revise_writeback_draft", "blocked": True, "reason": exc.code},
+            }
+        validation_result = {"status": "ok"}
+        updated = self.store.update_writeback_draft(
+            draft_id=draft_id,
+            status="validation_passed",
+            validation_result=validation_result,
+        )
+        return {
+            "status": "ok",
+            "draft": updated,
+            "next_action": {"kind": "apply_writeback_draft", "blocked": False},
+        }
+
+    def apply_writeback_draft(
+        self,
+        draft_id: str,
+        *,
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        _require_confirmed_source(source)
+        draft = self._get_writeback_draft_or_raise(draft_id)
+        if draft["status"] == "applied":
+            return {
+                "status": "ok",
+                "draft": draft,
+                "applied_result": draft.get("applied_result", {}),
+                "next_action": {"kind": "already_applied", "blocked": False},
+            }
+        if draft["status"] != "validation_passed":
+            raise OpsError(
+                "writeback_draft_not_validated",
+                "Writeback draft must pass validation before apply.",
+            )
+        # Revalidate immediately before applying so stale target changes cannot slip through.
+        self._validate_writeback_payload(draft)
+        apply_source = {
+            **draft["source"],
+            **source,
+            "draft_id": draft_id,
+        }
+        if draft["operation"] == "lock_content_prediction":
+            result = self.lock_prediction(
+                experiment_id=draft["target"]["experiment_id"],
+                prediction=draft["payload"]["prediction"],
+                source=apply_source,
+            )
+        elif draft["operation"] == "submit_generation_draft":
+            result = self.submit_generation_draft(
+                experiment_id=draft["target"]["experiment_id"],
+                text=draft["payload"]["text"],
+                source=apply_source,
+                pipeline=draft["payload"].get("pipeline", "standard"),
+                title=draft["payload"].get("title"),
+                generation_params=draft["payload"].get("generation_params"),
+            )
+        else:
+            raise OpsError(
+                "unsupported_writeback_operation",
+                f"Unsupported writeback operation: {draft['operation']}.",
+            )
+        applied_result = {
+            "status": "ok",
+            "entity": result.get("entity"),
+            "event_id": result.get("event", {}).get("id"),
+        }
+        updated = self.store.update_writeback_draft(
+            draft_id=draft_id,
+            status="applied",
+            applied_result=applied_result,
+        )
+        return {
+            "status": "ok",
+            "draft": updated,
+            "applied_result": result,
+            "next_action": result.get("next_action"),
+        }
+
+    def reject_writeback_draft(
+        self,
+        draft_id: str,
+        *,
+        reason: str,
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        _require_confirmed_source(source)
+        draft = self._get_writeback_draft_or_raise(draft_id)
+        if draft["status"] == "applied":
+            raise OpsError("writeback_draft_already_applied", "Applied writeback drafts cannot be rejected.")
+        validation_result = {
+            **(draft.get("validation_result") or {}),
+            "rejection_reason": reason,
+            "rejected_by": source.get("kind"),
+        }
+        updated = self.store.update_writeback_draft(
+            draft_id=draft_id,
+            status="rejected",
+            validation_result=validation_result,
+        )
+        return {
+            "status": "ok",
+            "draft": updated,
+            "next_action": {"kind": "done", "blocked": False},
+        }
+
     async def list_generation_pipelines(self) -> dict[str, Any]:
         pipelines = await self._list_available_pipelines()
         if pipelines is None:
@@ -877,6 +1024,37 @@ class OpsService:
         if not experiment:
             raise OpsError("experiment_not_found", "Content experiment was not found.")
         return experiment
+
+    def _get_writeback_draft_or_raise(self, draft_id: str) -> dict[str, Any]:
+        draft = self.store.get_writeback_draft(draft_id)
+        if not draft:
+            raise OpsError("writeback_draft_not_found", "Writeback draft was not found.")
+        return draft
+
+    def _validate_writeback_payload(self, draft: dict[str, Any]) -> None:
+        target = draft.get("target", {})
+        payload = draft.get("payload", {})
+        experiment_id = target.get("experiment_id")
+        if not experiment_id:
+            raise OpsError("writeback_target_required", "Writeback draft requires target.experiment_id.")
+        self._get_experiment_or_raise(experiment_id)
+        events = self.store.list_events_for_experiment(experiment_id)
+        operation = draft.get("operation")
+        if operation == "lock_content_prediction":
+            if not isinstance(payload.get("prediction"), dict) or not payload["prediction"]:
+                raise OpsError("prediction_required", "Prediction writeback requires a prediction payload.")
+            if _has_event(events, OpsEventType.PUBLISH_RECORDED, OpsEventType.METRICS_RECORDED):
+                raise OpsError("prediction_window_closed", "Cannot lock prediction after publish or metrics evidence.")
+            return
+        if operation == "submit_generation_draft":
+            if not _has_event(events, OpsEventType.PREDICTION_LOCKED):
+                raise OpsError("prediction_required", "Generation draft requires a locked prediction.")
+            text = payload.get("text")
+            if not isinstance(text, str):
+                raise OpsError("generation_draft_invalid", "Generation draft text must be a string.")
+            _require_clean_generation_draft_text(text)
+            return
+        raise OpsError("unsupported_writeback_operation", f"Unsupported writeback operation: {operation}.")
 
 
 def _require_confirmed_source(source: dict[str, Any]) -> None:

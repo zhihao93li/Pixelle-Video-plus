@@ -36,6 +36,11 @@ PIXELLE_OPS_REQUIRED_TOOLS = (
     "pixelle_set_project_cheat_workspace",
     "pixelle_get_cheat_workspace_summary",
     "pixelle_get_context_export",
+    "pixelle_submit_writeback_draft",
+    "pixelle_validate_writeback_draft",
+    "pixelle_apply_writeback_draft",
+    "pixelle_reject_writeback_draft",
+    "pixelle_list_writeback_drafts",
 )
 PIXELLE_OPS_CONVERSATION_GATES = {
     "project_selection_gate": True,
@@ -154,7 +159,7 @@ async def pixelle_get_capabilities() -> dict[str, Any]:
         "p2_capabilities": {
             "cheat_workspace_summary": True,
             "context_export": True,
-            "writeback_draft": False,
+            "writeback_draft": True,
             "ui_is_cheat_operation_entry": False,
         },
         "next_action": {"kind": "route_user_request", "blocked": False},
@@ -341,6 +346,53 @@ async def pixelle_get_context_export(
             account_id=account_id,
         )
     )
+
+
+async def pixelle_submit_writeback_draft(
+    operation: str,
+    target: dict[str, Any],
+    payload: dict[str, Any],
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    """Submit a Codex/cheat output as a writeback draft without changing product facts."""
+    return await _run_tool(
+        lambda: _build_service().submit_writeback_draft(
+            operation=operation,
+            target=target,
+            payload=payload,
+            source=source,
+        )
+    )
+
+
+async def pixelle_validate_writeback_draft(draft_id: str) -> dict[str, Any]:
+    """Validate a writeback draft without applying it."""
+    return await _run_tool(lambda: _build_service().validate_writeback_draft(draft_id))
+
+
+async def pixelle_apply_writeback_draft(draft_id: str, source: dict[str, Any]) -> dict[str, Any]:
+    """Apply a validated writeback draft through the Pixelle Ops service."""
+    return await _run_tool(lambda: _build_service().apply_writeback_draft(draft_id, source=source))
+
+
+async def pixelle_reject_writeback_draft(
+    draft_id: str,
+    reason: str,
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    """Reject a writeback draft without changing product facts."""
+    return await _run_tool(
+        lambda: _build_service().reject_writeback_draft(draft_id, reason=reason, source=source)
+    )
+
+
+async def pixelle_list_writeback_drafts() -> dict[str, Any]:
+    """List writeback drafts for review."""
+    return {
+        "status": "ok",
+        "drafts": _build_service().store.list_writeback_drafts(),
+        "next_action": {"kind": "review_writeback_draft", "blocked": False},
+    }
 
 
 async def pixelle_lock_prediction(
@@ -568,6 +620,11 @@ for tool in (
     pixelle_set_project_cheat_workspace,
     pixelle_get_cheat_workspace_summary,
     pixelle_get_context_export,
+    pixelle_submit_writeback_draft,
+    pixelle_validate_writeback_draft,
+    pixelle_apply_writeback_draft,
+    pixelle_reject_writeback_draft,
+    pixelle_list_writeback_drafts,
     pixelle_lock_prediction,
     pixelle_list_generation_pipelines,
     pixelle_submit_generation_draft,

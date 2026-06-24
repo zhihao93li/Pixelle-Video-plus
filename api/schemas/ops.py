@@ -64,6 +64,19 @@ class OpsContextExportResponse(BaseModel):
     next_action: dict[str, Any] | None = None
 
 
+class OpsWritebackDraftResponse(BaseModel):
+    status: str
+    draft: dict[str, Any]
+    applied_result: dict[str, Any] | None = None
+    next_action: dict[str, Any] | None = None
+
+
+class OpsWritebackDraftsResponse(BaseModel):
+    status: str
+    drafts: list[dict[str, Any]] = Field(default_factory=list)
+    next_action: dict[str, Any] | None = None
+
+
 class OpsChannelAccountCreateRequest(BaseModel):
     platform: str
     account_name: str

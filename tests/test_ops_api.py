@@ -515,6 +515,52 @@ def test_ops_api_returns_context_export(tmp_path, monkeypatch):
     assert context["sync_status"]["cheat_workspace"] == "not_configured"
 
 
+def test_ops_api_lists_writeback_drafts_without_apply_endpoint(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = service.create_cycle(
+        project_id=project["id"],
+        name="R1",
+        goal="Validate cat content",
+        source=_source(),
+    )
+    experiment = service.create_experiment(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        title="母猫打滚就是想配了吗？",
+        hypothesis="打滚判断题能承接配种系列。",
+        source=_source(),
+    )
+
+    draft = service.submit_writeback_draft(
+        operation="lock_content_prediction",
+        target={"experiment_id": experiment["id"]},
+        payload={"prediction": {"primary_metric": "save_rate"}},
+        source=_source(),
+    )
+    client = TestClient(app)
+    listed = client.get("/api/ops/writeback-drafts")
+    detail = client.get(f"/api/ops/writeback-drafts/{draft['draft']['id']}")
+    apply_response = client.post(f"/api/ops/writeback-drafts/{draft['draft']['id']}/apply")
+
+    assert listed.status_code == 200
+    assert listed.json()["drafts"][0]["id"] == draft["draft"]["id"]
+    assert detail.status_code == 200
+    assert detail.json()["draft"]["status"] == "draft_created"
+    assert apply_response.status_code == 404
+    assert service.store.get_experiment(experiment["id"])["stage"] == "draft"
+
+
 def test_ops_api_adds_preview_url_for_local_output_video(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db_path = tmp_path / "ops.db"

@@ -120,6 +120,19 @@ class OpsStore:
                     FOREIGN KEY(content_experiment_id) REFERENCES content_experiments(id),
                     FOREIGN KEY(content_item_id) REFERENCES content_items(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS codex_writeback_drafts (
+                    id TEXT PRIMARY KEY,
+                    operation TEXT NOT NULL,
+                    target_json TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    validation_result_json TEXT NOT NULL,
+                    applied_result_json TEXT NOT NULL,
+                    source_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             self._migrate_legacy_social_accounts(conn)
@@ -302,6 +315,75 @@ class OpsStore:
             "SELECT * FROM project_cheat_workspaces WHERE project_id = ?",
             (project_id,),
         )
+
+    def create_writeback_draft(
+        self,
+        *,
+        operation: str,
+        target: dict[str, Any],
+        payload: dict[str, Any],
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        row = {
+            "id": _new_id("draft"),
+            "operation": operation,
+            "target_json": _to_json(target),
+            "payload_json": _to_json(payload),
+            "status": "draft_created",
+            "validation_result_json": _to_json({}),
+            "applied_result_json": _to_json({}),
+            "source_json": _to_json(source),
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._insert("codex_writeback_drafts", row)
+        return _decode(row)
+
+    def get_writeback_draft(self, draft_id: str) -> dict[str, Any] | None:
+        return self._fetch_one("SELECT * FROM codex_writeback_drafts WHERE id = ?", (draft_id,))
+
+    def list_writeback_drafts(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM codex_writeback_drafts
+                ORDER BY created_at DESC, id DESC
+                """
+            ).fetchall()
+        return [_decode(dict(row)) for row in rows]
+
+    def update_writeback_draft(
+        self,
+        *,
+        draft_id: str,
+        status: str,
+        validation_result: dict[str, Any] | None = None,
+        applied_result: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        existing = self.get_writeback_draft(draft_id)
+        if existing is None:
+            return None
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE codex_writeback_drafts
+                SET
+                    status = ?,
+                    validation_result_json = ?,
+                    applied_result_json = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    _to_json(validation_result if validation_result is not None else existing["validation_result"]),
+                    _to_json(applied_result if applied_result is not None else existing["applied_result"]),
+                    _now(),
+                    draft_id,
+                ),
+            )
+        return self.get_writeback_draft(draft_id)
 
     def create_cycle(
         self,
@@ -607,9 +689,8 @@ def _to_json_list(value: list[dict[str, Any]]) -> str:
 
 def _decode(row: dict[str, Any]) -> dict[str, Any]:
     decoded = dict(row)
-    for key in ("source_json", "payload_json", "asset_ref_json", "credential_ref_json"):
-        if key in decoded:
-            decoded[key.removesuffix("_json")] = json.loads(decoded.pop(key) or "{}")
-    if "health_issues_json" in decoded:
-        decoded["health_issues"] = json.loads(decoded.pop("health_issues_json") or "[]")
+    for key in list(decoded):
+        if key.endswith("_json"):
+            default_value = "[]" if key == "health_issues_json" else "{}"
+            decoded[key.removesuffix("_json")] = json.loads(decoded.pop(key) or default_value)
     return decoded

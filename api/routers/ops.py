@@ -20,6 +20,8 @@ from api.schemas.ops import (
     OpsIntegrationsResponse,
     OpsProjectCyclesResponse,
     OpsProjectsResponse,
+    OpsWritebackDraftResponse,
+    OpsWritebackDraftsResponse,
 )
 from ops.service import OpsError, OpsService
 from pixelle_video.config.loader import load_config_dict
@@ -168,6 +170,27 @@ async def create_ops_channel_account(
         "status": "ok",
         "channel_account": account,
         "next_action": {"kind": "select_channel_account", "blocked": False},
+    }
+
+
+@router.get("/writeback-drafts", response_model=OpsWritebackDraftsResponse)
+async def list_ops_writeback_drafts():
+    return {
+        "status": "ok",
+        "drafts": OpsService().store.list_writeback_drafts(),
+        "next_action": {"kind": "review_writeback_draft", "blocked": False},
+    }
+
+
+@router.get("/writeback-drafts/{draft_id}", response_model=OpsWritebackDraftResponse)
+async def get_ops_writeback_draft(draft_id: str):
+    draft = OpsService().store.get_writeback_draft(draft_id)
+    if draft is None:
+        _raise_ops_error(OpsError("writeback_draft_not_found", "Writeback draft was not found."))
+    return {
+        "status": "ok",
+        "draft": draft,
+        "next_action": {"kind": "validate_writeback_draft", "blocked": False},
     }
 
 

@@ -132,9 +132,14 @@ async def test_plugin_reports_capabilities(plugin_service):
     assert "pixelle_set_project_cheat_workspace" in result["required_tools"]
     assert "pixelle_get_cheat_workspace_summary" in result["required_tools"]
     assert "pixelle_get_context_export" in result["required_tools"]
+    assert "pixelle_submit_writeback_draft" in result["required_tools"]
+    assert "pixelle_validate_writeback_draft" in result["required_tools"]
+    assert "pixelle_apply_writeback_draft" in result["required_tools"]
+    assert "pixelle_reject_writeback_draft" in result["required_tools"]
+    assert "pixelle_list_writeback_drafts" in result["required_tools"]
     assert result["p2_capabilities"]["cheat_workspace_summary"] is True
     assert result["p2_capabilities"]["context_export"] is True
-    assert result["p2_capabilities"]["writeback_draft"] is False
+    assert result["p2_capabilities"]["writeback_draft"] is True
     assert result["conversation_gates"]["project_selection_gate"] is True
     assert result["conversation_gates"]["channel_account_gate"] is True
     assert result["conversation_gates"]["content_shape_gate"] is True
@@ -223,6 +228,44 @@ async def test_plugin_returns_context_export(plugin_service):
     assert exported["context_export"]["project"]["id"] == project["entity"]["id"]
     assert exported["context_export"]["current_experiment"]["id"] == experiment["entity"]["id"]
     assert exported["context_export"]["next_action"]["kind"] == "lock_prediction"
+
+
+@pytest.mark.asyncio
+async def test_plugin_writeback_draft_validate_apply_prediction(plugin_service):
+    project = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = await server.pixelle_create_cycle(
+        project_id=project["entity"]["id"],
+        name="R1",
+        goal="Validate cat content",
+        source=_source(),
+    )
+    experiment = await server.pixelle_create_experiment(
+        project_id=project["entity"]["id"],
+        cycle_id=cycle["entity"]["id"],
+        title="母猫打滚就是想配了吗？",
+        hypothesis="打滚判断题能承接配种系列。",
+        source=_source(),
+    )
+
+    draft = await server.pixelle_submit_writeback_draft(
+        operation="lock_content_prediction",
+        target={"experiment_id": experiment["entity"]["id"]},
+        payload={"prediction": {"primary_metric": "save_rate"}},
+        source=_source(),
+    )
+    validated = await server.pixelle_validate_writeback_draft(draft_id=draft["draft"]["id"])
+    applied = await server.pixelle_apply_writeback_draft(draft_id=draft["draft"]["id"], source=_source())
+    listed = await server.pixelle_list_writeback_drafts()
+
+    assert validated["draft"]["status"] == "validation_passed"
+    assert applied["draft"]["status"] == "applied"
+    assert applied["applied_result"]["entity"]["stage"] == "prediction_locked"
+    assert listed["drafts"][0]["id"] == draft["draft"]["id"]
 
 
 @pytest.mark.asyncio
