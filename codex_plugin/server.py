@@ -33,6 +33,9 @@ PIXELLE_OPS_REQUIRED_TOOLS = (
     "pixelle_record_metrics",
     "pixelle_write_retro",
     "pixelle_write_memory",
+    "pixelle_set_project_cheat_workspace",
+    "pixelle_get_cheat_workspace_summary",
+    "pixelle_get_context_export",
 )
 PIXELLE_OPS_CONVERSATION_GATES = {
     "project_selection_gate": True,
@@ -148,6 +151,12 @@ async def pixelle_get_capabilities() -> dict[str, Any]:
             "full_operations_experiment",
         ],
         "default_pipeline": "standard",
+        "p2_capabilities": {
+            "cheat_workspace_summary": True,
+            "context_export": True,
+            "writeback_draft": False,
+            "ui_is_cheat_operation_entry": False,
+        },
         "next_action": {"kind": "route_user_request", "blocked": False},
     }
 
@@ -297,6 +306,41 @@ async def pixelle_create_experiment(
         }
 
     return await _run_tool(action)
+
+
+async def pixelle_set_project_cheat_workspace(
+    project_id: str,
+    workspace_path: str,
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind a Pixelle project to a local cheat-on-content workspace."""
+    return await _run_tool(
+        lambda: _build_service().set_project_cheat_workspace(
+            project_id=project_id,
+            workspace_path=workspace_path,
+            source=source,
+        )
+    )
+
+
+async def pixelle_get_cheat_workspace_summary(project_id: str) -> dict[str, Any]:
+    """Return a read-only cheat-on-content workspace summary for a Pixelle project."""
+    return await _run_tool(lambda: _build_service().get_cheat_workspace_summary(project_id))
+
+
+async def pixelle_get_context_export(
+    project_id: str | None = None,
+    channel_account_id: str | None = None,
+    account_id: str | None = None,
+) -> dict[str, Any]:
+    """Return Pixelle Ops and cheat-on-content summary context for Codex."""
+    return await _run_tool(
+        lambda: _build_service().get_context_export(
+            project_id=project_id,
+            channel_account_id=channel_account_id,
+            account_id=account_id,
+        )
+    )
 
 
 async def pixelle_lock_prediction(
@@ -521,6 +565,9 @@ for tool in (
     pixelle_create_social_account,
     pixelle_create_cycle,
     pixelle_create_experiment,
+    pixelle_set_project_cheat_workspace,
+    pixelle_get_cheat_workspace_summary,
+    pixelle_get_context_export,
     pixelle_lock_prediction,
     pixelle_list_generation_pipelines,
     pixelle_submit_generation_draft,

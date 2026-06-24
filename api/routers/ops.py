@@ -12,6 +12,9 @@ from api.schemas.ops import (
     OpsChannelAccountCreateResponse,
     OpsChannelAccountUpdateRequest,
     OpsChannelAccountUpdateResponse,
+    OpsCheatWorkspaceBindRequest,
+    OpsCheatWorkspaceResponse,
+    OpsContextExportResponse,
     OpsCurrentResponse,
     OpsExperimentResponse,
     OpsIntegrationsResponse,
@@ -67,9 +70,69 @@ async def list_ops_project_cycles(project_id: str):
         _raise_ops_error(exc)
 
 
+@router.get(
+    "/projects/{project_id}/cheat-workspace",
+    response_model=OpsCheatWorkspaceResponse,
+)
+async def get_ops_project_cheat_workspace(project_id: str):
+    try:
+        return OpsService().get_project_cheat_workspace(project_id)
+    except OpsError as exc:
+        _raise_ops_error(exc)
+
+
+@router.put(
+    "/projects/{project_id}/cheat-workspace",
+    response_model=OpsCheatWorkspaceResponse,
+)
+async def bind_ops_project_cheat_workspace(
+    project_id: str,
+    request: OpsCheatWorkspaceBindRequest,
+):
+    try:
+        return OpsService().set_project_cheat_workspace(
+            project_id=project_id,
+            workspace_path=request.workspace_path,
+            source={
+                "kind": "ui",
+                "surface": "p2_ops_ui",
+                "confirmed_by_user": True,
+            },
+        )
+    except OpsError as exc:
+        _raise_ops_error(exc)
+
+
+@router.get(
+    "/projects/{project_id}/cheat-workspace-summary",
+    response_model=OpsCheatWorkspaceResponse,
+)
+async def get_ops_project_cheat_workspace_summary(project_id: str):
+    try:
+        return OpsService().get_cheat_workspace_summary(project_id)
+    except OpsError as exc:
+        _raise_ops_error(exc)
+
+
 @router.get("/integrations", response_model=OpsIntegrationsResponse)
 async def list_ops_integrations():
     return _build_integrations_response()
+
+
+@router.get("/context-export", response_model=OpsContextExportResponse)
+async def get_ops_context_export(
+    project_id: str | None = None,
+    channel_account_id: str | None = None,
+    account_id: str | None = None,
+):
+    try:
+        return OpsService().get_context_export(
+            project_id=project_id,
+            channel_account_id=channel_account_id,
+            account_id=account_id,
+        )
+    except OpsError as exc:
+        _raise_ops_error(exc)
 
 
 @router.post(

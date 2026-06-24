@@ -47,6 +47,23 @@ class OpsIntegrationsResponse(BaseModel):
     next_action: dict[str, Any]
 
 
+class OpsCheatWorkspaceBindRequest(BaseModel):
+    workspace_path: str
+
+
+class OpsCheatWorkspaceResponse(BaseModel):
+    status: str
+    cheat_workspace: dict[str, Any]
+    summary: dict[str, Any] | None = None
+    next_action: dict[str, Any]
+
+
+class OpsContextExportResponse(BaseModel):
+    status: str
+    context_export: dict[str, Any]
+    next_action: dict[str, Any] | None = None
+
+
 class OpsChannelAccountCreateRequest(BaseModel):
     platform: str
     account_name: str

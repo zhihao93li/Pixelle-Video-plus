@@ -64,6 +64,18 @@ class OpsStore:
                     FOREIGN KEY(project_id) REFERENCES operating_projects(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS project_cheat_workspaces (
+                    project_id TEXT PRIMARY KEY,
+                    workspace_path TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    state_schema_version TEXT,
+                    health_issues_json TEXT NOT NULL,
+                    source_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(project_id) REFERENCES operating_projects(id)
+                );
+
                 CREATE TABLE IF NOT EXISTS content_experiments (
                     id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL,
@@ -231,6 +243,65 @@ class OpsStore:
 
     def list_social_accounts(self, project_id: str | None = None) -> list[dict[str, Any]]:
         return self.list_channel_accounts(project_id=project_id)
+
+    def upsert_project_cheat_workspace(
+        self,
+        *,
+        project_id: str,
+        workspace_path: str,
+        status: str,
+        state_schema_version: str | None,
+        health_issues: list[dict[str, Any]],
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT created_at FROM project_cheat_workspaces WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+            conn.execute(
+                """
+                INSERT INTO project_cheat_workspaces (
+                    project_id,
+                    workspace_path,
+                    status,
+                    state_schema_version,
+                    health_issues_json,
+                    source_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id) DO UPDATE SET
+                    workspace_path = excluded.workspace_path,
+                    status = excluded.status,
+                    state_schema_version = excluded.state_schema_version,
+                    health_issues_json = excluded.health_issues_json,
+                    source_json = excluded.source_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    project_id,
+                    workspace_path,
+                    status,
+                    state_schema_version,
+                    _to_json_list(health_issues),
+                    _to_json(source),
+                    existing["created_at"] if existing else now,
+                    now,
+                ),
+            )
+        binding = self.get_project_cheat_workspace(project_id)
+        if binding is None:
+            raise RuntimeError("project cheat workspace upsert failed")
+        return binding
+
+    def get_project_cheat_workspace(self, project_id: str) -> dict[str, Any] | None:
+        return self._fetch_one(
+            "SELECT * FROM project_cheat_workspaces WHERE project_id = ?",
+            (project_id,),
+        )
 
     def create_cycle(
         self,
@@ -530,9 +601,15 @@ def _to_json(value: dict[str, Any]) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def _to_json_list(value: list[dict[str, Any]]) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
 def _decode(row: dict[str, Any]) -> dict[str, Any]:
     decoded = dict(row)
     for key in ("source_json", "payload_json", "asset_ref_json", "credential_ref_json"):
         if key in decoded:
             decoded[key.removesuffix("_json")] = json.loads(decoded.pop(key) or "{}")
+    if "health_issues_json" in decoded:
+        decoded["health_issues"] = json.loads(decoded.pop("health_issues_json") or "[]")
     return decoded

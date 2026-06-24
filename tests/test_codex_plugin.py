@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 from fastmcp import Client
@@ -128,6 +129,12 @@ async def test_plugin_reports_capabilities(plugin_service):
     assert "pixelle_get_capabilities" in result["required_tools"]
     assert "pixelle_submit_generation_draft" in result["required_tools"]
     assert "pixelle_approve_generation_draft" in result["required_tools"]
+    assert "pixelle_set_project_cheat_workspace" in result["required_tools"]
+    assert "pixelle_get_cheat_workspace_summary" in result["required_tools"]
+    assert "pixelle_get_context_export" in result["required_tools"]
+    assert result["p2_capabilities"]["cheat_workspace_summary"] is True
+    assert result["p2_capabilities"]["context_export"] is True
+    assert result["p2_capabilities"]["writeback_draft"] is False
     assert result["conversation_gates"]["project_selection_gate"] is True
     assert result["conversation_gates"]["channel_account_gate"] is True
     assert result["conversation_gates"]["content_shape_gate"] is True
@@ -157,6 +164,65 @@ async def test_plugin_reports_capabilities(plugin_service):
     assert result["intent_routes"]["existing_generation"]["requires_reuse_decision"] is True
     assert result["intent_routes"]["mock_p0_closeout"]["allows_mock_evidence"] is True
     assert result["next_action"]["kind"] == "route_user_request"
+
+
+@pytest.mark.asyncio
+async def test_plugin_binds_and_reads_cheat_workspace_summary(plugin_service, tmp_path):
+    workspace = tmp_path / "cheat"
+    workspace.mkdir()
+    (workspace / ".cheat-state.json").write_text(
+        json.dumps({"schema_version": "1.0", "rubric_version": "rubric-v3"}),
+        encoding="utf-8",
+    )
+    (workspace / "candidates.md").write_text("- 选题 A\n", encoding="utf-8")
+    project = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+
+    bind_result = await server.pixelle_set_project_cheat_workspace(
+        project_id=project["entity"]["id"],
+        workspace_path=str(workspace),
+        source=_source(),
+    )
+    summary = await server.pixelle_get_cheat_workspace_summary(project_id=project["entity"]["id"])
+
+    assert bind_result["status"] == "ok"
+    assert bind_result["cheat_workspace"]["status"] == "valid"
+    assert summary["summary"]["rubric_version"] == "rubric-v3"
+    assert summary["summary"]["candidate_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_plugin_returns_context_export(plugin_service):
+    project = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = await server.pixelle_create_cycle(
+        project_id=project["entity"]["id"],
+        name="R1",
+        goal="Validate cat content",
+        source=_source(),
+    )
+    experiment = await server.pixelle_create_experiment(
+        project_id=project["entity"]["id"],
+        cycle_id=cycle["entity"]["id"],
+        title="母猫打滚就是想配了吗？",
+        hypothesis="打滚判断题能承接配种系列。",
+        source=_source(),
+    )
+
+    exported = await server.pixelle_get_context_export(project_id=project["entity"]["id"])
+
+    assert exported["status"] == "ok"
+    assert exported["context_export"]["project"]["id"] == project["entity"]["id"]
+    assert exported["context_export"]["current_experiment"]["id"] == experiment["entity"]["id"]
+    assert exported["context_export"]["next_action"]["kind"] == "lock_prediction"
 
 
 @pytest.mark.asyncio

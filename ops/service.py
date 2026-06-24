@@ -7,6 +7,11 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Callable
 
+from ops.cheat_workspace import (
+    cheat_workspace_status,
+    is_remote_workspace_path,
+    summarize_cheat_workspace,
+)
 from ops.models import ExperimentStage, OpsEventType
 from ops.store import OpsStore
 
@@ -184,6 +189,84 @@ class OpsService:
         if updated is None:
             raise OpsError("channel_account_not_found", "Channel account update requires an existing account.")
         return updated
+
+    def set_project_cheat_workspace(
+        self,
+        *,
+        project_id: str,
+        workspace_path: str,
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        _require_confirmed_source(source)
+        if not self.store.get_project(project_id):
+            raise OpsError("project_not_found", "Cheat workspace binding requires an existing project.")
+        if is_remote_workspace_path(workspace_path):
+            raise OpsError(
+                "cheat_workspace_path_must_be_local",
+                "Cheat workspace path must be a local filesystem path, not a URL.",
+            )
+        summary = summarize_cheat_workspace(workspace_path)
+        binding = self.store.upsert_project_cheat_workspace(
+            project_id=project_id,
+            workspace_path=summary["workspace_path"],
+            status=cheat_workspace_status(summary),
+            state_schema_version=summary.get("state_schema_version"),
+            health_issues=summary.get("health_issues", []),
+            source=source,
+        )
+        return {
+            "status": "ok",
+            "cheat_workspace": binding,
+            "summary": summary,
+            "next_action": {"kind": "view_cheat_workspace_summary", "blocked": False},
+        }
+
+    def get_project_cheat_workspace(self, project_id: str) -> dict[str, Any]:
+        if not self.store.get_project(project_id):
+            raise OpsError("project_not_found", "Cheat workspace binding requires an existing project.")
+        binding = self.store.get_project_cheat_workspace(project_id)
+        if binding is None:
+            return {
+                "status": "ok",
+                "cheat_workspace": {
+                    "project_id": project_id,
+                    "workspace_path": None,
+                    "status": "not_configured",
+                    "state_schema_version": None,
+                    "health_issues": [],
+                },
+                "next_action": {"kind": "bind_cheat_workspace", "blocked": False},
+            }
+        return {
+            "status": "ok",
+            "cheat_workspace": binding,
+            "next_action": {"kind": "view_cheat_workspace_summary", "blocked": False},
+        }
+
+    def get_cheat_workspace_summary(self, project_id: str) -> dict[str, Any]:
+        binding_view = self.get_project_cheat_workspace(project_id)
+        binding = binding_view["cheat_workspace"]
+        if binding["status"] == "not_configured":
+            return {
+                "status": "ok",
+                "cheat_workspace": binding,
+                "summary": None,
+                "next_action": {"kind": "bind_cheat_workspace", "blocked": False},
+            }
+        summary = summarize_cheat_workspace(binding["workspace_path"])
+        status = cheat_workspace_status(summary)
+        binding = {
+            **binding,
+            "status": status,
+            "state_schema_version": summary.get("state_schema_version"),
+            "health_issues": summary.get("health_issues", []),
+        }
+        return {
+            "status": "ok",
+            "cheat_workspace": binding,
+            "summary": summary,
+            "next_action": {"kind": "use_codex_with_cheat_context", "blocked": False},
+        }
 
     def create_cycle(
         self,
@@ -694,6 +777,45 @@ class OpsService:
             "next_action": _next_action_for_events(self.store.list_events_for_experiment(experiment_id)),
         }
 
+    def get_context_export(
+        self,
+        *,
+        project_id: str | None = None,
+        channel_account_id: str | None = None,
+        account_id: str | None = None,
+    ) -> dict[str, Any]:
+        view = self.current_view(
+            project_id=project_id,
+            channel_account_id=channel_account_id,
+            account_id=account_id,
+        )
+        project = view.get("project")
+        cheat_summary = None
+        cheat_status = "not_configured"
+        if project:
+            cheat_view = self.get_cheat_workspace_summary(project["id"])
+            cheat_status = cheat_view["cheat_workspace"]["status"]
+            cheat_summary = cheat_view["summary"]
+        events = view.get("events", [])
+        return {
+            "status": "ok",
+            "context_export": {
+                "project": project,
+                "channel_account": view.get("selected_channel_account"),
+                "current_cycle": view.get("cycle"),
+                "current_experiment": view.get("experiment"),
+                "next_action": view.get("next_action"),
+                "recent_ops_events": events[-10:],
+                "content_items": view.get("content_items", []),
+                "project_memory_summary": _project_memory_summary(events),
+                "cheat_workspace_summary": cheat_summary,
+                "sync_status": {
+                    "cheat_workspace": cheat_status,
+                },
+            },
+            "next_action": view.get("next_action"),
+        }
+
     async def list_generation_pipelines(self) -> dict[str, Any]:
         pipelines = await self._list_available_pipelines()
         if pipelines is None:
@@ -1023,6 +1145,19 @@ def _select_context_action(reason: str) -> dict[str, Any]:
         "kind": kind,
         "blocked": True,
         "reason": reason,
+    }
+
+
+def _project_memory_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    memory_events = [
+        event
+        for event in events
+        if event.get("event_type") == OpsEventType.MEMORY_WRITTEN.value
+    ]
+    return {
+        "count": len(memory_events),
+        "latest": memory_events[-1]["payload"].get("memory") if memory_events else None,
+        "latest_event_id": memory_events[-1]["id"] if memory_events else None,
     }
 
 

@@ -426,6 +426,95 @@ def test_ops_api_lists_project_cycles_with_experiment_evidence(tmp_path, monkeyp
     assert body["cycles"][1]["experiments"][0]["next_action"]["kind"] == "submit_generation_draft"
 
 
+def test_ops_api_binds_and_reads_project_cheat_workspace_summary(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+    workspace = tmp_path / "cheat"
+    workspace.mkdir()
+    (workspace / ".cheat-state.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "rubric_version": "rubric-v3",
+                "confidence": "medium",
+                "buffer": {"count": 2, "status": "green"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "candidates.md").write_text("- 选题 A\n- 选题 B\n", encoding="utf-8")
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    bind_response = client.put(
+        f"/api/ops/projects/{project['id']}/cheat-workspace",
+        json={"workspace_path": str(workspace)},
+    )
+    summary_response = client.get(f"/api/ops/projects/{project['id']}/cheat-workspace-summary")
+
+    assert bind_response.status_code == 200
+    assert bind_response.json()["cheat_workspace"]["status"] == "valid"
+    assert summary_response.status_code == 200
+    body = summary_response.json()
+    assert body["summary"]["rubric_version"] == "rubric-v3"
+    assert body["summary"]["candidate_count"] == 2
+    assert body["summary"]["buffer_count"] == 2
+    assert "选题 A" not in json.dumps(body, ensure_ascii=False)
+
+
+def test_ops_api_returns_context_export(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = service.create_cycle(
+        project_id=project["id"],
+        name="R1",
+        goal="Validate cat content",
+        source=_source(),
+    )
+    experiment = service.create_experiment(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        title="母猫打滚就是想配了吗？",
+        hypothesis="打滚判断题能承接配种系列。",
+        source=_source(),
+    )
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"primary_metric": "save_rate"},
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    response = client.get(f"/api/ops/context-export?project_id={project['id']}")
+
+    assert response.status_code == 200
+    context = response.json()["context_export"]
+    assert context["project"]["id"] == project["id"]
+    assert context["current_cycle"]["id"] == cycle["id"]
+    assert context["current_experiment"]["id"] == experiment["id"]
+    assert context["next_action"]["kind"] == "submit_generation_draft"
+    assert context["sync_status"]["cheat_workspace"] == "not_configured"
+
+
 def test_ops_api_adds_preview_url_for_local_output_video(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db_path = tmp_path / "ops.db"
