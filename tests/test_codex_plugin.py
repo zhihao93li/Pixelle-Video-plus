@@ -161,12 +161,22 @@ async def test_plugin_reports_capabilities(plugin_service):
     ]
     assert result["intent_routes"]["content_recommendation"]["writes_state"] is False
     assert result["intent_routes"]["content_recommendation"]["requires_project_or_channel_account"] is True
+    assert result["intent_routes"]["content_recommendation"]["confirmed_topic_writeback"] == {
+        "requires_writeback_draft": True,
+        "operation": "create_content_experiment",
+        "do_not_call_direct_create_experiment": True,
+    }
     assert result["intent_routes"]["ambiguous_copy_request"]["requires_user_choice"] is True
     assert result["intent_routes"]["project_selection"]["required_when_multiple_projects"] is True
     assert result["intent_routes"]["channel_account_selection"]["required_when_multiple_accounts"] is True
     assert result["intent_routes"]["video_generation"]["requires_draft_approval"] is True
     assert result["intent_routes"]["video_generation"]["requires_user_pipeline_choice"] is True
     assert result["intent_routes"]["video_generation"]["default_pipeline_requires_user_acceptance"] is True
+    assert result["intent_routes"]["full_operations_experiment"]["cheat_generated_experiment_creation"] == {
+        "requires_writeback_draft": True,
+        "operation": "create_content_experiment",
+        "do_not_call_direct_create_experiment": True,
+    }
     assert result["intent_routes"]["existing_generation"]["requires_reuse_decision"] is True
     assert result["intent_routes"]["mock_p0_closeout"]["allows_mock_evidence"] is True
     assert result["next_action"]["kind"] == "route_user_request"

@@ -49,7 +49,20 @@ def _make_cheat_workspace(path):
         encoding="utf-8",
     )
     (path / "candidates.md").write_text(
-        "- 母猫打滚就是想配了吗？\n- 同一窝小猫，可能不是一个爹吗？\n",
+        "\n".join(
+            [
+                "# 候选池",
+                "",
+                "### [tier1] 母猫打滚就是想配了吗？",
+                "- reason: 承接打滚判断系列",
+                "- risk: 中",
+                "",
+                "### [tier2] 同一窝小猫，可能不是一个爹吗？",
+                "- reason: 遗传猎奇题",
+                "- risk: 低到中",
+                "",
+            ]
+        ),
         encoding="utf-8",
     )
     (path / "audience.md").write_text("核心受众：新手铲屎官", encoding="utf-8")

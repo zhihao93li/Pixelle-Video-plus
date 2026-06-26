@@ -90,6 +90,11 @@ PIXELLE_OPS_INTENT_ROUTES = {
     "content_recommendation": {
         "first_tools": ["pixelle_get_capabilities", "pixelle_get_current"],
         "requires_project_or_channel_account": True,
+        "confirmed_topic_writeback": {
+            "requires_writeback_draft": True,
+            "operation": "create_content_experiment",
+            "do_not_call_direct_create_experiment": True,
+        },
         "writes_state": False,
     },
     "ambiguous_copy_request": {
@@ -104,6 +109,11 @@ PIXELLE_OPS_INTENT_ROUTES = {
     "full_operations_experiment": {
         "requires_prediction": True,
         "requires_draft_approval": True,
+        "cheat_generated_experiment_creation": {
+            "requires_writeback_draft": True,
+            "operation": "create_content_experiment",
+            "do_not_call_direct_create_experiment": True,
+        },
         "writes_state": True,
     },
     "video_generation": {

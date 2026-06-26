@@ -128,6 +128,9 @@ def _candidate_count(path: Path) -> int:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
         return 0
+    heading_count = sum(1 for line in lines if line.startswith("### "))
+    if heading_count:
+        return heading_count
     bullet_count = sum(1 for line in lines if line.lstrip().startswith(("- ", "* ")))
     if bullet_count:
         return bullet_count
@@ -138,4 +141,3 @@ def _markdown_count(path: Path) -> int:
     if not path.is_dir():
         return 0
     return len([item for item in path.iterdir() if item.is_file() and item.suffix == ".md"])
-
