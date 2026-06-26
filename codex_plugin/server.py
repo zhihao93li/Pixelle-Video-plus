@@ -8,7 +8,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from ops.service import OpsError, OpsService
+from ops.service import WRITEBACK_OPERATIONS, OpsError, OpsService
 
 mcp = FastMCP("pixelle-ops")
 _BACKGROUND_GENERATION_TASKS: set[asyncio.Task] = set()
@@ -160,6 +160,7 @@ async def pixelle_get_capabilities() -> dict[str, Any]:
             "cheat_workspace_summary": True,
             "context_export": True,
             "writeback_draft": True,
+            "writeback_operations": sorted(WRITEBACK_OPERATIONS),
             "ui_is_cheat_operation_entry": False,
         },
         "next_action": {"kind": "route_user_request", "blocked": False},

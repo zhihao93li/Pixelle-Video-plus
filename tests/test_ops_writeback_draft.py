@@ -82,6 +82,52 @@ def test_writeback_draft_validate_and_apply_prediction(service):
     assert service.store.get_experiment(experiment["id"])["stage"] == "prediction_locked"
 
 
+def test_writeback_draft_can_create_content_experiment(service):
+    project, cycle, _ = _seed_experiment(service)
+    draft = service.submit_writeback_draft(
+        operation="create_content_experiment",
+        target={"project_id": project["id"], "cycle_id": cycle["id"]},
+        payload={
+            "title": "母猫配完还叫，是不是没配上？",
+            "hypothesis": "配完后继续叫是当前系列的直接后续问题，适合作为下一条实验。",
+        },
+        source=_source(),
+    )
+
+    validated = service.validate_writeback_draft(draft["draft"]["id"])
+    applied = service.apply_writeback_draft(draft["draft"]["id"], source=_source())
+    created = applied["applied_result"]["entity"]
+
+    assert validated["draft"]["status"] == "validation_passed"
+    assert applied["draft"]["status"] == "applied"
+    assert created["kind"] == "content_experiment"
+    assert created["title"] == "母猫配完还叫，是不是没配上？"
+    assert created["stage"] == "draft"
+    assert created["project_id"] == project["id"]
+    assert created["cycle_id"] == cycle["id"]
+    assert applied["next_action"] == {"kind": "lock_prediction", "blocked": False}
+
+
+def test_writeback_draft_create_content_experiment_requires_valid_target(service):
+    project, _, _ = _seed_experiment(service)
+    draft = service.submit_writeback_draft(
+        operation="create_content_experiment",
+        target={"project_id": project["id"], "cycle_id": "missing_cycle"},
+        payload={
+            "title": "母猫配完还叫，是不是没配上？",
+            "hypothesis": "配完后继续叫是当前系列的直接后续问题。",
+        },
+        source=_source(),
+    )
+
+    validated = service.validate_writeback_draft(draft["draft"]["id"])
+
+    assert validated["draft"]["status"] == "validation_failed"
+    assert validated["draft"]["validation_result"]["error"]["code"] == "cycle_not_found"
+    with pytest.raises(OpsError, match="writeback_draft_not_validated"):
+        service.apply_writeback_draft(draft["draft"]["id"], source=_source())
+
+
 def test_writeback_draft_tracks_and_revalidates_source_hash(service, tmp_path):
     _, _, experiment = _seed_experiment(service)
     workspace = tmp_path / "cheat"

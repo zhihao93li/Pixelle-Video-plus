@@ -46,6 +46,7 @@ PIPELINE_DESCRIPTIONS = {
 }
 
 WRITEBACK_OPERATIONS = {
+    "create_content_experiment",
     "lock_content_prediction",
     "submit_generation_draft",
     "record_publish_evidence",
@@ -916,7 +917,19 @@ class OpsService:
             **source,
             "draft_id": draft_id,
         }
-        if draft["operation"] == "lock_content_prediction":
+        if draft["operation"] == "create_content_experiment":
+            experiment = self.create_experiment(
+                project_id=draft["target"]["project_id"],
+                cycle_id=draft["target"]["cycle_id"],
+                title=draft["payload"]["title"].strip(),
+                hypothesis=draft["payload"]["hypothesis"].strip(),
+                source=apply_source,
+            )
+            result = {
+                "entity": {"kind": "content_experiment", **experiment},
+                "next_action": {"kind": "lock_prediction", "blocked": False},
+            }
+        elif draft["operation"] == "lock_content_prediction":
             result = self.lock_prediction(
                 experiment_id=draft["target"]["experiment_id"],
                 prediction=draft["payload"]["prediction"],
@@ -1095,13 +1108,18 @@ class OpsService:
     def _validate_writeback_payload(self, draft: dict[str, Any]) -> None:
         target = draft.get("target", {})
         payload = draft.get("payload", {})
+        operation = draft.get("operation")
+        if operation == "create_content_experiment":
+            self._validate_create_content_experiment_writeback(target, payload)
+            _require_source_fingerprint_synced(draft.get("source", {}))
+            return
+
         experiment_id = target.get("experiment_id")
         if not experiment_id:
             raise OpsError("writeback_target_required", "Writeback draft requires target.experiment_id.")
         self._get_experiment_or_raise(experiment_id)
         _require_source_fingerprint_synced(draft.get("source", {}))
         events = self.store.list_events_for_experiment(experiment_id)
-        operation = draft.get("operation")
         if operation == "lock_content_prediction":
             if not isinstance(payload.get("prediction"), dict) or not payload["prediction"]:
                 raise OpsError("prediction_required", "Prediction writeback requires a prediction payload.")
@@ -1163,6 +1181,35 @@ class OpsService:
                 raise OpsError("retro_required", "Memory writeback requires a retro or observation first.")
             return
         raise OpsError("unsupported_writeback_operation", f"Unsupported writeback operation: {operation}.")
+
+    def _validate_create_content_experiment_writeback(
+        self,
+        target: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> None:
+        project_id = target.get("project_id")
+        cycle_id = target.get("cycle_id")
+        if not project_id or not cycle_id:
+            raise OpsError(
+                "create_experiment_target_required",
+                "Create experiment writeback requires target.project_id and target.cycle_id.",
+            )
+        if not self.store.get_project(project_id):
+            raise OpsError("project_not_found", "Content experiment requires an existing project.")
+        cycle = self.store.get_cycle(cycle_id)
+        if not cycle:
+            raise OpsError("cycle_not_found", "Content experiment requires an existing cycle.")
+        if cycle["project_id"] != project_id:
+            raise OpsError("cycle_project_mismatch", "Operation cycle must belong to the project.")
+        title = payload.get("title")
+        hypothesis = payload.get("hypothesis")
+        if not isinstance(title, str) or not title.strip():
+            raise OpsError("experiment_title_required", "Create experiment writeback requires payload.title.")
+        if not isinstance(hypothesis, str) or not hypothesis.strip():
+            raise OpsError(
+                "experiment_hypothesis_required",
+                "Create experiment writeback requires payload.hypothesis.",
+            )
 
 
 def _require_confirmed_source(source: dict[str, Any]) -> None:

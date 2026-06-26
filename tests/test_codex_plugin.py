@@ -140,6 +140,7 @@ async def test_plugin_reports_capabilities(plugin_service):
     assert result["p2_capabilities"]["cheat_workspace_summary"] is True
     assert result["p2_capabilities"]["context_export"] is True
     assert result["p2_capabilities"]["writeback_draft"] is True
+    assert "create_content_experiment" in result["p2_capabilities"]["writeback_operations"]
     assert result["conversation_gates"]["project_selection_gate"] is True
     assert result["conversation_gates"]["channel_account_gate"] is True
     assert result["conversation_gates"]["content_shape_gate"] is True

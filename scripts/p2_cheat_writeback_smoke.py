@@ -86,13 +86,18 @@ def run_smoke(db_path: Path) -> dict[str, Any]:
         goal="Verify cheat summary, source hash, and writeback apply.",
         source=_source(),
     )
-    experiment = service.create_experiment(
-        project_id=project["id"],
-        cycle_id=cycle["id"],
-        title="同一窝小猫，可能不是一个爹吗？",
-        hypothesis="遗传猎奇题适合承接配种系列。",
+    experiment_draft = service.submit_writeback_draft(
+        operation="create_content_experiment",
+        target={"project_id": project["id"], "cycle_id": cycle["id"]},
+        payload={
+            "title": "同一窝小猫，可能不是一个爹吗？",
+            "hypothesis": "遗传猎奇题适合承接配种系列。",
+        },
         source=_source(),
     )
+    service.validate_writeback_draft(experiment_draft["draft"]["id"])
+    experiment_apply = service.apply_writeback_draft(experiment_draft["draft"]["id"], source=_source())
+    experiment = experiment_apply["applied_result"]["entity"]
 
     bound = service.set_project_cheat_workspace(
         project_id=project["id"],
@@ -222,6 +227,8 @@ def run_smoke(db_path: Path) -> dict[str, Any]:
     current = client.get(f"/api/ops/current?project_id={project['id']}").json()
 
     _assert(bound["cheat_workspace"]["status"] == "valid", "cheat workspace should bind as valid")
+    _assert(experiment_apply["draft"]["status"] == "applied", "experiment writeback draft should apply")
+    _assert(experiment["kind"] == "content_experiment", "experiment should be created through writeback")
     _assert(validated["draft"]["source"]["source_hash"].startswith("sha256:"), "draft should store source hash")
     _assert(applied["draft"]["status"] == "applied", "fresh source draft should apply")
     _assert(context["context_export"]["cheat_workspace_summary"]["rubric_version"] == "rubric-smoke", "context export should include cheat summary")
@@ -232,6 +239,7 @@ def run_smoke(db_path: Path) -> dict[str, Any]:
         "status": "ok",
         "checks": {
             "cheat_workspace": bound["cheat_workspace"]["status"],
+            "created_experiment": experiment["id"],
             "source_hash": validated["draft"]["source"]["source_hash"][:18],
             "stale_draft_visible": any(item["status"] == "validation_failed" for item in drafts["drafts"]),
             "closed_loop": current["next_action"]["kind"],
