@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Callable
@@ -425,7 +426,11 @@ class OpsService:
         text = draft["payload"]["text"]
         pipeline = draft["payload"].get("pipeline") or "standard"
         title = draft["payload"].get("title")
-        generation_params = draft["payload"].get("generation_params") or {}
+        generation_params = _generation_params_for_approved_draft(
+            pipeline=pipeline,
+            title=title,
+            generation_params=draft["payload"].get("generation_params") or {},
+        )
         await self._require_known_pipeline(pipeline)
 
         operation_context = {
@@ -488,7 +493,11 @@ class OpsService:
         payload = generation_event["payload"]
         text = payload["text"]
         pipeline = payload.get("pipeline") or "standard"
-        generation_params = payload.get("generation_params") or {}
+        generation_params = _generation_params_for_approved_draft(
+            pipeline=pipeline,
+            title=payload.get("title"),
+            generation_params=payload.get("generation_params") or {},
+        )
         operation_context = payload.get("operation_context") or {
             "project_id": experiment["project_id"],
             "cycle_id": experiment["cycle_id"],
@@ -1374,6 +1383,21 @@ def _normalize_asset_ref(result: Any) -> dict[str, Any]:
     return asset_ref
 
 
+def _generation_params_for_approved_draft(
+    *,
+    pipeline: str,
+    title: str | None,
+    generation_params: dict[str, Any],
+) -> dict[str, Any]:
+    params = dict(generation_params)
+    if pipeline == "standard":
+        params["mode"] = "fixed"
+        params.setdefault("split_mode", "paragraph")
+        if title and "title" not in params:
+            params["title"] = title
+    return params
+
+
 def _select_content_item(
     content_items: list[dict[str, Any]],
     content_item_id: str | None,
@@ -1428,7 +1452,9 @@ def _build_asset_check_payload(
         ),
         None,
     )
-    draft_markers = _blocked_generation_draft_markers((latest_requested or {}).get("payload", {}).get("text", ""))
+    requested_text = (latest_requested or {}).get("payload", {}).get("text", "")
+    draft_markers = _blocked_generation_draft_markers(requested_text)
+    storyboard_check = _storyboard_text_check(asset_path, requested_text)
     checks = {
         "generation_completed_event_present": _has_event(events, OpsEventType.GENERATION_COMPLETED),
         "asset_reference_present": bool(asset_path),
@@ -1438,11 +1464,13 @@ def _build_asset_check_payload(
         "duration_seconds": asset_ref.get("duration"),
         "draft_text_clean": not draft_markers,
         "blocked_draft_markers": draft_markers,
+        **storyboard_check,
     }
     passed = (
         checks["generation_completed_event_present"]
         and checks["asset_reference_present"]
         and checks["draft_text_clean"]
+        and checks["storyboard_text_matches_draft"] is not False
         and (not checks["local_file_required"] or (checks["local_file_exists"] and (local_file_size or 0) > 0))
     )
     return {
@@ -1460,6 +1488,50 @@ def _asset_path_from_ref(asset_ref: dict[str, Any]) -> str | None:
         if isinstance(value, str) and value.strip():
             return value
     return None
+
+
+def _storyboard_text_check(asset_path: str | None, requested_text: str) -> dict[str, Any]:
+    default = {
+        "storyboard_text_available": False,
+        "storyboard_text_matches_draft": None,
+    }
+    if not asset_path or _is_url(asset_path) or not requested_text:
+        return default
+
+    storyboard_path = Path(asset_path).parent / "storyboard.json"
+    if not storyboard_path.is_file():
+        return default
+
+    try:
+        storyboard = json.loads(storyboard_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "storyboard_text_available": True,
+            "storyboard_text_matches_draft": False,
+        }
+
+    frames = storyboard.get("frames") if isinstance(storyboard, dict) else None
+    if not isinstance(frames, list):
+        return {
+            "storyboard_text_available": True,
+            "storyboard_text_matches_draft": False,
+        }
+
+    narrations = [
+        str(frame.get("narration", "")).strip()
+        for frame in frames
+        if isinstance(frame, dict) and str(frame.get("narration", "")).strip()
+    ]
+    storyboard_text = "\n\n".join(narrations)
+    return {
+        "storyboard_text_available": True,
+        "storyboard_text_matches_draft": _normalize_text_for_asset_check(storyboard_text)
+        == _normalize_text_for_asset_check(requested_text),
+    }
+
+
+def _normalize_text_for_asset_check(text: str) -> str:
+    return "".join(str(text).split())
 
 
 def _is_url(value: str) -> bool:

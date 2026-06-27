@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -397,6 +398,55 @@ async def test_request_generation_records_context_and_completed_item(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_request_generation_uses_approved_draft_as_fixed_script(tmp_path):
+    captured_kwargs = {}
+
+    async def fake_generation_runner(**kwargs):
+        captured_kwargs.update(kwargs)
+        return {"path": "output/petwoods.mp4", "input_text": kwargs["text"]}
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    approved_text = "同一窝小猫，\n可能不是一个爹吗？\n\n答案是：\n真的有可能。"
+
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text=approved_text,
+        source=_source(),
+        pipeline="standard",
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+
+    await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=approval["event"]["id"],
+        source=_source(),
+    )
+
+    requested_event = next(
+        event
+        for event in store.list_events_for_experiment(experiment["id"])
+        if event["event_type"] == "generation_requested"
+    )
+    assert captured_kwargs["text"] == approved_text
+    assert captured_kwargs["mode"] == "fixed"
+    assert captured_kwargs["split_mode"] == "paragraph"
+    assert requested_event["payload"]["generation_params"]["mode"] == "fixed"
+    assert requested_event["payload"]["generation_params"]["split_mode"] == "paragraph"
+
+
+@pytest.mark.asyncio
 async def test_request_generation_can_start_without_waiting_for_completion(tmp_path):
     async def fake_generation_runner(**kwargs):
         raise AssertionError("generation runner should not be called when wait_for_completion is false")
@@ -526,6 +576,65 @@ async def test_check_generation_asset_records_passed_result(tmp_path):
     assert result["event"]["payload"]["checks"]["draft_text_clean"] is True
     assert result["next_action"]["kind"] == "record_publish"
     assert view["next_action"]["kind"] == "record_publish"
+
+
+@pytest.mark.asyncio
+async def test_check_generation_asset_fails_when_storyboard_rewrites_approved_text(tmp_path):
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    video_path = task_dir / "final.mp4"
+    video_path.write_bytes(b"fake video bytes")
+    (task_dir / "storyboard.json").write_text(
+        json.dumps(
+            {
+                "frames": [
+                    {"narration": "一窝小猫可能多个爸爸，这是正常现象"},
+                    {"narration": "靠肉眼无法判断亲缘，需要检测"},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    async def fake_generation_runner(**kwargs):
+        return {"video_path": str(video_path), "duration": 12.5, "file_size": video_path.stat().st_size}
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    approved_text = "同一窝小猫，\n可能不是一个爹吗？\n\n答案是：\n真的有可能。"
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text=approved_text,
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+    generation = await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=approval["event"]["id"],
+        source=_source(),
+    )
+
+    result = service.check_generation_asset(
+        experiment_id=experiment["id"],
+        content_item_id=generation["content_item"]["id"],
+        source=_source(),
+    )
+
+    assert result["event"]["payload"]["status"] == "failed"
+    assert result["event"]["payload"]["checks"]["storyboard_text_matches_draft"] is False
+    assert result["next_action"]["kind"] == "resolve_asset_issue"
 
 
 @pytest.mark.asyncio
