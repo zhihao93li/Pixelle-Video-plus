@@ -487,7 +487,7 @@ class OpsService:
         generation_event = _find_event(events, generation_event_id, OpsEventType.GENERATION_REQUESTED)
         if generation_event is None:
             raise OpsError("generation_request_not_found", "Generation completion requires an existing generation request.")
-        if _has_event(events, OpsEventType.GENERATION_COMPLETED):
+        if _generation_request_already_completed(events, generation_event_id):
             raise OpsError("generation_already_completed", "Generation is already completed for this experiment.")
 
         payload = generation_event["payload"]
@@ -1312,12 +1312,26 @@ def _require_clean_generation_draft_text(text: str) -> None:
 
 
 def _require_generation_request_window(events: list[dict[str, Any]]) -> None:
-    if _has_event(events, OpsEventType.GENERATION_COMPLETED):
+    latest_generation_event = _latest_generation_event(events)
+    if latest_generation_event and latest_generation_event["event_type"] == OpsEventType.GENERATION_COMPLETED.value:
+        latest_check = _latest_asset_check(events, latest_generation_event.get("content_item_id"))
+        if latest_check and latest_check["payload"].get("status") == "failed":
+            return
         raise OpsError("generation_already_completed", "Generation is already completed for this experiment.")
 
-    latest_generation_event = _latest_generation_event(events)
     if latest_generation_event and latest_generation_event["event_type"] == OpsEventType.GENERATION_REQUESTED.value:
         raise OpsError("generation_in_progress", "Generation is already requested and has not completed or failed.")
+
+
+def _generation_request_already_completed(events: list[dict[str, Any]], generation_event_id: str) -> bool:
+    seen_request = False
+    for event in events:
+        if event["id"] == generation_event_id:
+            seen_request = True
+            continue
+        if seen_request and event["event_type"] == OpsEventType.GENERATION_COMPLETED.value:
+            return True
+    return False
 
 
 def _latest_generation_event(events: list[dict[str, Any]]) -> dict[str, Any] | None:

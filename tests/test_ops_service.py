@@ -758,6 +758,61 @@ async def test_generation_request_blocks_completed_experiment(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_generation_request_allows_retry_after_failed_asset_check(tmp_path):
+    attempts = []
+
+    async def fake_generation_runner(**kwargs):
+        attempts.append(kwargs)
+        video_path = tmp_path / f"retry-{len(attempts)}.mp4"
+        video_path.write_bytes(b"fake video bytes")
+        return {"video_path": str(video_path), "duration": 12.5, "file_size": video_path.stat().st_size}
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    draft = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="母猫打滚就是想配了吗？\n\n还真不是。",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=draft["event"]["id"],
+        source=_source(),
+    )
+    first = await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=approval["event"]["id"],
+        source=_source(),
+    )
+    store.append_event(
+        project_id=experiment["project_id"],
+        cycle_id=experiment["cycle_id"],
+        experiment_id=experiment["id"],
+        content_item_id=first["content_item"]["id"],
+        event_type="asset_checked",
+        payload={"status": "failed", "checks": {"storyboard_text_matches_draft": False}},
+        source=_source(),
+    )
+
+    second = await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=approval["event"]["id"],
+        source=_source(),
+    )
+
+    assert len(attempts) == 2
+    assert second["content_item"]["id"] != first["content_item"]["id"]
+    assert second["next_action"]["kind"] == "check_generation_asset"
+
+
+@pytest.mark.asyncio
 async def test_generation_failure_records_event_without_content_item(tmp_path):
     async def failing_generation_runner(**kwargs):
         raise RuntimeError("tts unavailable")
