@@ -348,6 +348,9 @@ draft_created
 1. draft text 只能是最终上屏字幕或口播稿。
 2. 不能包含视频目标、发布标题、发布正文、标签、生成说明。
 3. 未通过用户审核不能 request generation。
+4. `request_generation` 只能读取已批准 draft 的正文；Codex 不能在调用生成时临时替换、扩写或重组文案。
+5. `standard` pipeline 必须把已批准正文作为 fixed text 传入生成层，不能再让生成层重新创作文案。
+6. `asset_check` 必须比较生成产物的 storyboard/narration 与已批准 draft；不一致时即使视频文件存在，也必须标记失败，不能进入发布。
 
 ### 8.3 publish evidence
 
@@ -547,7 +550,19 @@ apply 后用户改了 prediction markdown。
 3. memory 必须关联 retro 或 observation。
 4. UI 显示学习项和 source。
 
-### 场景 F：重复 apply
+### 场景 F：cheat 主路径生成
+
+Codex 根据 cheat-on-content 推荐让用户确认选题，通过 `create_content_experiment` writeback 创建实验，再锁定预测、提交并审核 generation draft、请求生成、检查资产。
+
+验收：
+
+1. `create_content_experiment` 必须走 writeback draft，不允许直接调用底层 create experiment 绕过审核链。
+2. `generation_requested.payload.text` 必须等于用户批准的 draft text。
+3. `standard` pipeline 的 generation params 必须进入 fixed mode。
+4. `asset_checked.checks.storyboard_text_matches_draft` 必须为 true，才允许进入 `record_publish`。
+5. `current_view.content_item` 必须指向最新通过检查的 content item，旧失败资产不能污染当前状态。
+
+### 场景 G：重复 apply
 
 同一个 draft 被重复 apply。
 
@@ -557,7 +572,7 @@ apply 后用户改了 prediction markdown。
 2. 不重复写事件。
 3. 审计记录可追踪。
 
-### 场景 G：schema mismatch
+### 场景 H：schema mismatch
 
 workspace 的 `.cheat-state.json` schema 低于当前支持版本。
 
@@ -581,8 +596,9 @@ workspace 的 `.cheat-state.json` schema 低于当前支持版本。
 10. API：summary 不暴露敏感内容。
 11. Plugin：capabilities 包含 P2 routes。
 12. Smoke：从 context export 到 draft apply 的最小链路。
-13. UI：workspace 未绑定、valid、schema mismatch、source changed、pending draft、conflict。
-14. Regression：P1 Ops UI、Projects、Settings 仍可用。
+13. Smoke：`scripts/p2_cheat_main_path_smoke.py` 覆盖 cheat 推荐到生成 asset check 的主路径。
+14. UI：workspace 未绑定、valid、schema mismatch、source changed、pending draft、conflict。
+15. Regression：P1 Ops UI、Projects、Settings 仍可用。
 
 ## 16. 完成定义
 

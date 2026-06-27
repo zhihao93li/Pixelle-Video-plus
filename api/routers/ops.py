@@ -250,6 +250,9 @@ def _with_asset_preview_urls(payload: dict) -> dict:
 
 def _walk_content_items(value):
     if isinstance(value, dict):
+        item = value.get("content_item")
+        if isinstance(item, dict):
+            yield item
         items = value.get("content_items")
         if isinstance(items, list):
             for item in items:

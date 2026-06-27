@@ -15,6 +15,8 @@ class OpsCurrentResponse(BaseModel):
     selected_social_account: dict[str, Any] | None = None
     context: dict[str, Any] = Field(default_factory=dict)
     content_items: list[dict[str, Any]] = Field(default_factory=list)
+    content_item: dict[str, Any] | None = None
+    asset_check: dict[str, Any] | None = None
     events: list[dict[str, Any]] = Field(default_factory=list)
     next_action: dict[str, Any]
 
@@ -22,6 +24,8 @@ class OpsCurrentResponse(BaseModel):
 class OpsExperimentResponse(BaseModel):
     experiment: dict[str, Any]
     content_items: list[dict[str, Any]] = Field(default_factory=list)
+    content_item: dict[str, Any] | None = None
+    asset_check: dict[str, Any] | None = None
     events: list[dict[str, Any]] = Field(default_factory=list)
     next_action: dict[str, Any]
 

@@ -117,12 +117,12 @@ class OpsService:
             for experiment in self.store.list_experiments_for_cycle(cycle["id"]):
                 events = self.store.list_events_for_experiment(experiment["id"])
                 experiment_views.append(
-                    {
+                    _with_current_content_item({
                         "experiment": experiment,
                         "content_items": self.store.list_content_items_for_experiment(experiment["id"]),
                         "events": events,
                         "next_action": _next_action_for_events(events),
-                    }
+                    })
                 )
             cycles.append(
                 {
@@ -782,6 +782,7 @@ class OpsService:
             channel_account_id=channel_account_id,
             account_id=account_id,
         )
+        _with_current_content_item(view)
         if not project_id and not effective_account_id and len(self.store.list_projects()) > 1:
             view["next_action"] = _select_context_action("multiple_projects")
             return view
@@ -793,12 +794,15 @@ class OpsService:
 
     def get_experiment_view(self, experiment_id: str) -> dict[str, Any]:
         experiment = self._get_experiment_or_raise(experiment_id)
-        return {
-            "experiment": experiment,
-            "content_items": self.store.list_content_items_for_experiment(experiment_id),
-            "events": self.store.list_events_for_experiment(experiment_id),
-            "next_action": _next_action_for_events(self.store.list_events_for_experiment(experiment_id)),
-        }
+        events = self.store.list_events_for_experiment(experiment_id)
+        return _with_current_content_item(
+            {
+                "experiment": experiment,
+                "content_items": self.store.list_content_items_for_experiment(experiment_id),
+                "events": events,
+                "next_action": _next_action_for_events(events),
+            }
+        )
 
     def get_context_export(
         self,
@@ -830,6 +834,8 @@ class OpsService:
                 "next_action": view.get("next_action"),
                 "recent_ops_events": events[-10:],
                 "content_items": view.get("content_items", []),
+                "content_item": view.get("content_item"),
+                "asset_check": view.get("asset_check"),
                 "project_memory_summary": _project_memory_summary(events),
                 "cheat_workspace_summary": cheat_summary,
                 "sync_status": {
@@ -1343,6 +1349,17 @@ def _latest_generation_event(events: list[dict[str, Any]]) -> dict[str, Any] | N
     return next((event for event in reversed(events) if event["event_type"] in generation_event_types), None)
 
 
+def _latest_generation_completed_event(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return next(
+        (
+            event
+            for event in reversed(events)
+            if event["event_type"] == OpsEventType.GENERATION_COMPLETED.value
+        ),
+        None,
+    )
+
+
 def _blocked_generation_draft_markers(text: str) -> list[str]:
     return [marker for marker in BLOCKED_GENERATION_DRAFT_MARKERS if marker in text]
 
@@ -1426,6 +1443,16 @@ def _content_item_for_event(
     event: dict[str, Any],
 ) -> dict[str, Any] | None:
     return _select_content_item(content_items, event.get("content_item_id"))
+
+
+def _current_content_item_for_events(
+    content_items: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    latest_completed = _latest_generation_completed_event(events)
+    if latest_completed is not None:
+        return _content_item_for_event(content_items, latest_completed)
+    return content_items[-1] if content_items else None
 
 
 def _latest_asset_check(
@@ -1614,6 +1641,16 @@ def _next_action_for_view(view: dict[str, Any]) -> dict[str, Any]:
     return _next_action_for_events(view["events"])
 
 
+def _with_current_content_item(view: dict[str, Any]) -> dict[str, Any]:
+    events = view.get("events") or []
+    content_items = view.get("content_items") or []
+    content_item = _current_content_item_for_events(content_items, events)
+    content_item_id = content_item["id"] if content_item else None
+    view["content_item"] = content_item
+    view["asset_check"] = _latest_asset_check(events, content_item_id) if content_item_id else None
+    return view
+
+
 def _select_context_action(reason: str) -> dict[str, Any]:
     kind = "select_channel_account" if reason == "multiple_accounts" else "select_project"
     return {
@@ -1659,7 +1696,9 @@ def _next_action_for_events(events: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _next_action_after_generation_completed(events: list[dict[str, Any]]) -> dict[str, Any]:
-    asset_check = _latest_asset_check(events, None)
+    latest_generation = _latest_generation_completed_event(events)
+    content_item_id = latest_generation.get("content_item_id") if latest_generation else None
+    asset_check = _latest_asset_check(events, content_item_id)
     if asset_check is None:
         return {"kind": "check_generation_asset", "blocked": False}
     if asset_check["payload"].get("status") != "passed":

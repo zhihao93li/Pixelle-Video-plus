@@ -307,23 +307,27 @@ export function detailRows(step: LoopStep, experiment: ExperimentView | null): D
         ]
       : [{ label: "审核", value: "缺失", tone: "warn" }];
   }
-  if (step.key === "asset") return assetRows(experiment.content_items, events);
+  if (step.key === "asset") return assetRows(experiment);
   if (step.key === "publish") return publishRows(events);
   return retroRows(events);
 }
 
 export function previewContentItem(experiment: ExperimentView | null): ContentItem | null {
   if (!experiment) return null;
+  if (experiment.content_item?.asset_media_type === "video" && experiment.content_item.asset_url) {
+    return experiment.content_item;
+  }
   for (let index = experiment.content_items.length - 1; index >= 0; index -= 1) {
     const item = experiment.content_items[index];
     if (item.asset_media_type === "video" && item.asset_url) return item;
   }
+  if (experiment.content_item) return experiment.content_item;
   return experiment.content_items[experiment.content_items.length - 1] || null;
 }
 
-function assetRows(items: ContentItem[], events: OpsEvent[]): DetailRow[] {
-  const item = items[items.length - 1];
-  const assetCheck = latestEvent(events, "asset_checked");
+function assetRows(experiment: ExperimentView): DetailRow[] {
+  const item = experiment.content_item || experiment.content_items[experiment.content_items.length - 1];
+  const assetCheck = experiment.asset_check || latestEvent(experiment.events, "asset_checked");
   if (!item && !assetCheck) return [{ label: "资产", value: "缺失", tone: "warn" }];
   const payload = assetCheck?.payload || {};
   return [

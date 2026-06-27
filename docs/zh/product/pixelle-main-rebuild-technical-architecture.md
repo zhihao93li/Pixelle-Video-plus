@@ -1083,6 +1083,8 @@ P0.7-B 要求所有自然语言 route 都以 `pixelle_get_capabilities` 为第�
 
 `generation_drafted.payload.text` 只能保存最终上屏字幕或口播稿。生成说明、发布标题、发布正文、标签等辅助字段必须放在其他结构化字段或后续发布证据里，不能混入生成正文。
 
+生成层的文本来源只能是已批准 draft。`standard` pipeline 在 Ops 入口下必须使用 fixed mode，把 `generation_drafted.payload.text` 作为唯一正文传入；不得让 Codex 在 `request_generation` 时传入新文案，也不得让视频生成模块重新生成或改写旁白正文。
+
 当用户只说“下一条”“写文案”“做这个主题”而没有明确内容形态时，Pixelle Codex Plugin 对话层必须先让用户选择：短视频字幕稿、图文笔记、只做 hook、或完整运营实验。不能擅自把自然语言请求解释成图文长文，也不能在用户只要审稿时提前写入实验状态。
 
 进入视频生成前，Codex 必须调用 `pixelle_list_generation_pipelines` 读取当前注册 pipeline，并让用户选择；默认推荐 `standard`，但不能自造 pipeline 名称，也不能把默认值当成用户已经选择。
@@ -1090,6 +1092,8 @@ P0.7-B 要求所有自然语言 route 都以 `pixelle_get_capabilities` 为第�
 如果同主题或当前实验已经存在 `generation_completed`，Codex 不能直接调用 `pixelle_check_generation_asset` 把旧成片作为本次生成结果。必须先让用户选择：复用已有成片、用当前审核稿重新生成、或新建干净实验重新生成。选择重新生成时，必须创建新实验或绑定到尚未完成生成的干净实验，再提交当前审核稿。
 
 生成请求默认采用异步状态流：`pixelle_request_generation` 写入 `generation_requested` 后立即返回，由插件后台继续执行生成；Codex 通过 `pixelle_get_generation_status` 查询 `running / completed / failed`。生成完成后必须调用 `pixelle_check_generation_asset`，检查真实资产引用、本地文件可读性和 draft 文本污染；只有 `asset_checked.status = passed` 时，下一步才是 `pixelle_record_publish`。
+
+`pixelle_check_generation_asset` 必须在可用时读取生成目录里的 storyboard/narration，并与已批准 draft 做归一化比较。若 `storyboard_text_matches_draft = false`，视频文件存在也不能视为成功资产。当前状态聚合必须以最新 `generation_completed` 绑定的 `content_item_id` 为准；旧 content item 的通过或失败 asset check 不能决定新内容的 `next_action`。
 
 ### 9.3 State transition result
 
@@ -1168,9 +1172,12 @@ tests/ops/test_codex_writeback.py
 
 1. `operation_context` 被传给生成请求。
 2. 生成失败或无资产引用不推进状态。
-3. cheat workspace summary 是只读。
-4. URL 形式的 workspace path 被拒绝。
-5. Codex draft 未 apply 前不改变产品状态。
+3. Ops 生成请求只能使用已批准 draft，`standard` pipeline 进入 fixed mode。
+4. asset check 能拦截 storyboard/narration 与已批准 draft 不一致的成片。
+5. 重生成后 `current_view.content_item` 和 `next_action` 只参考最新 content item。
+6. cheat workspace summary 是只读。
+7. URL 形式的 workspace path 被拒绝。
+8. Codex draft 未 apply 前不改变产品状态。
 
 ### 10.3 API contract tests
 

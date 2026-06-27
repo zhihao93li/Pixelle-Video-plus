@@ -90,6 +90,8 @@ export interface NextAction {
 export interface ExperimentView {
   experiment: ContentExperiment;
   content_items: ContentItem[];
+  content_item?: ContentItem | null;
+  asset_check?: OpsEvent | null;
   events: OpsEvent[];
   next_action: NextAction;
 }
@@ -123,6 +125,8 @@ export interface CurrentResponse {
   selected_social_account: ChannelAccount | null;
   context: JsonObject;
   content_items: ContentItem[];
+  content_item?: ContentItem | null;
+  asset_check?: OpsEvent | null;
   events: OpsEvent[];
   next_action: NextAction;
 }
@@ -135,6 +139,8 @@ export interface ContextExport {
   next_action: NextAction;
   recent_ops_events: OpsEvent[];
   content_items: ContentItem[];
+  content_item?: ContentItem | null;
+  asset_check?: OpsEvent | null;
   project_memory_summary?: JsonObject;
   cheat_workspace_summary?: JsonObject | null;
   sync_status?: JsonObject;

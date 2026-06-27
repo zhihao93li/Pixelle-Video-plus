@@ -878,8 +878,8 @@ function ReviewDetail({ experiment }: { experiment: ExperimentView }) {
 
 function AssetDetail({ experiment }: { experiment: ExperimentView }) {
   const previewItem = previewContentItem(experiment);
-  const item = previewItem || experiment.content_items[experiment.content_items.length - 1] || null;
-  const assetCheck = latestEvent(experiment.events, "asset_checked");
+  const item = previewItem || experiment.content_item || experiment.content_items[experiment.content_items.length - 1] || null;
+  const assetCheck = experiment.asset_check || latestEvent(experiment.events, "asset_checked");
   const failed = latestEvent(experiment.events, "generation_failed");
   const checks = objectValue(assetCheck?.payload.checks);
   return (

@@ -185,6 +185,108 @@ def test_ops_api_current_view_auto_selects_single_channel_account(tmp_path, monk
     assert body["context"]["selection"] == "implicit_single_channel_account"
 
 
+def test_ops_api_current_view_exposes_latest_checked_content_item_preview(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = service.create_cycle(
+        project_id=project["id"],
+        name="Pet cycle",
+        goal="Grow cat content",
+        source=_source(),
+    )
+    experiment = service.create_experiment(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        title="Cat hook",
+        hypothesis="Cat hook wins.",
+        source=_source(),
+    )
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    output_path = tmp_path / "repo" / "output" / "current" / "final.mp4"
+    output_path.parent.mkdir(parents=True)
+    output_path.write_bytes(b"mp4")
+    monkeypatch.chdir(output_path.parents[2])
+    old_item = store.create_content_item(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        kind="video",
+        title="Old video",
+        status="generated",
+        asset_ref={"video_path": "output/old/final.mp4"},
+    )
+    store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=old_item["id"],
+        event_type="generation_completed",
+        payload={"asset_ref": old_item["asset_ref"]},
+        source=_source(),
+    )
+    store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=old_item["id"],
+        event_type="asset_checked",
+        payload={"status": "failed", "checks": {"storyboard_text_matches_draft": False}},
+        source=_source(),
+    )
+    new_item = store.create_content_item(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        kind="video",
+        title="New video",
+        status="generated",
+        asset_ref={"video_path": str(output_path)},
+    )
+    store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=new_item["id"],
+        event_type="generation_completed",
+        payload={"asset_ref": new_item["asset_ref"]},
+        source=_source(),
+    )
+    store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=new_item["id"],
+        event_type="asset_checked",
+        payload={"status": "passed", "checks": {"storyboard_text_matches_draft": True}},
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    response = client.get(f"/api/ops/current?project_id={project['id']}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["content_item"]["id"] == new_item["id"]
+    assert body["content_item"]["asset_preview_available"] is True
+    assert body["content_item"]["asset_media_type"] == "video"
+    assert body["asset_check"]["payload"]["status"] == "passed"
+    assert body["next_action"]["kind"] == "record_publish"
+
+
 def test_ops_api_lists_projects_with_channel_accounts(tmp_path, monkeypatch):
     db_path = tmp_path / "ops.db"
     monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))

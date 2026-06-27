@@ -101,6 +101,138 @@ def test_generated_experiment_next_action_requires_asset_check(service):
         )
 
 
+def test_current_view_uses_latest_generated_content_item_after_retry(service):
+    project, cycle, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "completion_rate"},
+        source=_source(),
+    )
+    old_item = service.store.create_content_item(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        kind="video",
+        title="Old generated video",
+        status="generated",
+        asset_ref={"video_path": "output/old/final.mp4"},
+    )
+    service.store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=old_item["id"],
+        event_type="generation_completed",
+        payload={"asset_ref": old_item["asset_ref"]},
+        source=_source(),
+    )
+    service.store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=old_item["id"],
+        event_type="asset_checked",
+        payload={"status": "failed", "checks": {"storyboard_text_matches_draft": False}},
+        source=_source(),
+    )
+    new_item = service.store.create_content_item(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        kind="video",
+        title="New generated video",
+        status="generated",
+        asset_ref={"video_path": "output/new/final.mp4"},
+    )
+    service.store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=new_item["id"],
+        event_type="generation_completed",
+        payload={"asset_ref": new_item["asset_ref"]},
+        source=_source(),
+    )
+    service.store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=new_item["id"],
+        event_type="asset_checked",
+        payload={"status": "passed", "checks": {"storyboard_text_matches_draft": True}},
+        source=_source(),
+    )
+    service.store.update_experiment_stage(experiment["id"], "generation_completed")
+
+    view = service.current_view(project_id=project["id"])
+
+    assert view["content_item"]["id"] == new_item["id"]
+    assert view["asset_check"]["content_item_id"] == new_item["id"]
+    assert view["asset_check"]["payload"]["status"] == "passed"
+    assert view["next_action"]["kind"] == "record_publish"
+
+
+def test_new_generation_requires_own_asset_check_even_if_old_asset_passed(service):
+    project, cycle, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "completion_rate"},
+        source=_source(),
+    )
+    old_item = service.store.create_content_item(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        kind="video",
+        title="Old generated video",
+        status="generated",
+        asset_ref={"video_path": "output/old/final.mp4"},
+    )
+    service.store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=old_item["id"],
+        event_type="generation_completed",
+        payload={"asset_ref": old_item["asset_ref"]},
+        source=_source(),
+    )
+    service.store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=old_item["id"],
+        event_type="asset_checked",
+        payload={"status": "passed", "checks": {"local_file_exists": True}},
+        source=_source(),
+    )
+    new_item = service.store.create_content_item(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        kind="video",
+        title="New generated video",
+        status="generated",
+        asset_ref={"video_path": "output/new/final.mp4"},
+    )
+    service.store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=new_item["id"],
+        event_type="generation_completed",
+        payload={"asset_ref": new_item["asset_ref"]},
+        source=_source(),
+    )
+    service.store.update_experiment_stage(experiment["id"], "generation_completed")
+
+    view = service.current_view(project_id=project["id"])
+
+    assert view["content_item"]["id"] == new_item["id"]
+    assert view["asset_check"] is None
+    assert view["next_action"]["kind"] == "check_generation_asset"
+
+
 def test_create_cycle_requires_existing_project(service):
     with pytest.raises(OpsError, match="project_not_found"):
         service.create_cycle(
