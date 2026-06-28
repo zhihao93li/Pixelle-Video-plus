@@ -48,7 +48,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -359,7 +360,8 @@ button {
 }
 
 select,
-input {
+input,
+textarea {
   min-height: 34px;
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -368,7 +370,14 @@ input {
   padding: 0 10px;
 }
 
-input::placeholder {
+textarea {
+  min-height: 88px;
+  padding: 10px;
+  resize: vertical;
+}
+
+input::placeholder,
+textarea::placeholder {
   color: #a4aca5;
 }
 
@@ -989,6 +998,207 @@ input::placeholder {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.publish-workspace {
+  gap: 16px;
+}
+
+.publish-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.publish-flow-step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--soft);
+  padding: 10px;
+}
+
+.publish-flow-step span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.publish-flow-step strong {
+  display: block;
+  font-size: 13px;
+}
+
+.publish-flow-step small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.publish-flow-step.active {
+  border-color: rgba(139, 92, 19, 0.28);
+  background: var(--warn-soft);
+}
+
+.publish-flow-step.active span {
+  background: var(--warn);
+  color: #fff;
+}
+
+.publish-flow-step.done {
+  border-color: rgba(47, 111, 94, 0.22);
+  background: var(--accent-soft);
+}
+
+.publish-flow-step.done span {
+  background: var(--accent);
+  color: #fff;
+}
+
+.publish-package,
+.publish-evidence-form {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--soft);
+  padding: 14px;
+}
+
+.publish-evidence-form {
+  border-color: rgba(139, 92, 19, 0.22);
+  background: #fffdfa;
+}
+
+.publish-package-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.publish-package-tabs button {
+  display: grid;
+  gap: 3px;
+  min-width: 132px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.publish-package-tabs button.active {
+  border-color: rgba(47, 111, 94, 0.3);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(47, 111, 94, 0.08);
+}
+
+.publish-package-tabs strong {
+  font-size: 12px;
+}
+
+.publish-package-tabs span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publish-section-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.publish-section-head span:first-child {
+  display: block;
+  color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.publish-section-head h3 {
+  margin: 4px 0 0;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.publish-copy-list {
+  display: grid;
+  gap: 8px;
+}
+
+.package-asset,
+.package-checklist {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 12px;
+}
+
+.publish-copy-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.publish-copy-row.multiline {
+  align-items: start;
+}
+
+.publish-copy-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.publish-copy-row strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.publish-copy-row.multiline strong {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 8;
+  white-space: pre-wrap;
+}
+
+.evidence-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.evidence-form-grid label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.evidence-form-grid label:last-child {
+  grid-column: 1 / -1;
 }
 
 .detail-row,
@@ -1638,12 +1848,15 @@ pre {
   .workspace-grid,
   .form-grid,
   .metric-grid,
-  .check-list {
+  .check-list,
+  .publish-flow,
+  .evidence-form-grid {
     grid-template-columns: 1fr;
   }
 
   .detail-row,
-  .inspect-row {
+  .inspect-row,
+  .publish-copy-row {
     grid-template-columns: 1fr;
     gap: 4px;
   }

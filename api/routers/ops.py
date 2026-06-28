@@ -20,12 +20,16 @@ from api.schemas.ops import (
     OpsIntegrationsResponse,
     OpsProjectCyclesResponse,
     OpsProjectsResponse,
+    OpsPublishEvidenceRequest,
+    OpsPublishEvidenceResponse,
+    OpsPublishPackageResponse,
     OpsWritebackDraftResponse,
     OpsWritebackDraftsResponse,
 )
 from ops.service import OpsError, OpsService
 from pixelle_video.config.loader import load_config_dict
 from pixelle_video.config.schema import PixelleVideoConfig
+from publishing import PublishService
 
 router = APIRouter(prefix="/ops", tags=["Ops"])
 
@@ -52,6 +56,42 @@ async def get_current_ops_view(
 async def get_ops_experiment(experiment_id: str):
     try:
         return _with_asset_preview_urls(OpsService().get_experiment_view(experiment_id))
+    except OpsError as exc:
+        _raise_ops_error(exc)
+
+
+@router.get(
+    "/experiments/{experiment_id}/publish-package",
+    response_model=OpsPublishPackageResponse,
+)
+async def get_ops_publish_package(
+    experiment_id: str,
+    channel_account_id: str,
+):
+    try:
+        service = OpsService()
+        experiment_view = _with_asset_preview_urls(service.get_experiment_view(experiment_id))
+        channel_account = service.store.get_channel_account(channel_account_id)
+        if channel_account is None:
+            _raise_ops_error(OpsError("channel_account_not_found", "Publish package requires an existing channel account."))
+        if channel_account["project_id"] != experiment_view["experiment"]["project_id"]:
+            _raise_ops_error(
+                OpsError(
+                    "channel_account_project_mismatch",
+                    "Publish package channel account must belong to the same project as the experiment.",
+                )
+            )
+        package = PublishService().build_package(
+            experiment_view=experiment_view,
+            channel_account=channel_account,
+        )
+        return {
+            "status": "ok",
+            "package": package,
+            "next_action": {"kind": "manual_publish_from_package", "blocked": False},
+        }
+    except ValueError as exc:
+        _raise_ops_error(OpsError("publish_package_unavailable", str(exc)))
     except OpsError as exc:
         _raise_ops_error(exc)
 
@@ -228,6 +268,66 @@ async def update_ops_channel_account(
         "channel_account": account,
         "next_action": {"kind": "select_channel_account", "blocked": False},
     }
+
+
+@router.post(
+    "/experiments/{experiment_id}/publish-evidence",
+    response_model=OpsPublishEvidenceResponse,
+)
+async def record_ops_publish_evidence(
+    experiment_id: str,
+    request: OpsPublishEvidenceRequest,
+):
+    evidence = _publish_evidence_from_request(request)
+    try:
+        result = OpsService().record_publish(
+            experiment_id=experiment_id,
+            content_item_id=request.content_item_id,
+            channel_account_id=request.channel_account_id,
+            evidence=evidence,
+            source={
+                "kind": "ui",
+                "surface": "p3_ops_publish_ui",
+                "confirmed_by_user": True,
+            },
+        )
+    except OpsError as exc:
+        _raise_ops_error(exc)
+
+    return {
+        "status": "ok",
+        "event": result["event"],
+        "next_action": result["next_action"],
+    }
+
+
+def _publish_evidence_from_request(request: OpsPublishEvidenceRequest) -> dict:
+    evidence = {
+        "package_id": _clean_optional(request.package_id),
+        "package_hash": _clean_optional(request.package_hash),
+        "asset_hash": _clean_optional(request.asset_hash),
+        "platform_url": _clean_optional(request.platform_url),
+        "platform_post_id": _clean_optional(request.platform_post_id),
+        "buffer_post_id": _clean_optional(request.buffer_post_id),
+        "published_at": _clean_optional(request.published_at),
+        "screenshot_path": _clean_optional(request.screenshot_path),
+        "final_title": _clean_optional(request.final_title),
+        "final_body": _clean_optional(request.final_body),
+        "final_tags": request.final_tags,
+        "note": _clean_optional(request.note),
+        "evidence_source": "manual",
+    }
+    if request.mock:
+        evidence["mock"] = True
+        evidence["mock_label"] = _clean_optional(request.mock_label)
+    return {key: value for key, value in evidence.items() if value not in (None, "")}
+
+
+def _clean_optional(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def _raise_ops_error(exc: OpsError) -> None:

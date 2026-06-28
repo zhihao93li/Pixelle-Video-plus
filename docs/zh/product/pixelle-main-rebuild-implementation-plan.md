@@ -8,6 +8,9 @@
 1. `docs/zh/product/pixelle-main-rebuild-prd.md`
 2. `docs/zh/product/pixelle-main-rebuild-technical-architecture.md`
 3. `docs/zh/product/pixelle-p2-cheat-on-content-prd.md`
+4. `docs/zh/product/pixelle-p3-publish-module-prd.md`
+5. `docs/zh/product/pixelle-p3-publish-module-technical-architecture.md`
+6. `docs/zh/product/pixelle-p3-publish-ui-design.md`
 
 ## 1. 本计划的目标
 
@@ -707,23 +710,43 @@ Pixelle UI 只展示 Codex 运营动作的结果，不承担运营入口。
 docs/zh/product/pixelle-p2-cheat-on-content-prd.md
 ```
 
-### P3：证据自动化
+### P3：独立发布模块
 
 目标：
 
-减少发布证据和指标数据的手工录入，但不改变 Pixelle Ops 的证据规则。
+把发布能力拆成独立模块，先打通 `PublishPackage -> 一键复制/资产交付 -> PublishEvidence -> Ops PublishRecord`，再考虑具体平台的辅助或自动发布。
 
 范围：
 
-1. 平台数据 readback。
-2. Buffer 发布状态回读。
-3. 多平台 metrics adapter。
-4. 更完整的内容队列。
+1. 发布准备包和手动发布证据登记。
+2. 不同平台、不同内容类型的字段渲染。
+3. 一键复制标题、正文、标签和完整发布包。
+4. 资产预览、下载或打开路径。
+5. 同一内容多平台发布，每个平台账号独立 package 和 evidence。
+6. 发布证据校验、幂等和风控阻断。
+7. Ops 第 5 步内嵌发布包工作台。
 
 不做：
 
-1. 不把自动回读当成唯一证据来源。
-2. 不在没有真实平台返回时伪造成功。
+1. 不打开平台发布页。
+2. 不上传视频或图片到平台。
+3. 不自动填写平台表单。
+4. 不默认全自动点击最终发布。
+5. 不绕过验证码或平台风控。
+6. 不把录制动作直接当成发布模块接口。
+7. 不在没有真实平台返回或人工证据时伪造成功。
+8. 不把发布模块和指标回收混在同一阶段。
+9. P3-A 不新增左侧 `Publish` 顶级导航。
+10. P3-A 不做独立发布中心。
+11. UI 不自己拼 `PublishPackage` 或 `copy_blocks`。
+
+执行文档：
+
+```text
+docs/zh/product/pixelle-p3-publish-module-prd.md
+docs/zh/product/pixelle-p3-publish-module-technical-architecture.md
+docs/zh/product/pixelle-p3-publish-ui-design.md
+```
 
 ### P4：长期产品化学习层
 

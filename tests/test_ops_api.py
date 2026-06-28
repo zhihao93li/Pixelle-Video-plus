@@ -403,6 +403,202 @@ def test_ops_api_updates_channel_account_with_ui_source(tmp_path, monkeypatch):
     assert projects["projects"][0]["channel_accounts"][0]["account_name"] == "PetWoods Douyin"
 
 
+def test_ops_api_records_real_publish_evidence_with_ui_source(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    account = service.create_channel_account(
+        project_id=project["id"],
+        platform="xiaohongshu",
+        account_name="PetWoods 宠物森友会",
+        account_handle="petwoods",
+        source=_source(),
+    )
+    cycle = service.create_cycle(
+        project_id=project["id"],
+        name="Pet cycle",
+        goal="Grow cat content",
+        source=_source(),
+    )
+    experiment = service.create_experiment(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        title="Cat hook",
+        hypothesis="Cat hook wins.",
+        source=_source(),
+    )
+    content_item = store.create_content_item(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        kind="video",
+        title=experiment["title"],
+        status="generated",
+        asset_ref={"video_path": "output/task-123/final.mp4"},
+    )
+    store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=content_item["id"],
+        event_type="generation_completed",
+        payload={"asset_ref": content_item["asset_ref"]},
+        source=_source(),
+    )
+    store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=content_item["id"],
+        event_type="asset_checked",
+        payload={"status": "passed"},
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/ops/experiments/{experiment['id']}/publish-evidence",
+        json={
+            "content_item_id": content_item["id"],
+            "channel_account_id": account["id"],
+            "package_id": "pkg_test123",
+            "package_hash": "package-hash-123",
+            "asset_hash": "asset-hash-123",
+            "platform_url": " https://www.xiaohongshu.com/explore/post-123 ",
+            "platform_post_id": "post-123",
+            "published_at": "2026-06-28T12:30",
+            "screenshot_path": "/tmp/post-123.png",
+            "final_title": "Cat hook",
+            "final_body": "Final body",
+            "final_tags": ["#cat"],
+            "note": "manual publish",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    evidence = body["event"]["payload"]["evidence"]
+    assert body["status"] == "ok"
+    assert body["event"]["source"]["kind"] == "ui"
+    assert body["event"]["source"]["surface"] == "p3_ops_publish_ui"
+    assert body["event"]["content_item_id"] == content_item["id"]
+    assert evidence["platform_url"] == "https://www.xiaohongshu.com/explore/post-123"
+    assert evidence["platform_post_id"] == "post-123"
+    assert evidence["package_id"] == "pkg_test123"
+    assert evidence["package_hash"] == "package-hash-123"
+    assert evidence["asset_hash"] == "asset-hash-123"
+    assert evidence["screenshot_path"] == "/tmp/post-123.png"
+    assert evidence["final_tags"] == ["#cat"]
+    assert body["event"]["payload"]["publication"]["channel_account_id"] == account["id"]
+    assert body["event"]["payload"]["publication"]["platform"] == "xiaohongshu"
+    assert body["next_action"]["kind"] == "record_metrics"
+
+
+def test_ops_api_renders_publish_package_from_publish_module(tmp_path, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    monkeypatch.setenv("PIXELLE_OPS_DB_PATH", str(db_path))
+
+    store = OpsStore(db_path)
+    store.init_db()
+    service = OpsService(store)
+    project = service.create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    account = service.create_channel_account(
+        project_id=project["id"],
+        platform="xiaohongshu",
+        account_name="PetWoods 宠物森友会",
+        account_handle="petwoods",
+        source=_source(),
+    )
+    cycle = service.create_cycle(
+        project_id=project["id"],
+        name="Pet cycle",
+        goal="Grow cat content",
+        source=_source(),
+    )
+    experiment = service.create_experiment(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        title="Cat hook",
+        hypothesis="Cat hook wins.",
+        source=_source(),
+    )
+    draft = store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        event_type="generation_drafted",
+        payload={
+            "title": "同一窝小猫，可能不是一个爹吗？",
+            "text": "同一窝小猫，真的可能不是同一个爹。",
+            "tags": ["母猫繁育", "#猫咪冷知识"],
+        },
+        source=_source(),
+    )
+    store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        event_type="generation_draft_approved",
+        payload={"draft_id": draft["id"]},
+        source=_source(),
+    )
+    content_item = store.create_content_item(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        kind="video",
+        title=experiment["title"],
+        status="generated",
+        asset_ref={"video_path": "output/task-123/final.mp4", "duration": 72.6},
+    )
+    store.append_event(
+        project_id=project["id"],
+        cycle_id=cycle["id"],
+        experiment_id=experiment["id"],
+        content_item_id=content_item["id"],
+        event_type="asset_checked",
+        payload={"status": "passed"},
+        source=_source(),
+    )
+
+    client = TestClient(app)
+    response = client.get(
+        f"/api/ops/experiments/{experiment['id']}/publish-package?channel_account_id={account['id']}"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    package = body["package"]
+    copy_blocks = {block["key"]: block for block in package["copy_blocks"]}
+    checklist = {item["key"]: item for item in package["checklist"]}
+    assert body["next_action"]["kind"] == "manual_publish_from_package"
+    assert package["id"].startswith("pkg_")
+    assert package["content_item_id"] == content_item["id"]
+    assert package["channel_account_id"] == account["id"]
+    assert package["platform"] == "xiaohongshu"
+    assert package["status"] == "ready"
+    assert package["tags"] == ["#母猫繁育", "#猫咪冷知识"]
+    assert copy_blocks["title"]["value"] == "同一窝小猫，可能不是一个爹吗？"
+    assert "完整发布包" == copy_blocks["full_package_markdown"]["label"]
+    assert checklist["asset_checked"]["status"] == "passed"
+    assert package["package_hash"]
+    assert package["asset_hash"]
+
+
 def test_ops_api_lists_integrations_without_plaintext_secrets(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "config.yaml").write_text(

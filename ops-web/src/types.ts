@@ -222,6 +222,88 @@ export type UpdateChannelAccountInput = CreateChannelAccountInput;
 
 export type UpdateChannelAccountResponse = CreateChannelAccountResponse;
 
+export interface PublishCopyBlock {
+  key: string;
+  label: string;
+  value: string;
+  kind: "text" | "long_text" | "path" | string;
+  required: boolean;
+}
+
+export interface PublishChecklistItem {
+  key: string;
+  label: string;
+  status: "passed" | "warning" | "missing" | string;
+  detail: string;
+}
+
+export interface PublishAssetHandoff {
+  path?: string;
+  file_name?: string;
+  duration?: number;
+  file_size?: number;
+  asset_hash?: string;
+  asset_url?: string;
+  media_type?: string;
+  preview_available?: boolean;
+}
+
+export interface PublishPackage {
+  id: string;
+  project_id: string;
+  cycle_id: string;
+  experiment_id: string;
+  content_item_id: string;
+  channel_account_id: string;
+  platform: string;
+  account_name: string;
+  account_handle?: string | null;
+  content_type: string;
+  status: string;
+  title: string;
+  body: string;
+  tags: string[];
+  platform_fields: JsonObject;
+  copy_blocks: PublishCopyBlock[];
+  checklist: PublishChecklistItem[];
+  asset_handoff: PublishAssetHandoff;
+  approved_draft_id?: string | null;
+  approved_text_hash: string;
+  asset_hash: string;
+  package_hash: string;
+}
+
+export interface PublishPackageResponse {
+  status: string;
+  package: PublishPackage;
+  next_action: NextAction;
+}
+
+export interface RecordPublishEvidenceInput {
+  content_item_id: string;
+  channel_account_id?: string | null;
+  package_id?: string | null;
+  package_hash?: string | null;
+  asset_hash?: string | null;
+  platform_url?: string | null;
+  platform_post_id?: string | null;
+  buffer_post_id?: string | null;
+  published_at?: string | null;
+  screenshot_path?: string | null;
+  final_title?: string | null;
+  final_body?: string | null;
+  final_tags?: string[];
+  note?: string | null;
+  mock?: boolean;
+  mock_label?: string | null;
+}
+
+export interface RecordPublishEvidenceResponse {
+  status: string;
+  event: OpsEvent;
+  next_action: NextAction;
+}
+
 export interface ApiErrorShape {
   detail?: {
     error?: {

@@ -1,4 +1,4 @@
-"""Schemas for read-only operations API responses."""
+"""Schemas for operations API responses."""
 
 from typing import Any
 
@@ -103,3 +103,34 @@ class OpsChannelAccountCreateResponse(BaseModel):
 
 class OpsChannelAccountUpdateResponse(OpsChannelAccountCreateResponse):
     pass
+
+
+class OpsPublishEvidenceRequest(BaseModel):
+    content_item_id: str
+    channel_account_id: str | None = None
+    package_id: str | None = None
+    package_hash: str | None = None
+    asset_hash: str | None = None
+    platform_url: str | None = None
+    platform_post_id: str | None = None
+    buffer_post_id: str | None = None
+    published_at: str | None = None
+    screenshot_path: str | None = None
+    final_title: str | None = None
+    final_body: str | None = None
+    final_tags: list[str] = Field(default_factory=list)
+    note: str | None = None
+    mock: bool = False
+    mock_label: str | None = None
+
+
+class OpsPublishEvidenceResponse(BaseModel):
+    status: str
+    event: dict[str, Any]
+    next_action: dict[str, Any]
+
+
+class OpsPublishPackageResponse(BaseModel):
+    status: str
+    package: dict[str, Any]
+    next_action: dict[str, Any]

@@ -6,6 +6,9 @@ import type {
   IntegrationsResponse,
   ProjectCyclesResponse,
   ProjectsResponse,
+  PublishPackageResponse,
+  RecordPublishEvidenceInput,
+  RecordPublishEvidenceResponse,
   UpdateChannelAccountInput,
   UpdateChannelAccountResponse,
   WritebackDraftsResponse,
@@ -64,6 +67,13 @@ export function getContextExport(projectId?: string, channelAccountId?: string):
   return request<ContextExportResponse>(`/api/ops/context-export${query ? `?${query}` : ""}`);
 }
 
+export function getPublishPackage(experimentId: string, channelAccountId: string): Promise<PublishPackageResponse> {
+  const params = new URLSearchParams({ channel_account_id: channelAccountId });
+  return request<PublishPackageResponse>(
+    `/api/ops/experiments/${encodeURIComponent(experimentId)}/publish-package?${params.toString()}`,
+  );
+}
+
 export function listWritebackDrafts(): Promise<WritebackDraftsResponse> {
   return request<WritebackDraftsResponse>("/api/ops/writeback-drafts");
 }
@@ -89,6 +99,19 @@ export function updateChannelAccount(
     `/api/ops/channel-accounts/${encodeURIComponent(channelAccountId)}`,
     {
       method: "PATCH",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function recordPublishEvidence(
+  experimentId: string,
+  input: RecordPublishEvidenceInput,
+): Promise<RecordPublishEvidenceResponse> {
+  return request<RecordPublishEvidenceResponse>(
+    `/api/ops/experiments/${encodeURIComponent(experimentId)}/publish-evidence`,
+    {
+      method: "POST",
       body: JSON.stringify(input),
     },
   );

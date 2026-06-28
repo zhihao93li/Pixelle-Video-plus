@@ -16,10 +16,12 @@ import {
   createChannelAccount,
   getContextExport,
   getCurrent,
+  getPublishPackage,
   listIntegrations,
   listProjectCycles,
   listProjects,
   listWritebackDrafts,
+  recordPublishEvidence,
   updateChannelAccount,
 } from "./api";
 import {
@@ -55,6 +57,7 @@ import type {
   NextAction,
   OpsEvent,
   OpsProject,
+  PublishPackage,
   ProjectCyclesResponse,
   ProjectsResponse,
   WritebackDraft,
@@ -240,6 +243,7 @@ export function App() {
               <OpsScreen
                 selectedProject={selectedProject}
                 selectedAccount={selectedAccount}
+                accounts={accounts}
                 cycles={cycles}
                 selectedCycle={selectedCycle}
                 selectedExperiment={selectedExperiment}
@@ -249,6 +253,7 @@ export function App() {
                 writebackDrafts={state.writebackDrafts?.drafts || []}
                 onConfigureAccounts={() => setScreen("projects")}
                 onCopyPrompt={() => void copyPrompt()}
+                onRefresh={() => void refresh()}
                 onSelectCycle={setSelectedCycleId}
                 onSelectStep={setSelectedStep}
               />
@@ -301,6 +306,10 @@ function Sidebar({ screen, onScreenChange }: { screen: Screen; onScreenChange: (
         <a href={`${VIDEO_BASE}/History`} rel="noreferrer">
           <span>History</span>
           <span>生成记录</span>
+        </a>
+        <a href={`${VIDEO_BASE}/Help`} rel="noreferrer">
+          <span>Help</span>
+          <span>帮助</span>
         </a>
       </nav>
       <div className="sidebar-footer">选题、文案、生成、发布登记仍通过 Codex + pixelle-ops 执行。</div>
@@ -523,6 +532,7 @@ function ContextItem({ label, value, meta, warn }: { label: string; value: strin
 function OpsScreen({
   selectedProject,
   selectedAccount,
+  accounts,
   cycles,
   selectedCycle,
   selectedExperiment,
@@ -532,11 +542,13 @@ function OpsScreen({
   writebackDrafts,
   onConfigureAccounts,
   onCopyPrompt,
+  onRefresh,
   onSelectCycle,
   onSelectStep,
 }: {
   selectedProject: OpsProject | null;
   selectedAccount: ChannelAccount | null;
+  accounts: ChannelAccount[];
   cycles: CycleView[];
   selectedCycle: CycleView | null;
   selectedExperiment: ExperimentView | null;
@@ -546,6 +558,7 @@ function OpsScreen({
   writebackDrafts: WritebackDraft[];
   onConfigureAccounts: () => void;
   onCopyPrompt: () => void;
+  onRefresh: () => void;
   onSelectCycle: (cycleId: string) => void;
   onSelectStep: (step: StepKey) => void;
 }) {
@@ -598,8 +611,11 @@ function OpsScreen({
           contextExport={contextExport}
           experiment={selectedExperiment}
           nextAction={nextAction}
+          accounts={accounts}
+          selectedAccount={selectedAccount}
           step={activeStep}
           writebackDrafts={writebackDrafts}
+          onPublishRecorded={onRefresh}
         />
       </section>
       <EvidenceDrawer step={activeStep} experiment={selectedExperiment} />
@@ -680,13 +696,19 @@ function StepWorkspace({
   step,
   experiment,
   nextAction,
+  accounts,
+  selectedAccount,
   writebackDrafts,
+  onPublishRecorded,
 }: {
   contextExport?: ContextExportResponse;
   step: (typeof LOOP_STEPS)[number];
   experiment: ExperimentView | null;
   nextAction?: NextAction | null;
+  accounts: ChannelAccount[];
+  selectedAccount: ChannelAccount | null;
   writebackDrafts: WritebackDraft[];
+  onPublishRecorded: () => void;
 }) {
   const missing = missingEvents(step, experiment);
   const stepDrafts = writebackDraftsForStep(writebackDrafts, experiment, step.key);
@@ -711,45 +733,78 @@ function StepWorkspace({
       </div>
       <div className="workspace-grid">
         <section className="detail-card">
-          <StepDetail stepKey={step.key} experiment={experiment} />
+          <StepDetail
+            stepKey={step.key}
+            experiment={experiment}
+            accounts={accounts}
+            selectedAccount={selectedAccount}
+            onPublishRecorded={onPublishRecorded}
+          />
           <StepSourceSummary experiment={experiment} stepKey={step.key} writebackDrafts={writebackDrafts} />
         </section>
         <section className="inspector-card">
-          <h3>本步骤检查</h3>
-          <div className="inspect-row">
-            <span>通过标准</span>
-            <strong>{step.successText}</strong>
-          </div>
-          <div className="inspect-row">
-            <span>本步骤缺失</span>
-            <strong>{missing}</strong>
-          </div>
-          <div className="inspect-row">
-            <span>阻塞下一步</span>
-            <strong>{nextAction?.blocked ? "是" : "否"}</strong>
-          </div>
-          <div className="inspect-row">
-            <span>方法论摘要</span>
-            <strong>{summary ? `rubric ${textValue(summary.rubric_version) || "-"} · confidence ${textValue(summary.confidence) || "-"}` : "未绑定或不可读"}</strong>
-          </div>
-          <div className={`inspect-row ${pendingStepDrafts.length ? "warn" : "good"}`}>
-            <span>待确认写回</span>
-            <strong>{pendingStepDrafts.length ? `${pendingStepDrafts.length} 条待处理` : "本步骤无待处理 draft"}</strong>
-          </div>
-          <DraftList drafts={pendingStepDrafts} />
+          {step.key === "publish" ? (
+            <PublishInspector experiment={experiment} selectedAccount={selectedAccount} nextAction={nextAction} />
+          ) : (
+            <>
+              <h3>本步骤检查</h3>
+              <div className="inspect-row">
+                <span>通过标准</span>
+                <strong>{step.successText}</strong>
+              </div>
+              <div className="inspect-row">
+                <span>本步骤缺失</span>
+                <strong>{missing}</strong>
+              </div>
+              <div className="inspect-row">
+                <span>阻塞下一步</span>
+                <strong>{nextAction?.blocked ? "是" : "否"}</strong>
+              </div>
+              <div className="inspect-row">
+                <span>方法论摘要</span>
+                <strong>{summary ? `rubric ${textValue(summary.rubric_version) || "-"} · confidence ${textValue(summary.confidence) || "-"}` : "未绑定或不可读"}</strong>
+              </div>
+              <div className={`inspect-row ${pendingStepDrafts.length ? "warn" : "good"}`}>
+                <span>待确认写回</span>
+                <strong>{pendingStepDrafts.length ? `${pendingStepDrafts.length} 条待处理` : "本步骤无待处理 draft"}</strong>
+              </div>
+              <DraftList drafts={pendingStepDrafts} />
+            </>
+          )}
         </section>
       </div>
     </section>
   );
 }
 
-function StepDetail({ stepKey, experiment }: { stepKey: StepKey; experiment: ExperimentView | null }) {
+function StepDetail({
+  stepKey,
+  experiment,
+  selectedAccount,
+  accounts,
+  onPublishRecorded,
+}: {
+  stepKey: StepKey;
+  experiment: ExperimentView | null;
+  accounts: ChannelAccount[];
+  selectedAccount: ChannelAccount | null;
+  onPublishRecorded: () => void;
+}) {
   if (!experiment) return <EmptyDetail title="还没有内容实验" body="先回 Codex 创建本轮内容实验。" />;
   if (stepKey === "prediction") return <PredictionDetail experiment={experiment} />;
   if (stepKey === "draft") return <DraftDetail experiment={experiment} />;
   if (stepKey === "review") return <ReviewDetail experiment={experiment} />;
   if (stepKey === "asset") return <AssetDetail experiment={experiment} />;
-  if (stepKey === "publish") return <PublishDetail experiment={experiment} />;
+  if (stepKey === "publish") {
+    return (
+      <PublishDetail
+        accounts={accounts}
+        experiment={experiment}
+        selectedAccount={selectedAccount}
+        onPublishRecorded={onPublishRecorded}
+      />
+    );
+  }
   return <RetroDetail experiment={experiment} />;
 }
 
@@ -910,36 +965,408 @@ function AssetDetail({ experiment }: { experiment: ExperimentView }) {
   );
 }
 
-function PublishDetail({ experiment }: { experiment: ExperimentView }) {
-  const event = latestEvent(experiment.events, "publish_recorded");
-  const evidence = objectValue(event?.payload.evidence);
-  if (!event || !evidence) {
-    return <EmptyDetail title="还没有发布证据" body="生成资产不等于已发布。需要登记平台 URL、post id、Buffer id 或 mock 发布证据。" />;
+function PublishDetail({
+  accounts,
+  experiment,
+  selectedAccount,
+  onPublishRecorded,
+}: {
+  accounts: ChannelAccount[];
+  experiment: ExperimentView;
+  selectedAccount: ChannelAccount | null;
+  onPublishRecorded: () => void;
+}) {
+  const publishEvent = latestEvent(experiment.events, "publish_recorded");
+  const evidence = objectValue(publishEvent?.payload.evidence);
+  const [activeAccountId, setActiveAccountId] = useState(selectedAccount?.id || "");
+  const activeAccount = accounts.find((account) => account.id === activeAccountId) || selectedAccount;
+  const [publishPackage, setPublishPackage] = useState<PublishPackage | null>(null);
+  const [packageLoading, setPackageLoading] = useState(false);
+  const [packageError, setPackageError] = useState<string | null>(null);
+  const hasRealEvidence = Boolean(evidence && !evidence.mock);
+  const [platformUrl, setPlatformUrl] = useState("");
+  const [platformPostId, setPlatformPostId] = useState("");
+  const [publishedAt, setPublishedAt] = useState("");
+  const [screenshotPath, setScreenshotPath] = useState("");
+  const [note, setNote] = useState("");
+  const [copyState, setCopyState] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const assetReady = hasPassedAssetCheck(experiment) && Boolean(publishPackage?.asset_handoff.path);
+  const canSubmit = Boolean(
+    publishPackage
+      && activeAccount
+      && assetReady
+      && !hasRealEvidence
+      && !submitting
+      && (platformUrl.trim() || platformPostId.trim()),
+  );
+
+  useEffect(() => {
+    setActiveAccountId(selectedAccount?.id || "");
+  }, [selectedAccount?.id, experiment.experiment.id]);
+
+  useEffect(() => {
+    if (!activeAccountId) {
+      setPublishPackage(null);
+      setPackageError("缺少平台账号，无法生成发布准备包。");
+      return;
+    }
+    let alive = true;
+    setPackageLoading(true);
+    setPackageError(null);
+    void getPublishPackage(experiment.experiment.id, activeAccountId)
+      .then((response) => {
+        if (!alive) return;
+        setPublishPackage(response.package);
+      })
+      .catch((packageLoadError) => {
+        if (!alive) return;
+        setPublishPackage(null);
+        setPackageError(packageLoadError instanceof Error ? packageLoadError.message : "发布准备包读取失败。");
+      })
+      .finally(() => {
+        if (alive) setPackageLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [activeAccountId, experiment.experiment.id]);
+
+  async function copyPublishField(key: string, value: string) {
+    const copied = await copyText(value);
+    setCopyState(copied ? key : "error");
+    window.setTimeout(() => setCopyState(""), 1300);
   }
-  const isMock = Boolean(evidence.mock);
-  const postUrl = textValue(evidence.platform_url || evidence.url || evidence.post_url);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!publishPackage || !activeAccount || !canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+    setSuccess(false);
+    try {
+      await recordPublishEvidence(experiment.experiment.id, {
+        content_item_id: publishPackage.content_item_id,
+        channel_account_id: activeAccount.id,
+        package_id: publishPackage.id,
+        package_hash: publishPackage.package_hash,
+        asset_hash: publishPackage.asset_hash,
+        platform_url: platformUrl.trim() || null,
+        platform_post_id: platformPostId.trim() || null,
+        published_at: publishedAt || null,
+        screenshot_path: screenshotPath.trim() || null,
+        final_title: publishPackage.title,
+        final_body: publishPackage.body,
+        final_tags: publishPackage.tags,
+        note: note.trim() || null,
+      });
+      setSuccess(true);
+      setPlatformUrl("");
+      setPlatformPostId("");
+      setPublishedAt("");
+      setScreenshotPath("");
+      setNote("");
+      onPublishRecorded();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "发布证据登记失败。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (evidence) {
+    const isMock = Boolean(evidence.mock);
+    const postUrl = textValue(evidence.platform_url || evidence.url || evidence.post_url);
+    return (
+      <div className="step-detail publish-workspace">
+        <PublishFlow current="evidence" evidenceDone />
+        <StatusBanner
+          tone={isMock ? "warn" : "good"}
+          title={isMock ? "Mock 发布证据" : "真实发布证据已登记"}
+          body={isMock ? "这只验证闭环，不代表内容已经真实发到平台。" : "这条内容可以进入持续观测与复盘。"}
+        />
+        <MetricGrid
+          items={[
+            ["平台", textValue(evidence.platform || objectValue(publishEvent?.payload.publication)?.platform || selectedAccount?.platform)],
+            ["发布时间", formatDateTime(textValue(evidence.published_at))],
+            ["平台 post id", textValue(evidence.platform_post_id || evidence.post_id)],
+            ["Buffer id", textValue(evidence.buffer_post_id)],
+          ]}
+        />
+        {postUrl ? (
+          <a className="evidence-link" href={postUrl} rel="noreferrer" target="_blank">
+            打开发布链接
+          </a>
+        ) : null}
+        <InfoBlock title="说明" value={textValue(evidence.mock_label || evidence.note || evidence.reason)} />
+      </div>
+    );
+  }
+
   return (
-    <div className="step-detail">
+    <div className="step-detail publish-workspace">
+      <PublishFlow current="prepare" />
       <StatusBanner
-        tone={isMock ? "warn" : "good"}
-        title={isMock ? "Mock 发布证据" : "真实发布证据"}
-        body={isMock ? "这只验证闭环，不代表内容已经真实发到平台。" : "已有可追溯的平台发布证据。"}
+        tone="warn"
+        title="复制发布包不等于已发布"
+        body="只有手动发布后登记平台 URL 或 Post ID，才会进入持续观测与复盘。"
       />
+      {!assetReady ? (
+        <StatusBanner tone="warn" title="发布准备未就绪" body="需要先完成生成资产和 asset check，才应该去平台发布。" />
+      ) : null}
+      {!activeAccount ? (
+        <StatusBanner tone="warn" title="缺少平台账号" body="先在顶部选择平台账号；真实发布证据必须归属到一个账号。" />
+      ) : null}
+      {accounts.length > 1 ? (
+        <div className="publish-package-tabs" aria-label="发布包切换">
+          {accounts.map((account) => (
+            <button
+              className={account.id === activeAccountId ? "active" : ""}
+              key={account.id}
+              onClick={() => setActiveAccountId(account.id)}
+              type="button"
+            >
+              <strong>{account.platform}</strong>
+              <span>{account.account_name}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {packageLoading ? (
+        <div className="inline-empty">
+          <Loader2 className="spin" size={18} />
+          <strong>正在读取发布准备包</strong>
+          <span>发布字段、复制块和 checklist 来自 Publish Module。</span>
+        </div>
+      ) : null}
+      {packageError ? <EmptyDetail title="发布准备包不可用" body={packageError} /> : null}
+      {publishPackage ? (
+      <section className="publish-package">
+        <div className="publish-section-head">
+          <div>
+            <span>发布准备包</span>
+            <h3>{publishPackage.title || experiment.experiment.title}</h3>
+          </div>
+          <span className="status-pill partial">{publishPackage.status === "ready" ? "待手动发布" : "待补齐"}</span>
+        </div>
+        <PackageAssetPreview publishPackage={publishPackage} />
+        <div className="publish-copy-list">
+          {publishPackage.copy_blocks.map((block) => (
+            <PublishCopyRow
+              copied={copyState === block.key}
+              key={block.key}
+              label={block.label}
+              multiline={block.kind === "long_text"}
+              onCopy={() => void copyPublishField(block.key, block.value)}
+              primaryCopy={block.key === "full_package_markdown"}
+              value={block.value}
+            />
+          ))}
+        </div>
+        <PackageChecklist checklist={publishPackage.checklist} />
+      </section>
+      ) : null}
+      <form className="publish-evidence-form" onSubmit={submit}>
+        <div className="publish-section-head">
+          <div>
+            <span>登记真实发布证据</span>
+            <h3>发完后把平台 URL 或 Post ID 填在这里</h3>
+          </div>
+          <span className="status-pill missing">阻塞观测</span>
+        </div>
+        <div className="evidence-form-grid">
+          <label>
+            平台链接
+            <input
+              onChange={(event) => setPlatformUrl(event.target.value)}
+              placeholder="https://www.xiaohongshu.com/explore/..."
+              value={platformUrl}
+            />
+          </label>
+          <label>
+            平台 Post ID
+            <input onChange={(event) => setPlatformPostId(event.target.value)} placeholder="可选" value={platformPostId} />
+          </label>
+          <label>
+            发布时间
+            <input onChange={(event) => setPublishedAt(event.target.value)} type="datetime-local" value={publishedAt} />
+          </label>
+          <label>
+            截图路径
+            <input onChange={(event) => setScreenshotPath(event.target.value)} placeholder="可选，本地截图路径" value={screenshotPath} />
+          </label>
+          <label>
+            备注
+            <textarea onChange={(event) => setNote(event.target.value)} placeholder="可选，例如发布时做过的轻微标题调整。" value={note} />
+          </label>
+        </div>
+        <p className="field-help">登记后会写入真实 `publish_recorded` 事件，并把下一步推进到持续观测与复盘。</p>
+        {error ? <div className="form-message error">{error}</div> : null}
+        {success ? <div className="form-message success">真实发布证据已登记。</div> : null}
+        <button className="button primary" disabled={!canSubmit} type="submit">
+          {submitting ? <Loader2 className="spin" size={16} /> : <CheckCircle2 size={16} />}
+          {submitting ? "登记中" : "登记真实证据"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function PublishCopyRow({
+  label,
+  value,
+  copied,
+  multiline,
+  primaryCopy,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  copied: boolean;
+  multiline?: boolean;
+  primaryCopy?: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <div className={`publish-copy-row ${multiline ? "multiline" : ""}`}>
+      <span>{label}</span>
+      <strong>{value || "未记录"}</strong>
+      <button className="button quiet" disabled={!value} onClick={onCopy} type="button">
+        {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
+        {copied ? "已复制" : primaryCopy ? "复制完整发布包" : "复制"}
+      </button>
+    </div>
+  );
+}
+
+function PackageAssetPreview({ publishPackage }: { publishPackage: PublishPackage }) {
+  const handoff = publishPackage.asset_handoff;
+  const canPreview = handoff.media_type === "video" && handoff.asset_url && handoff.preview_available;
+  return (
+    <section className="package-asset">
+      <div className="publish-section-head">
+        <div>
+          <span>资产交付</span>
+          <h3>{handoff.file_name || "待发布资产"}</h3>
+        </div>
+        <span className="status-pill configured">{canPreview ? "可预览" : "路径交付"}</span>
+      </div>
+      {canPreview ? (
+        <div className="asset-preview">
+          <video controls playsInline preload="metadata" src={handoff.asset_url} />
+          <div>
+            <strong>{handoff.file_name || publishPackage.title}</strong>
+            <a href={handoff.asset_url} rel="noreferrer" target="_blank">
+              打开原视频
+            </a>
+          </div>
+        </div>
+      ) : (
+        <div className="asset-preview-empty">
+          <strong>当前资产不能直接预览</strong>
+          <span>{handoff.path || "发布包没有返回可交付资产路径。"}</span>
+        </div>
+      )}
       <MetricGrid
         items={[
-          ["平台", textValue(evidence.platform)],
-          ["发布时间", formatDateTime(textValue(evidence.published_at))],
-          ["平台 post id", textValue(evidence.platform_post_id || evidence.post_id)],
-          ["Buffer id", textValue(evidence.buffer_post_id)],
+          ["内容类型", publishPackage.content_type],
+          ["时长", secondsValue(handoff.duration)],
+          ["文件大小", fileSizeValue(handoff.file_size)],
+          ["asset hash", shortHash(textValue(handoff.asset_hash))],
         ]}
       />
-      {postUrl ? (
-        <a className="evidence-link" href={postUrl} rel="noreferrer" target="_blank">
-          打开发布链接
-        </a>
-      ) : null}
-      <InfoBlock title="说明" value={textValue(evidence.mock_label || evidence.note || evidence.reason)} />
+    </section>
+  );
+}
+
+function PackageChecklist({ checklist }: { checklist: PublishPackage["checklist"] }) {
+  return (
+    <section className="package-checklist">
+      <div className="publish-section-head">
+        <div>
+          <span>发布 checklist</span>
+          <h3>发布前人工核对</h3>
+        </div>
+      </div>
+      <div className="check-list">
+        {checklist.map((item) => (
+          <div className={item.status === "passed" ? "passed" : "failed"} key={item.key} title={item.detail}>
+            <span>{item.status === "passed" ? "通过" : item.status === "warning" ? "提醒" : "缺失"}</span>
+            <strong>{item.label}</strong>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PublishFlow({ current, evidenceDone }: { current: "prepare" | "evidence"; evidenceDone?: boolean }) {
+  const steps = [
+    ["复制发布包", "复制标题、文案和视频资产"],
+    ["手动发布", "到平台后台完成发布"],
+    ["登记真实证据", "回填 URL 或 Post ID"],
+  ];
+  return (
+    <div className="publish-flow">
+      {steps.map(([title, body], index) => {
+        const done = Boolean(evidenceDone);
+        const active = !evidenceDone && ((current === "prepare" && index === 0) || (current === "evidence" && index === 2));
+        return (
+          <div className={`publish-flow-step ${done ? "done" : ""} ${active ? "active" : ""}`} key={title}>
+            <span>{index + 1}</span>
+            <div>
+              <strong>{title}</strong>
+              <small>{body}</small>
+            </div>
+          </div>
+        );
+      })}
     </div>
+  );
+}
+
+function PublishInspector({
+  experiment,
+  selectedAccount,
+  nextAction,
+}: {
+  experiment: ExperimentView | null;
+  selectedAccount: ChannelAccount | null;
+  nextAction?: NextAction | null;
+}) {
+  const publishEvent = experiment ? latestEvent(experiment.events, "publish_recorded") : null;
+  const item = experiment ? previewContentItem(experiment) || experiment.content_item : null;
+  const assetReady = Boolean(experiment && hasPassedAssetCheck(experiment) && item);
+  return (
+    <>
+      <h3>发布判断</h3>
+      <div className={`inspect-row ${selectedAccount ? "good" : "warn"}`}>
+        <span>平台账号</span>
+        <strong>{selectedAccount ? `${selectedAccount.platform} / ${selectedAccount.account_name}` : "未选择"}</strong>
+      </div>
+      <div className={`inspect-row ${assetReady ? "good" : "warn"}`}>
+        <span>资产可交付</span>
+        <strong>{assetReady ? "可以，已通过 asset check" : "不可以，缺资产或检查未通过"}</strong>
+      </div>
+      <div className={`inspect-row ${publishEvent ? "good" : "warn"}`}>
+        <span>真实证据</span>
+        <strong>{publishEvent ? "已登记" : "缺 URL/Post ID，不能进入观测"}</strong>
+      </div>
+      <div className="inspect-row">
+        <span>下一步</span>
+        <strong>{publishEvent ? "持续观测并复盘" : nextActionLabel(nextAction)}</strong>
+      </div>
+      <div className={`inspect-row ${publishEvent ? "good" : "warn"}`}>
+        <span>阻塞观测</span>
+        <strong>{publishEvent ? "否" : "是"}</strong>
+      </div>
+      <div className="inspect-row warn">
+        <span>边界</span>
+        <strong>复制发布包不等于已发布</strong>
+      </div>
+    </>
   );
 }
 
@@ -1003,6 +1430,25 @@ function AssetPreview({ item }: { item: ContentItem | null }) {
       </div>
     </div>
   );
+}
+
+function hasPassedAssetCheck(experiment: ExperimentView): boolean {
+  const assetCheck = experiment.asset_check || latestEvent(experiment.events, "asset_checked");
+  return textValue(assetCheck?.payload.status) === "passed";
+}
+
+function approvedDraftTitle(experiment: ExperimentView): string {
+  const approval = latestEvent(experiment.events, "generation_draft_approved");
+  const approvedDraft = approval ? findEventById(experiment.events, textValue(approval.payload.draft_id)) : null;
+  const draft = approvedDraft || latestEvent(experiment.events, "generation_drafted");
+  return textValue(draft?.payload.title) || experiment.experiment.title;
+}
+
+function approvedDraftText(experiment: ExperimentView): string {
+  const approval = latestEvent(experiment.events, "generation_draft_approved");
+  const approvedDraft = approval ? findEventById(experiment.events, textValue(approval.payload.draft_id)) : null;
+  const draft = approvedDraft || latestEvent(experiment.events, "generation_drafted");
+  return textValue(draft?.payload.text);
 }
 
 function EmptyDetail({ title, body }: { title: string; body: string }) {

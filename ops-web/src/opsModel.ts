@@ -62,12 +62,12 @@ export const LOOP_STEPS: LoopStep[] = [
   },
   {
     key: "publish",
-    label: "发布并记录证据",
-    shortLabel: "发布证据",
-    body: "确认资产后登记真实或 mock 发布。",
+    label: "发布准备与证据",
+    shortLabel: "发布准备",
+    body: "准备发布包，发布后登记真实证据。",
     events: ["publish_recorded"],
     successText: "已有发布证据。",
-    missingText: "缺少发布证据。",
+    missingText: "发布包待使用，缺真实发布证据。",
   },
   {
     key: "retro",
@@ -93,7 +93,7 @@ export const NEXT_ACTION_LABELS: Record<string, string> = {
   check_generation_status: "检查生成状态",
   check_generation_asset: "检查生成资产",
   resolve_asset_issue: "处理生成资产问题",
-  record_publish: "登记发布证据",
+  record_publish: "准备发布并登记证据",
   record_metrics: "登记指标",
   write_retro: "写复盘",
   write_memory: "写入项目记忆",
@@ -253,7 +253,7 @@ export function buildCodexPrompt(args: {
 
 export function stageTitle(step: LoopStep, experiment: ExperimentView | null): string {
   if (!experiment) return "当前轮还没有内容实验";
-  if (step.key === "publish") return `《${experiment.experiment.title}》的发布证据`;
+  if (step.key === "publish") return `《${experiment.experiment.title}》的发布准备与证据`;
   if (step.key === "draft") return `《${experiment.experiment.title}》的待审草稿`;
   if (step.key === "review") return `《${experiment.experiment.title}》的文案审核`;
   if (step.key === "asset") return `《${experiment.experiment.title}》的内容资产`;
@@ -267,6 +267,9 @@ export function stageSummary(step: LoopStep, experiment: ExperimentView | null):
   if (hasStepRequiredEvidence(experiment, step)) return step.successText;
   if (step.key === "asset" && latestEvent(experiment.events, "generation_completed")) {
     return "视频资产已生成，但还缺少 asset check。";
+  }
+  if (step.key === "publish" && latestEvent(experiment.events, "asset_checked")) {
+    return "发布包可准备，缺真实发布证据。";
   }
   if (step.key === "retro" && latestEvent(experiment.events, "metrics_recorded")) {
     return "已有指标记录，但还缺少复盘或记忆写入。";
@@ -349,7 +352,18 @@ function publishRows(events: OpsEvent[]): DetailRow[] {
   const evidence = asObject(event.payload.evidence) || {};
   return [
     { label: "证据性质", value: evidence.mock ? "Mock 发布，只验证流程" : "真实发布证据", tone: evidence.mock ? "warn" : "good" },
-    { label: "平台链接", value: summarizeValue(evidence.url || evidence.post_url || evidence.post_id || evidence.external_id || "未记录") },
+    {
+      label: "平台链接",
+      value: summarizeValue(
+        evidence.platform_url
+          || evidence.url
+          || evidence.post_url
+          || evidence.platform_post_id
+          || evidence.post_id
+          || evidence.external_id
+          || "未记录",
+      ),
+    },
     { label: "说明", value: summarizeValue(evidence.mock_label || evidence.note || "已记录发布事件") },
   ];
 }

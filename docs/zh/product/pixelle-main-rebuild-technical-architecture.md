@@ -6,6 +6,9 @@
 关联文档：`docs/zh/product/pixelle-main-rebuild-prd.md`
 实施计划：`docs/zh/product/pixelle-main-rebuild-implementation-plan.md`
 P2 PRD：`docs/zh/product/pixelle-p2-cheat-on-content-prd.md`
+P3 发布模块 PRD：`docs/zh/product/pixelle-p3-publish-module-prd.md`
+P3 发布模块技术方案：`docs/zh/product/pixelle-p3-publish-module-technical-architecture.md`
+P3 发布准备 UI 设计：`docs/zh/product/pixelle-p3-publish-ui-design.md`
 
 ## 1. 架构目标
 
@@ -1286,18 +1289,28 @@ P2 是当前后续最高优先级。目标不是把 cheat workspace 迁入 Pixel
 
 详细产品边界见 `docs/zh/product/pixelle-p2-cheat-on-content-prd.md`。
 
-### P3：证据自动化
+### P3：独立发布模块
 
-只有在 P2 的 Codex + cheat 集成稳定后，再考虑真实外部数据自动化：
+只有在 P2 的 Codex + cheat 集成稳定后，再做发布模块。P3 的目标不是直接做全自动发布，也不是第一版做浏览器半自动发布，而是先把发布准备和发布证据从 Ops、Video 和旧 Buffer/COS 能力中拆成独立模块：
 
-1. 平台发布状态 readback。
-2. Buffer 发布状态回读。
-3. 小红书、抖音、YouTube 等平台指标适配。
-4. 定时观测任务。
-5. 更完整的多平台内容队列。
-6. 发布后指标和复盘的半自动写入。
+1. `PublishPackage`：已审核内容、资产、平台账号、发布字段、复制块和 checklist 的冻结契约。
+2. `PublishEvidence`：平台 URL、post id、API 响应、截图等可验证发布证据。
+3. `PlatformPayloadRenderer`：按平台和内容类型渲染标题、正文、标签、完整发布包和资产交付信息。
+4. `PublishAdapter`：后续再接小红书 browser assisted、YouTube API、Buffer API 等平台执行器。
 
-这些能力不应该抢在 P2 前做。否则系统只有更多数据入口，却没有稳定的方法论上下文和写回契约，容易再次变成大而散的后台。
+P3 第一优先级是 `prepare + manual evidence`：
+
+1. 创建不同平台、不同内容类型的发布准备包。
+2. 支持一键复制标题、正文、标签和完整发布包。
+3. 支持资产预览、下载或打开路径。
+4. 手动发布后登记真实证据，打通闭环。
+5. 浏览器辅助、官方 API 和全自动发布都后置。
+
+P3-A 的前端集成不新增顶级 `Publish` 导航，也不做独立发布中心。发布准备先嵌入 Ops 第 5 步“发布准备与证据”，UI 只消费 Publish Module 输出的 package、copy blocks、checklist 和 evidence 状态。底层 Publish Module 独立，前端入口可以先在 Ops 闭环里复用。
+
+详细产品边界见 `docs/zh/product/pixelle-p3-publish-module-prd.md`。
+详细技术方案见 `docs/zh/product/pixelle-p3-publish-module-technical-architecture.md`。
+详细 UI 边界见 `docs/zh/product/pixelle-p3-publish-ui-design.md`。
 
 ### P4：长期产品化学习层
 

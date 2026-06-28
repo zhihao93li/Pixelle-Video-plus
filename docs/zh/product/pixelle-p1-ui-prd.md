@@ -13,6 +13,7 @@
 5. `docs/zh/product/pixelle-p1-ui-information-architecture.md`
 6. `docs/zh/product/pixelle-p1-ops-loop-demo.html`
 7. `docs/zh/product/pixelle-p2-cheat-on-content-prd.md`
+8. `docs/zh/product/pixelle-p3-publish-ui-design.md`
 
 ## 1. 一句话目标
 
@@ -126,7 +127,7 @@ Ops 页面采用“地图 / 详情主体 / 条件式 Inspector / 原始证据”
 1. 工作面只展示当前步骤做判断必须看的字段；跨步骤状态归左侧闭环地图。
 2. 不在每个步骤重复展示“当前环节 / 证据状态 / 查看模式 / 闭环进度”等通用字段。
 3. 视频时长、pipeline、asset check 只在“生成并检查资产”步骤展示。
-4. 平台链接、post id、Buffer id 只在“发布并记录证据”步骤展示。
+4. 发布包、复制块、平台链接、post id、Buffer id 只在“发布准备与证据”步骤展示。
 5. 浏览、评论、收藏、完播、观测窗口只在“观测数据并复盘沉淀”步骤展示。
 6. 底部证据区只展示当前步骤原始记录，不作为第二套导航或第二个详情页。
 
@@ -340,6 +341,8 @@ Ops / Projects / Create / History / Settings / Help
 6. `Help`：后续可保留现有帮助入口。
 
 P1-A 不新增顶层 `Assets` 或 `Experiment Detail` 页面。实验详情和资产先折叠在 `Ops` 中展示；如果 P1-A 使用中证明需要独立页面，再进入 P1-B。
+
+P3-A 继续沿用这个导航判断：不新增顶层 `Publish` 页面。发布底层模块独立，但前端先嵌入 Ops 第 5 步“发布准备与证据”，展示 `PublishPackage`、copy blocks、资产交付、checklist 和手动证据登记。复制发布包不等于发布，只有真实或明确 mock 的 evidence 才能推进闭环。
 
 P1-A 不再把 Ops 嵌进 Streamlit。Streamlit 只保留视频生成工具台；Ops UI 放在 `ops-web/`，通过 API 读取 Pixelle Ops 状态。
 
