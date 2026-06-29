@@ -30,6 +30,10 @@ class VideoGenerateRequest(BaseModel):
         "generate",
         description="Processing mode: 'generate' (AI generates narrations) or 'fixed' (use text as-is)"
     )
+    split_mode: Literal["paragraph", "line", "sentence"] = Field(
+        "paragraph",
+        description="Script splitting mode used when mode is 'fixed'",
+    )
     
     # === Optional Title ===
     title: Optional[str] = Field(None, description="Video title (auto-generated if not provided)")

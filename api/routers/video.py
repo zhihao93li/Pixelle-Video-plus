@@ -21,13 +21,13 @@ import os
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
 
-from api.dependencies import PixelleVideoDep
+from api.dependencies import GenerationServiceDep, PixelleVideoDep
 from api.schemas.video import (
     VideoGenerateAsyncResponse,
     VideoGenerateRequest,
     VideoGenerateResponse,
 )
-from api.tasks import TaskType, task_manager
+from pixelle_video.generation import generation_request_from_legacy_video_request
 
 router = APIRouter(prefix="/video", tags=["Video Generation"])
 
@@ -123,6 +123,7 @@ async def generate_video_sync(
         video_params = {
             "text": request_body.text,
             "mode": request_body.mode,
+            "split_mode": request_body.split_mode,
             "title": request_body.title,
             "n_scenes": request_body.n_scenes,
             "min_narration_words": request_body.min_narration_words,
@@ -185,19 +186,18 @@ async def generate_video_sync(
 @router.post("/generate/async", response_model=VideoGenerateAsyncResponse)
 async def generate_video_async(
     request_body: VideoGenerateRequest,
-    pixelle_video: PixelleVideoDep,
-    request: Request
+    generation_service: GenerationServiceDep,
 ):
     """
     Generate video asynchronously
 
-    Creates a background task for video generation.
+    Creates a Generation Service task for video generation.
     Returns immediately with a task_id for tracking progress.
 
     **Workflow:**
     1. Submit video generation request
     2. Receive task_id in response
-    3. Poll `/api/tasks/{task_id}` to check status
+    3. Poll `/api/generation/tasks/{task_id}` to check status
     4. When status is "completed", retrieve video from result
 
     Request body includes all video generation parameters.
@@ -208,90 +208,8 @@ async def generate_video_async(
     try:
         logger.info(f"Async video generation: {request_body.text[:50]}...")
 
-        # Create task
-        task = task_manager.create_task(
-            task_type=TaskType.VIDEO_GENERATION,
-            request_params=request_body.model_dump()
-        )
-
-        # Define async execution function
-        async def execute_video_generation():
-            """Execute video generation in background"""
-            # Auto-determine media_width and media_height from template meta tags (required)
-            if not request_body.frame_template:
-                raise ValueError("frame_template is required to determine media size")
-
-            from pixelle_video.services.frame_html import HTMLFrameGenerator
-            from pixelle_video.utils.template_util import resolve_template_path
-            template_path = resolve_template_path(request_body.frame_template)
-            generator = HTMLFrameGenerator(template_path)
-            media_width, media_height = generator.get_media_size()
-            logger.debug(f"Auto-determined media size from template: {media_width}x{media_height}")
-
-            # Build video generation parameters
-            video_params = {
-                "text": request_body.text,
-                "mode": request_body.mode,
-                "title": request_body.title,
-                "n_scenes": request_body.n_scenes,
-                "min_narration_words": request_body.min_narration_words,
-                "max_narration_words": request_body.max_narration_words,
-                "min_image_prompt_words": request_body.min_image_prompt_words,
-                "max_image_prompt_words": request_body.max_image_prompt_words,
-                "media_width": media_width,
-                "media_height": media_height,
-                "media_workflow": request_body.media_workflow,
-                "video_fps": request_body.video_fps,
-                "frame_template": request_body.frame_template,
-                "prompt_prefix": request_body.prompt_prefix,
-                "image_prompt_visual_context": request_body.image_prompt_visual_context,
-                "image_prompt_generation_rules": request_body.image_prompt_generation_rules,
-                "bgm_path": request_body.bgm_path,
-                "bgm_volume": request_body.bgm_volume,
-                # Progress callback can be added here if needed
-                # "progress_callback": lambda event: task_manager.update_progress(...)
-            }
-
-            if request_body.tts_inference_mode:
-                video_params["tts_inference_mode"] = request_body.tts_inference_mode
-
-            if request_body.tts_speed is not None:
-                video_params["tts_speed"] = request_body.tts_speed
-
-            # Add TTS workflow if specified
-            if request_body.tts_workflow:
-                video_params["tts_workflow"] = request_body.tts_workflow
-
-            # Add ref_audio if specified
-            if request_body.ref_audio:
-                video_params["ref_audio"] = request_body.ref_audio
-
-            if request_body.voice_id:
-                video_params["voice_id"] = request_body.voice_id
-
-            # Add custom template parameters if specified
-            if request_body.template_params:
-                video_params["template_params"] = request_body.template_params
-
-            result = await pixelle_video.generate_video(**video_params)
-
-            # Get file size
-            file_size = os.path.getsize(result.video_path) if os.path.exists(result.video_path) else 0
-
-            # Convert path to URL
-            video_url = path_to_url(request, result.video_path)
-
-            return {
-                "video_url": video_url,
-                "duration": result.duration,
-                "file_size": file_size
-            }
-
-        # Start execution
-        await task_manager.execute_task(
-            task_id=task.task_id,
-            coro_func=execute_video_generation
-        )
+        generation_request = generation_request_from_legacy_video_request(request_body)
+        task = generation_service.submit(generation_request)
 
         return VideoGenerateAsyncResponse(
             task_id=task.task_id

@@ -1,8 +1,21 @@
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EntryId = Literal["topic", "script", "scenes", "assets", "audio", "video"]
+GenerationStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
+GenerationErrorLayer = Literal[
+    "input",
+    "config",
+    "credentials",
+    "network",
+    "api_contract",
+    "permissions",
+    "persistence",
+    "runtime",
+    "product_assumption",
+]
 
 
 class InputFieldSpec(BaseModel):
@@ -73,3 +86,75 @@ class PipelineManifest(BaseModel):
             if entry.id == entry_id:
                 return entry
         raise KeyError(f"Pipeline {self.id!r} does not support entry {entry_id!r}")
+
+
+class GenerationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pipeline_id: str
+    entry: EntryId
+    input: dict[str, Any]
+    params: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str | None = None
+
+
+class GenerationProgress(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stage: str
+    percentage: float = 0.0
+    message: str = ""
+    current: int | None = None
+    total: int | None = None
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class GenerationArtifact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["video", "audio", "image", "storyboard", "subtitle", "metadata"]
+    path: str
+    url: str | None = None
+    media_type: str | None = None
+    role: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GenerationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    pipeline_id: str
+    entry: EntryId
+    status: Literal["completed"] = "completed"
+    artifacts: list[GenerationArtifact]
+    primary_video: GenerationArtifact
+    duration: float | None = None
+    file_size: int | None = None
+    storyboard_path: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GenerationError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    layer: GenerationErrorLayer
+    message: str
+    exception_type: str | None = None
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class GenerationTask(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    pipeline_id: str
+    entry: EntryId
+    status: GenerationStatus = "pending"
+    progress: GenerationProgress
+    request: GenerationRequest
+    result: GenerationResult | None = None
+    error: GenerationError | None = None
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)

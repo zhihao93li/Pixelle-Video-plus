@@ -17,14 +17,16 @@ Provides dependency injection for PixelleVideoCore and other services.
 """
 
 from typing import Annotated
+
 from fastapi import Depends
 from loguru import logger
 
+from pixelle_video.generation import GenerationService
 from pixelle_video.service import PixelleVideoCore
-
 
 # Global Pixelle-Video instance
 _pixelle_video_instance: PixelleVideoCore = None
+_generation_service_instance: GenerationService = None
 
 
 async def get_pixelle_video() -> PixelleVideoCore:
@@ -47,6 +49,12 @@ async def get_pixelle_video() -> PixelleVideoCore:
 async def shutdown_pixelle_video():
     """Shutdown Pixelle-Video instance and cleanup resources"""
     global _pixelle_video_instance
+    global _generation_service_instance
+    if _generation_service_instance:
+        logger.info("Shutting down Generation Service...")
+        await _generation_service_instance.shutdown()
+        _generation_service_instance = None
+
     if _pixelle_video_instance:
         logger.info("Shutting down Pixelle-Video...")
         await _pixelle_video_instance.cleanup()
@@ -56,6 +64,21 @@ async def shutdown_pixelle_video():
     await HTMLFrameGenerator.close_browser()
 
 
+async def get_generation_service(
+    pixelle_video: Annotated[PixelleVideoCore, Depends(get_pixelle_video)],
+) -> GenerationService:
+    """Get GenerationService instance bound to the current PixelleVideoCore."""
+    global _generation_service_instance
+
+    if _generation_service_instance is None:
+        _generation_service_instance = GenerationService(
+            pipeline_registry=pixelle_video.pipeline_registry,
+        )
+        logger.info("✅ Generation Service initialized for API")
+
+    return _generation_service_instance
+
+
 # Type alias for dependency injection
 PixelleVideoDep = Annotated[PixelleVideoCore, Depends(get_pixelle_video)]
-
+GenerationServiceDep = Annotated[GenerationService, Depends(get_generation_service)]
