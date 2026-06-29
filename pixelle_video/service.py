@@ -24,6 +24,8 @@ from comfykit import ComfyKit
 from loguru import logger
 
 from pixelle_video.config import config_manager
+from pixelle_video.generation import PipelineRegistry, build_pipeline_registry
+from pixelle_video.generation.defaults import build_default_pipeline_manifests
 from pixelle_video.pipelines.asset_based import AssetBasedPipeline
 from pixelle_video.pipelines.custom import CustomPipeline
 from pixelle_video.pipelines.standard import StandardPipeline
@@ -99,6 +101,7 @@ class PixelleVideoCore:
         
         # Video generation pipelines (dictionary of pipeline_name -> pipeline_instance)
         self.pipelines = {}
+        self.pipeline_registry = PipelineRegistry()
         
         # Default pipeline callable (for backward compatibility)
         self.generate_video = None
@@ -217,6 +220,10 @@ class PixelleVideoCore:
             "custom": CustomPipeline(self),
             "asset_based": AssetBasedPipeline(self),
         }
+        self.pipeline_registry = build_pipeline_registry(
+            build_default_pipeline_manifests(),
+            pipelines=self.pipelines,
+        )
         logger.info(f"📹 Registered pipelines: {', '.join(self.pipelines.keys())}")
         
         # 3. Set default pipeline callable (for backward compatibility)
