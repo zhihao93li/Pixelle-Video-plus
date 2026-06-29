@@ -28,8 +28,13 @@ class GenerationService:
         self._tasks: dict[str, GenerationTask] = {}
         self._futures: dict[str, asyncio.Task] = {}
         self._idempotency_index: dict[str, str] = {}
+        self._progress_callbacks: dict[str, Callable[[GenerationTask], None]] = {}
 
-    def submit(self, request: GenerationRequest) -> GenerationTask:
+    def submit(
+        self,
+        request: GenerationRequest,
+        progress_callback: Callable[[GenerationTask], None] | None = None,
+    ) -> GenerationTask:
         if request.idempotency_key and request.idempotency_key in self._idempotency_index:
             return self.get_task(self._idempotency_index[request.idempotency_key])
 
@@ -48,6 +53,8 @@ class GenerationService:
 
         if request.idempotency_key:
             self._idempotency_index[request.idempotency_key] = task_id
+        if progress_callback:
+            self._progress_callbacks[task_id] = progress_callback
 
         self._futures[task_id] = asyncio.create_task(self._run_task(task_id))
         return task
@@ -120,6 +127,7 @@ class GenerationService:
         task = self.get_task(task_id)
         task.status = "running"
         task.updated_at = datetime.now()
+        self._notify_progress(task)
 
         try:
             pipeline = self.pipeline_registry.get_pipeline(task.pipeline_id)
@@ -132,14 +140,17 @@ class GenerationService:
             if task.progress.percentage < 100.0:
                 task.progress = GenerationProgress(stage="completed", percentage=100.0)
             task.updated_at = datetime.now()
+            self._notify_progress(task)
 
         except asyncio.CancelledError:
             task.status = "cancelled"
             task.updated_at = datetime.now()
+            self._notify_progress(task)
         except Exception as exc:
             task.status = "failed"
             task.error = self._to_generation_error(exc)
             task.updated_at = datetime.now()
+            self._notify_progress(task)
 
     def _build_pipeline_kwargs(self, request: GenerationRequest) -> dict:
         params = dict(request.params)
@@ -187,6 +198,12 @@ class GenerationService:
             detail=detail,
         )
         task.updated_at = datetime.now()
+        self._notify_progress(task)
+
+    def _notify_progress(self, task: GenerationTask) -> None:
+        callback = self._progress_callbacks.get(task.task_id)
+        if callback:
+            callback(task)
 
     def _to_generation_result(self, task: GenerationTask, pipeline_result) -> GenerationResult:
         video_path = self._get_result_value(pipeline_result, "video_path")

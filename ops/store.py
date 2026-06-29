@@ -1,0 +1,696 @@
+"""SQLite persistence for the minimal Pixelle operations loop."""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from ops.models import ExperimentStage
+
+DEFAULT_DB_PATH = Path("data/ops.db")
+
+
+def default_db_path() -> Path:
+    return Path(os.environ.get("PIXELLE_OPS_DB_PATH", DEFAULT_DB_PATH))
+
+
+class OpsStore:
+    def __init__(self, db_path: str | Path | None = None):
+        self.db_path = Path(db_path) if db_path is not None else default_db_path()
+
+    def init_db(self) -> None:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS operating_projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    product TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    description TEXT,
+                    source_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS operation_cycles (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    goal TEXT NOT NULL,
+                    starts_on TEXT,
+                    ends_on TEXT,
+                    source_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(project_id) REFERENCES operating_projects(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS channel_accounts (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    account_name TEXT NOT NULL,
+                    account_handle TEXT,
+                    external_account_id TEXT,
+                    status TEXT NOT NULL,
+                    credential_ref_json TEXT NOT NULL,
+                    source_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(project_id) REFERENCES operating_projects(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS project_cheat_workspaces (
+                    project_id TEXT PRIMARY KEY,
+                    workspace_path TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    state_schema_version TEXT,
+                    health_issues_json TEXT NOT NULL,
+                    source_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(project_id) REFERENCES operating_projects(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS content_experiments (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    cycle_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    hypothesis TEXT NOT NULL,
+                    stage TEXT NOT NULL,
+                    source_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(project_id) REFERENCES operating_projects(id),
+                    FOREIGN KEY(cycle_id) REFERENCES operation_cycles(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS content_items (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    cycle_id TEXT NOT NULL,
+                    experiment_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    asset_ref_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(project_id) REFERENCES operating_projects(id),
+                    FOREIGN KEY(cycle_id) REFERENCES operation_cycles(id),
+                    FOREIGN KEY(experiment_id) REFERENCES content_experiments(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS ops_events (
+                    id TEXT PRIMARY KEY,
+                    operating_project_id TEXT NOT NULL,
+                    operation_cycle_id TEXT NOT NULL,
+                    content_experiment_id TEXT NOT NULL,
+                    content_item_id TEXT,
+                    event_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    source_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(operating_project_id) REFERENCES operating_projects(id),
+                    FOREIGN KEY(operation_cycle_id) REFERENCES operation_cycles(id),
+                    FOREIGN KEY(content_experiment_id) REFERENCES content_experiments(id),
+                    FOREIGN KEY(content_item_id) REFERENCES content_items(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS codex_writeback_drafts (
+                    id TEXT PRIMARY KEY,
+                    operation TEXT NOT NULL,
+                    target_json TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    validation_result_json TEXT NOT NULL,
+                    applied_result_json TEXT NOT NULL,
+                    source_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                """
+            )
+            self._migrate_legacy_social_accounts(conn)
+
+    def create_project(
+        self,
+        *,
+        name: str,
+        product: str,
+        channel: str,
+        source: dict[str, Any],
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        row = {
+            "id": _new_id("op"),
+            "name": name,
+            "product": product,
+            "channel": channel,
+            "description": description,
+            "source_json": _to_json(source),
+            "created_at": _now(),
+        }
+        self._insert("operating_projects", row)
+        return _decode(row)
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM operating_projects
+                ORDER BY created_at ASC, id ASC
+                """
+            ).fetchall()
+        return [_decode(dict(row)) for row in rows]
+
+    def create_channel_account(
+        self,
+        *,
+        project_id: str,
+        platform: str,
+        account_name: str,
+        source: dict[str, Any],
+        account_handle: str | None = None,
+        external_account_id: str | None = None,
+        status: str = "configured",
+        credential_ref: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        row = {
+            "id": _new_id("acct"),
+            "project_id": project_id,
+            "platform": platform,
+            "account_name": account_name,
+            "account_handle": account_handle,
+            "external_account_id": external_account_id,
+            "status": status,
+            "credential_ref_json": _to_json(credential_ref or {}),
+            "source_json": _to_json(source),
+            "created_at": _now(),
+        }
+        self._insert("channel_accounts", row)
+        return _decode(row)
+
+    def create_social_account(self, **kwargs: Any) -> dict[str, Any]:
+        return self.create_channel_account(**kwargs)
+
+    def update_channel_account(
+        self,
+        *,
+        channel_account_id: str,
+        platform: str,
+        account_name: str,
+        source: dict[str, Any],
+        account_handle: str | None = None,
+        external_account_id: str | None = None,
+        status: str = "configured",
+        credential_ref: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE channel_accounts
+                SET
+                    platform = ?,
+                    account_name = ?,
+                    account_handle = ?,
+                    external_account_id = ?,
+                    status = ?,
+                    credential_ref_json = ?,
+                    source_json = ?
+                WHERE id = ?
+                """,
+                (
+                    platform,
+                    account_name,
+                    account_handle,
+                    external_account_id,
+                    status,
+                    _to_json(credential_ref or {}),
+                    _to_json(source),
+                    channel_account_id,
+                ),
+            )
+        return self.get_channel_account(channel_account_id)
+
+    def list_channel_accounts(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        sql = """
+            SELECT * FROM channel_accounts
+            ORDER BY created_at ASC, id ASC
+        """
+        params: tuple[Any, ...] = ()
+        if project_id:
+            sql = """
+                SELECT * FROM channel_accounts
+                WHERE project_id = ?
+                ORDER BY created_at ASC, id ASC
+            """
+            params = (project_id,)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_decode(dict(row)) for row in rows]
+
+    def list_social_accounts(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        return self.list_channel_accounts(project_id=project_id)
+
+    def upsert_project_cheat_workspace(
+        self,
+        *,
+        project_id: str,
+        workspace_path: str,
+        status: str,
+        state_schema_version: str | None,
+        health_issues: list[dict[str, Any]],
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT created_at FROM project_cheat_workspaces WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+            conn.execute(
+                """
+                INSERT INTO project_cheat_workspaces (
+                    project_id,
+                    workspace_path,
+                    status,
+                    state_schema_version,
+                    health_issues_json,
+                    source_json,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id) DO UPDATE SET
+                    workspace_path = excluded.workspace_path,
+                    status = excluded.status,
+                    state_schema_version = excluded.state_schema_version,
+                    health_issues_json = excluded.health_issues_json,
+                    source_json = excluded.source_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    project_id,
+                    workspace_path,
+                    status,
+                    state_schema_version,
+                    _to_json_list(health_issues),
+                    _to_json(source),
+                    existing["created_at"] if existing else now,
+                    now,
+                ),
+            )
+        binding = self.get_project_cheat_workspace(project_id)
+        if binding is None:
+            raise RuntimeError("project cheat workspace upsert failed")
+        return binding
+
+    def get_project_cheat_workspace(self, project_id: str) -> dict[str, Any] | None:
+        return self._fetch_one(
+            "SELECT * FROM project_cheat_workspaces WHERE project_id = ?",
+            (project_id,),
+        )
+
+    def create_writeback_draft(
+        self,
+        *,
+        operation: str,
+        target: dict[str, Any],
+        payload: dict[str, Any],
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        row = {
+            "id": _new_id("draft"),
+            "operation": operation,
+            "target_json": _to_json(target),
+            "payload_json": _to_json(payload),
+            "status": "draft_created",
+            "validation_result_json": _to_json({}),
+            "applied_result_json": _to_json({}),
+            "source_json": _to_json(source),
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._insert("codex_writeback_drafts", row)
+        return _decode(row)
+
+    def get_writeback_draft(self, draft_id: str) -> dict[str, Any] | None:
+        return self._fetch_one("SELECT * FROM codex_writeback_drafts WHERE id = ?", (draft_id,))
+
+    def list_writeback_drafts(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM codex_writeback_drafts
+                ORDER BY created_at DESC, id DESC
+                """
+            ).fetchall()
+        return [_decode(dict(row)) for row in rows]
+
+    def update_writeback_draft(
+        self,
+        *,
+        draft_id: str,
+        status: str,
+        validation_result: dict[str, Any] | None = None,
+        applied_result: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        existing = self.get_writeback_draft(draft_id)
+        if existing is None:
+            return None
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE codex_writeback_drafts
+                SET
+                    status = ?,
+                    validation_result_json = ?,
+                    applied_result_json = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    _to_json(validation_result if validation_result is not None else existing["validation_result"]),
+                    _to_json(applied_result if applied_result is not None else existing["applied_result"]),
+                    _now(),
+                    draft_id,
+                ),
+            )
+        return self.get_writeback_draft(draft_id)
+
+    def create_cycle(
+        self,
+        *,
+        project_id: str,
+        name: str,
+        goal: str,
+        source: dict[str, Any],
+        starts_on: str | None = None,
+        ends_on: str | None = None,
+    ) -> dict[str, Any]:
+        row = {
+            "id": _new_id("cyc"),
+            "project_id": project_id,
+            "name": name,
+            "goal": goal,
+            "starts_on": starts_on,
+            "ends_on": ends_on,
+            "source_json": _to_json(source),
+            "created_at": _now(),
+        }
+        self._insert("operation_cycles", row)
+        return _decode(row)
+
+    def create_experiment(
+        self,
+        *,
+        project_id: str,
+        cycle_id: str,
+        title: str,
+        hypothesis: str,
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        row = {
+            "id": _new_id("exp"),
+            "project_id": project_id,
+            "cycle_id": cycle_id,
+            "title": title,
+            "hypothesis": hypothesis,
+            "stage": ExperimentStage.DRAFT.value,
+            "source_json": _to_json(source),
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._insert("content_experiments", row)
+        return _decode(row)
+
+    def create_content_item(
+        self,
+        *,
+        project_id: str,
+        cycle_id: str,
+        experiment_id: str,
+        kind: str,
+        title: str,
+        status: str,
+        asset_ref: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        row = {
+            "id": _new_id("item"),
+            "project_id": project_id,
+            "cycle_id": cycle_id,
+            "experiment_id": experiment_id,
+            "kind": kind,
+            "title": title,
+            "status": status,
+            "asset_ref_json": _to_json(asset_ref or {}),
+            "created_at": _now(),
+        }
+        self._insert("content_items", row)
+        return _decode(row)
+
+    def append_event(
+        self,
+        *,
+        project_id: str,
+        cycle_id: str,
+        experiment_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        source: dict[str, Any],
+        content_item_id: str | None = None,
+    ) -> dict[str, Any]:
+        row = {
+            "id": _new_id("evt"),
+            "operating_project_id": project_id,
+            "operation_cycle_id": cycle_id,
+            "content_experiment_id": experiment_id,
+            "content_item_id": content_item_id,
+            "event_type": event_type,
+            "payload_json": _to_json(payload),
+            "source_json": _to_json(source),
+            "created_at": _now(),
+        }
+        self._insert("ops_events", row)
+        return _decode(row)
+
+    def update_experiment_stage(self, experiment_id: str, stage: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE content_experiments SET stage = ?, updated_at = ? WHERE id = ?",
+                (stage, _now(), experiment_id),
+            )
+
+    def get_project(self, project_id: str) -> dict[str, Any] | None:
+        return self._fetch_one("SELECT * FROM operating_projects WHERE id = ?", (project_id,))
+
+    def get_channel_account(self, channel_account_id: str) -> dict[str, Any] | None:
+        return self._fetch_one("SELECT * FROM channel_accounts WHERE id = ?", (channel_account_id,))
+
+    def get_social_account(self, account_id: str) -> dict[str, Any] | None:
+        return self.get_channel_account(account_id)
+
+    def get_cycle(self, cycle_id: str) -> dict[str, Any] | None:
+        return self._fetch_one("SELECT * FROM operation_cycles WHERE id = ?", (cycle_id,))
+
+    def get_experiment(self, experiment_id: str) -> dict[str, Any] | None:
+        return self._fetch_one("SELECT * FROM content_experiments WHERE id = ?", (experiment_id,))
+
+    def list_cycles_for_project(self, project_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM operation_cycles
+                WHERE project_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (project_id,),
+            ).fetchall()
+        return [_decode(dict(row)) for row in rows]
+
+    def list_experiments_for_cycle(self, cycle_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM content_experiments
+                WHERE cycle_id = ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (cycle_id,),
+            ).fetchall()
+        return [_decode(dict(row)) for row in rows]
+
+    def list_events_for_experiment(self, experiment_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM ops_events
+                WHERE content_experiment_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (experiment_id,),
+            ).fetchall()
+        return [_decode(dict(row)) for row in rows]
+
+    def list_content_items_for_experiment(self, experiment_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM content_items
+                WHERE experiment_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (experiment_id,),
+            ).fetchall()
+        return [_decode(dict(row)) for row in rows]
+
+    def get_current_view(
+        self,
+        *,
+        project_id: str | None = None,
+        channel_account_id: str | None = None,
+        account_id: str | None = None,
+    ) -> dict[str, Any]:
+        effective_account_id = channel_account_id or account_id
+        account = self.get_channel_account(effective_account_id) if effective_account_id else None
+        effective_project_id = account["project_id"] if account else project_id
+        if effective_project_id:
+            project = self.get_project(effective_project_id)
+            selection = "explicit_channel_account" if account else "explicit_project"
+        else:
+            project = self._fetch_one(
+                "SELECT * FROM operating_projects ORDER BY created_at DESC, id DESC LIMIT 1"
+            )
+            selection = "latest_project" if project else "empty"
+        cycle = None
+        experiment = None
+        events: list[dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
+        channel_accounts: list[dict[str, Any]] = []
+        if project:
+            channel_accounts = self.list_channel_accounts(project_id=project["id"])
+            if not account and len(channel_accounts) == 1:
+                account = channel_accounts[0]
+                selection = "implicit_single_channel_account"
+            cycle = self._fetch_one(
+                """
+                SELECT * FROM operation_cycles
+                WHERE project_id = ?
+                ORDER BY created_at DESC, id DESC LIMIT 1
+                """,
+                (project["id"],),
+            )
+        if cycle:
+            experiment = self._fetch_one(
+                """
+                SELECT * FROM content_experiments
+                WHERE cycle_id = ?
+                ORDER BY created_at DESC, id DESC LIMIT 1
+                """,
+                (cycle["id"],),
+            )
+        if experiment:
+            events = self.list_events_for_experiment(experiment["id"])
+            items = self.list_content_items_for_experiment(experiment["id"])
+        return {
+            "project": project,
+            "cycle": cycle,
+            "experiment": experiment,
+            "content_items": items,
+            "events": events,
+            "channel_accounts": channel_accounts,
+            "selected_channel_account": account,
+            "social_accounts": channel_accounts,
+            "selected_social_account": account,
+            "context": {
+                "project_id": project["id"] if project else None,
+                "channel_account_id": account["id"] if account else effective_account_id,
+                "account_id": account["id"] if account else account_id,
+                "selection": selection,
+            },
+        }
+
+    def _migrate_legacy_social_accounts(self, conn: sqlite3.Connection) -> None:
+        legacy = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'social_accounts'"
+        ).fetchone()
+        if not legacy:
+            return
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO channel_accounts (
+                id,
+                project_id,
+                platform,
+                account_name,
+                account_handle,
+                external_account_id,
+                status,
+                credential_ref_json,
+                source_json,
+                created_at
+            )
+            SELECT
+                id,
+                project_id,
+                platform,
+                account_name,
+                account_handle,
+                external_account_id,
+                status,
+                credential_ref_json,
+                source_json,
+                created_at
+            FROM social_accounts
+            """
+        )
+
+    def _fetch_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(sql, params).fetchone()
+        return _decode(dict(row)) if row else None
+
+    def _insert(self, table: str, row: dict[str, Any]) -> None:
+        columns = ", ".join(row)
+        values = ", ".join(f":{column}" for column in row)
+        with self._connect() as conn:
+            conn.execute(f"INSERT INTO {table} ({columns}) VALUES ({values})", row)
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+
+def _new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _to_json(value: dict[str, Any]) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _to_json_list(value: list[dict[str, Any]]) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _decode(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    for key in list(decoded):
+        if key.endswith("_json"):
+            default_value = "[]" if key == "health_issues_json" else "{}"
+            decoded[key.removesuffix("_json")] = json.loads(decoded.pop(key) or default_value)
+    return decoded

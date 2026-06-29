@@ -23,6 +23,7 @@ from pixelle_video.config import config_manager
 from pixelle_video.models.progress import ProgressEvent
 from web.i18n import get_language, tr
 from web.utils.async_helpers import run_async
+from web.utils.generation_tasks import submit_video_params_as_generation_task
 
 
 def render_output_preview(pixelle_video, video_params):
@@ -39,7 +40,7 @@ def render_output_preview(pixelle_video, video_params):
 
 
 def render_single_output(pixelle_video, video_params):
-    """Render single video generation output (original logic, unchanged)"""
+    """Render single video generation output."""
     # Extract parameters from video_params dict
     text = video_params.get("text", "")
     mode = video_params.get("mode", "generate")
@@ -68,6 +69,37 @@ def render_single_output(pixelle_video, video_params):
         # Check if system is configured
         if not config_manager.validate():
             st.warning(tr("settings.not_configured"))
+
+        selected_pipeline_id = "standard"
+        selected_entry_id = "topic" if mode == "generate" else "script"
+        pipeline_registry = getattr(pixelle_video, "pipeline_registry", None)
+        if pipeline_registry:
+            manifests = pipeline_registry.list_manifests()
+            if manifests:
+                manifest_by_id = {manifest.id: manifest for manifest in manifests}
+                pipeline_ids = list(manifest_by_id.keys())
+                selected_pipeline_id = st.selectbox(
+                    "Pipeline",
+                    pipeline_ids,
+                    index=pipeline_ids.index("standard") if "standard" in pipeline_ids else 0,
+                    format_func=lambda pipeline_id: manifest_by_id[pipeline_id].name,
+                    key="generation_pipeline_select",
+                )
+                selected_manifest = manifest_by_id[selected_pipeline_id]
+                entry_ids = [entry.id for entry in selected_manifest.entries]
+                preferred_entry = "topic" if mode == "generate" else "script"
+                if preferred_entry not in entry_ids:
+                    preferred_entry = selected_manifest.default_entry or entry_ids[0]
+                selected_entry_id = st.selectbox(
+                    "Entry",
+                    entry_ids,
+                    index=entry_ids.index(preferred_entry),
+                    format_func=lambda entry_id: selected_manifest.entry(entry_id).name,
+                    key=f"generation_entry_select_{selected_pipeline_id}",
+                )
+                entry_spec = selected_manifest.entry(selected_entry_id)
+                required_fields = ", ".join(field.name for field in entry_spec.required_fields)
+                st.caption(f"{selected_manifest.description} Required: {required_fields}")
         
         # Generate Button
         if st.button(tr("btn.generate"), type="primary", use_container_width=True):
@@ -90,42 +122,15 @@ def render_single_output(pixelle_video, video_params):
             start_time = time.time()
             
             try:
-                # Progress callback to update UI
-                def update_progress(event: ProgressEvent):
-                    """Update progress bar and status text from ProgressEvent"""
-                    # Translate event to user-facing message
-                    if event.event_type == "frame_step":
-                        # Frame step: "分镜 3/5 - 步骤 2/4: 生成插图"
-                        action_key = f"progress.step_{event.action}"
-                        action_text = tr(action_key)
-                        message = tr(
-                            "progress.frame_step",
-                            current=event.frame_current,
-                            total=event.frame_total,
-                            step=event.step,
-                            action=action_text
-                        )
-                    elif event.event_type == "processing_frame":
-                        # Processing frame: "分镜 3/5"
-                        message = tr(
-                            "progress.frame",
-                            current=event.frame_current,
-                            total=event.frame_total
-                        )
-                    else:
-                        # Simple events: use i18n key directly
-                        message = tr(f"progress.{event.event_type}")
-                    
-                    # Append extra_info if available (e.g., batch progress)
-                    if event.extra_info:
-                        message = f"{message} - {event.extra_info}"
-                    
+                def update_progress(task):
+                    progress = task.progress
+                    message = progress.message or progress.stage or task.status
+                    if progress.current is not None and progress.total is not None:
+                        message = f"{message} ({progress.current}/{progress.total})"
                     status_text.text(message)
-                    progress_bar.progress(min(int(event.progress * 100), 99))  # Cap at 99% until complete
+                    progress_bar.progress(min(int(progress.percentage), 99))
                 
-                # Generate video (directly pass parameters)
-                # Note: media_width and media_height are auto-determined from template
-                video_params = {
+                generation_params = {
                     "text": text,
                     "mode": mode,
                     "title": title if title else None,
@@ -138,30 +143,45 @@ def render_single_output(pixelle_video, video_params):
                     "image_prompt_generation_rules": image_prompt_generation_rules,
                     "bgm_path": bgm_path,
                     "bgm_volume": bgm_volume if bgm_path else 0.2,
-                    "progress_callback": update_progress,
                     "media_width": st.session_state.get('template_media_width'),
                     "media_height": st.session_state.get('template_media_height'),
                 }
                 
                 # Add TTS parameters based on mode
-                video_params["tts_inference_mode"] = tts_mode
+                generation_params["tts_inference_mode"] = tts_mode
                 if tts_mode == "local":
-                    video_params["tts_voice"] = selected_voice
-                    video_params["tts_speed"] = tts_speed
+                    generation_params["tts_voice"] = selected_voice
+                    generation_params["tts_speed"] = tts_speed
                 elif tts_mode == "fish":
                     if selected_voice:
-                        video_params["tts_voice"] = selected_voice
-                    video_params["tts_speed"] = tts_speed
+                        generation_params["tts_voice"] = selected_voice
+                    generation_params["tts_speed"] = tts_speed
                 else:  # comfyui
-                    video_params["tts_workflow"] = tts_workflow_key
+                    generation_params["tts_workflow"] = tts_workflow_key
                     if ref_audio_path:
-                        video_params["ref_audio"] = str(ref_audio_path)
+                        generation_params["ref_audio"] = str(ref_audio_path)
                 
                 # Add custom template parameters if any
                 if custom_values_for_video:
-                    video_params["template_params"] = custom_values_for_video
+                    generation_params["template_params"] = custom_values_for_video
                 
-                result = run_async(pixelle_video.generate_video(**video_params))
+                task = run_async(
+                    submit_video_params_as_generation_task(
+                        pixelle_video=pixelle_video,
+                        video_params=generation_params,
+                        pipeline_id=selected_pipeline_id,
+                        entry_id=selected_entry_id,
+                        progress_callback=update_progress,
+                    )
+                )
+                if task.status == "failed":
+                    error_message = task.error.message if task.error else "Generation failed"
+                    raise RuntimeError(error_message)
+                if task.result is None:
+                    raise RuntimeError(f"Generation task {task.task_id} finished without a result")
+
+                result = task.result
+                video_path = result.primary_video.path
                 
                 # Calculate total generation time
                 total_generation_time = time.time() - start_time
@@ -170,25 +190,25 @@ def render_single_output(pixelle_video, video_params):
                 status_text.text(tr("status.success"))
                 
                 # Display success message
-                st.success(tr("status.video_generated", path=result.video_path))
+                st.success(tr("status.video_generated", path=video_path))
                 
                 st.markdown("---")
                 
                 # Video information (compact display)
-                file_size_mb = result.file_size / (1024 * 1024)
+                file_size_mb = (result.file_size or 0) / (1024 * 1024)
                 
                 # Parse video size from template path
                 from pixelle_video.utils.template_util import (
                     parse_template_size,
                     resolve_template_path,
                 )
-                template_path = resolve_template_path(result.storyboard.config.frame_template)
+                template_path = resolve_template_path(frame_template or "1080x1920/default.html")
                 video_width, video_height = parse_template_size(template_path)
                 
                 info_text = (
                     f"⏱️ {tr('info.generation_time')} {total_generation_time:.1f}s   "
                     f"📦 {file_size_mb:.2f}MB   "
-                    f"🎬 {len(result.storyboard.frames)}{tr('info.scenes_unit')}   "
+                    f"🎞️ {result.duration or 0:.1f}s   "
                     f"📐 {video_width}x{video_height}"
                 )
                 st.caption(info_text)
@@ -196,13 +216,13 @@ def render_single_output(pixelle_video, video_params):
                 st.markdown("---")
                 
                 # Video preview
-                if os.path.exists(result.video_path):
-                    st.video(result.video_path)
+                if os.path.exists(video_path):
+                    st.video(video_path)
                     
                     # Download button
-                    with open(result.video_path, "rb") as video_file:
+                    with open(video_path, "rb") as video_file:
                         video_bytes = video_file.read()
-                        video_filename = os.path.basename(result.video_path)
+                        video_filename = os.path.basename(video_path)
                         st.download_button(
                             label="⬇️ 下载视频" if get_language() == "zh_CN" else "⬇️ Download Video",
                             data=video_bytes,
@@ -211,7 +231,7 @@ def render_single_output(pixelle_video, video_params):
                             use_container_width=True
                         )
                 else:
-                    st.error(tr("status.video_not_found", path=result.video_path))
+                    st.error(tr("status.video_not_found", path=video_path))
                 
             except Exception as e:
                 status_text.text("")
