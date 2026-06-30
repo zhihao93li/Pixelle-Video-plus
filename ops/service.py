@@ -1506,6 +1506,16 @@ def _asset_ref_from_generation_result(result: Any) -> dict[str, Any]:
         "pipeline_id": result.pipeline_id,
         "entry": result.entry,
     }
+    metadata = getattr(result, "metadata", None) or {}
+    for key in (
+        "asset_manifest",
+        "quality_review",
+        "compose_runtime",
+        "quality_profile",
+        "production_template",
+    ):
+        if metadata.get(key) is not None:
+            asset_ref[key] = metadata[key]
     return {key: value for key, value in asset_ref.items() if value is not None}
 
 
@@ -1630,6 +1640,9 @@ def _build_asset_check_payload(
     requested_text = (latest_requested or {}).get("payload", {}).get("text", "")
     draft_markers = _blocked_generation_draft_markers(requested_text)
     storyboard_check = _storyboard_text_check(asset_path, requested_text)
+    quality_review = asset_ref.get("quality_review")
+    quality_status = quality_review.get("status") if isinstance(quality_review, dict) else None
+    quality_failures = _quality_review_failures(quality_review)
     checks = {
         "generation_completed_event_present": _has_event(events, OpsEventType.GENERATION_COMPLETED),
         "asset_reference_present": bool(asset_path),
@@ -1637,6 +1650,9 @@ def _build_asset_check_payload(
         "local_file_exists": local_file_exists,
         "local_file_size": local_file_size,
         "duration_seconds": asset_ref.get("duration"),
+        "quality_review_status": quality_status,
+        "quality_review_passed": None if quality_status is None else quality_status != "failed",
+        "quality_review_failures": quality_failures,
         "draft_text_clean": not draft_markers,
         "blocked_draft_markers": draft_markers,
         **storyboard_check,
@@ -1645,6 +1661,7 @@ def _build_asset_check_payload(
         checks["generation_completed_event_present"]
         and checks["asset_reference_present"]
         and checks["draft_text_clean"]
+        and checks["quality_review_passed"] is not False
         and checks["storyboard_text_matches_draft"] is not False
         and (not checks["local_file_required"] or (checks["local_file_exists"] and (local_file_size or 0) > 0))
     )
@@ -1655,6 +1672,16 @@ def _build_asset_check_payload(
         "asset_path": asset_path,
         "checks": checks,
     }
+
+
+def _quality_review_failures(quality_review: Any) -> list[str]:
+    if not isinstance(quality_review, dict):
+        return []
+    failures = []
+    for check in quality_review.get("checks") or []:
+        if isinstance(check, dict) and check.get("status") == "failed":
+            failures.append(str(check.get("message") or check.get("id") or "Quality check failed."))
+    return failures
 
 
 def _asset_path_from_ref(asset_ref: dict[str, Any]) -> str | None:

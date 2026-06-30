@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Callable
 
+from pixelle_video.generation.quality import build_asset_manifest, run_quality_review
 from pixelle_video.generation.registry import PipelineRegistry
 from pixelle_video.generation.schemas import (
     EntryId,
@@ -220,6 +221,21 @@ class GenerationService:
             media_type="video/mp4",
             role="primary_video",
         )
+        duration = self._get_result_value(pipeline_result, "duration")
+        storyboard = self._get_result_value(pipeline_result, "storyboard")
+        compose_runtime = task.request.params.get("compose_runtime", "html_ffmpeg")
+        quality_profile = task.request.params.get("quality_profile", "basic")
+        asset_manifest = build_asset_manifest(
+            video_path=video_path,
+            storyboard=storyboard,
+            bgm_path=task.request.params.get("bgm_path"),
+        )
+        quality_review = run_quality_review(
+            video_path,
+            expected_duration=duration,
+            quality_profile=quality_profile,
+            allow_silent=bool(task.request.params.get("allow_silent", False)),
+        )
 
         return GenerationResult(
             task_id=task.task_id,
@@ -227,10 +243,14 @@ class GenerationService:
             entry=task.entry,
             artifacts=[primary_video],
             primary_video=primary_video,
-            duration=self._get_result_value(pipeline_result, "duration"),
+            duration=duration,
             file_size=file_size,
             metadata={
                 "source_result_type": type(pipeline_result).__name__,
+                "asset_manifest": asset_manifest,
+                "quality_review": quality_review,
+                "compose_runtime": compose_runtime,
+                "quality_profile": quality_profile,
                 **task.request.metadata,
             },
         )

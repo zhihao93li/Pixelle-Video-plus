@@ -9,7 +9,12 @@ from pixelle_video.generation import (
     build_pipeline_registry,
 )
 from pixelle_video.models.progress import ProgressEvent
-from pixelle_video.models.storyboard import Storyboard, StoryboardConfig, VideoGenerationResult
+from pixelle_video.models.storyboard import (
+    Storyboard,
+    StoryboardConfig,
+    StoryboardFrame,
+    VideoGenerationResult,
+)
 
 
 def _video_result(path: str = "output/task/final.mp4") -> VideoGenerationResult:
@@ -153,3 +158,83 @@ def test_generation_service_requires_known_pipeline_and_entry():
                 input={"assets": [str(Path("asset.png"))]},
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_generation_result_includes_quality_review_and_asset_manifest(tmp_path):
+    video_path = tmp_path / "final.mp4"
+    audio_path = tmp_path / "scene-1.wav"
+    image_path = tmp_path / "scene-1.png"
+    bgm_path = tmp_path / "bgm.mp3"
+    segment_path = tmp_path / "scene-1-segment.mp4"
+    for path in (video_path, audio_path, image_path, bgm_path, segment_path):
+        path.write_bytes(b"fake media")
+
+    class AssetTrackingPipeline:
+        async def __call__(self, **kwargs):
+            storyboard = Storyboard(
+                title="Tracked Video",
+                config=StoryboardConfig(
+                    media_width=1080,
+                    media_height=1920,
+                    task_id="tracked-task",
+                ),
+                final_video_path=str(video_path),
+                total_duration=9.0,
+                frames=[
+                    StoryboardFrame(
+                        index=0,
+                        narration="Scene one.",
+                        image_prompt="A calm cat drinking water.",
+                        audio_path=str(audio_path),
+                        image_path=str(image_path),
+                        video_segment_path=str(segment_path),
+                        duration=9.0,
+                    )
+                ],
+            )
+            return VideoGenerationResult(
+                video_path=str(video_path),
+                storyboard=storyboard,
+                duration=9.0,
+                file_size=video_path.stat().st_size,
+            )
+
+    service = _service_for_pipeline(AssetTrackingPipeline())
+    task = service.submit(
+        GenerationRequest(
+            pipeline_id="standard",
+            entry="script",
+            input={"script": "Scene one."},
+            params={"bgm_path": str(bgm_path), "quality_profile": "basic"},
+        )
+    )
+
+    completed = await service.wait_for_task(task.task_id)
+
+    assert completed.status == "completed"
+    assert completed.result is not None
+    metadata = completed.result.metadata
+    assert metadata["quality_review"]["status"] == "failed"
+    assert {
+        check["id"]
+        for check in metadata["quality_review"]["checks"]
+    } >= {
+        "file_exists",
+        "video_playable",
+        "audio_present",
+        "duration_seconds",
+        "file_size_bytes",
+        "black_frame_sample",
+    }
+    asset_roles = {
+        asset["role"]
+        for asset in metadata["asset_manifest"]["assets"]
+    }
+    assert {
+        "final_video",
+        "narration_audio",
+        "primary_visual",
+        "bgm",
+        "subtitle_text",
+    }.issubset(asset_roles)

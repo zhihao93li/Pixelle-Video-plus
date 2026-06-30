@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.dependencies import GenerationServiceDep, PixelleVideoDep
 from pixelle_video.generation import (
@@ -7,6 +7,10 @@ from pixelle_video.generation import (
     GenerationResult,
     GenerationTask,
     PipelineManifest,
+    ProductionTemplate,
+    ProductionTemplateError,
+    build_default_production_template_registry,
+    detect_available_generation_capabilities,
 )
 
 router = APIRouter(prefix="/generation", tags=["Generation Pipelines"])
@@ -15,6 +19,17 @@ router = APIRouter(prefix="/generation", tags=["Generation Pipelines"])
 class PipelineListResponse(BaseModel):
     default_pipeline: str | None
     pipelines: list[PipelineManifest]
+
+
+class ProductionTemplateListResponse(BaseModel):
+    default_template: str | None
+    templates: list[ProductionTemplate]
+
+
+class ProductionTemplateTaskRequest(BaseModel):
+    input: dict
+    metadata: dict = Field(default_factory=dict)
+    idempotency_key: str | None = None
 
 
 class GenerationSubmitResponse(BaseModel):
@@ -33,6 +48,41 @@ async def list_generation_pipelines(pixelle_video: PixelleVideoDep):
         default_pipeline=default_pipeline,
         pipelines=manifests,
     )
+
+
+@router.get("/templates", response_model=ProductionTemplateListResponse)
+async def list_generation_templates():
+    registry = build_default_production_template_registry()
+    return ProductionTemplateListResponse(
+        default_template=registry.default_template_id(project="PetWoods", channel="xiaohongshu"),
+        templates=registry.list(),
+    )
+
+
+@router.post("/templates/{template_id}/tasks", response_model=GenerationSubmitResponse)
+async def submit_generation_template_task(
+    template_id: str,
+    request_body: ProductionTemplateTaskRequest,
+    generation_service: GenerationServiceDep,
+):
+    registry = build_default_production_template_registry()
+    try:
+        generation_request = registry.compile_request(
+            template_id,
+            input=request_body.input,
+            metadata=request_body.metadata,
+            idempotency_key=request_body.idempotency_key,
+            available_capabilities=detect_available_generation_capabilities(),
+        )
+        task = generation_service.submit(generation_request)
+        return GenerationSubmitResponse(
+            generation_task_id=task.task_id,
+            task=task,
+        )
+    except ProductionTemplateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @router.get("/pipelines/{pipeline_id}", response_model=PipelineManifest)

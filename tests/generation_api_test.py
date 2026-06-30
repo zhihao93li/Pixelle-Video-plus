@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+import api.routers.generation as generation_router
 from api.app import app
 from api.dependencies import get_generation_service, get_pixelle_video
 from pixelle_video.generation import (
@@ -128,6 +129,68 @@ def test_generation_pipeline_detail_endpoint_returns_404_for_unknown_pipeline():
 
     assert response.status_code == 404
     assert "missing" in response.json()["detail"]
+
+
+def test_generation_templates_endpoint_lists_builtin_production_templates():
+    response = TestClient(app).get("/api/generation/templates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["default_template"] == "petwoods_xhs_daily_v1"
+    assert [template["id"] for template in payload["templates"]] == [
+        "petwoods_xhs_daily_v1",
+        "petwoods_xhs_quality_explainer_v1",
+    ]
+    assert payload["templates"][0]["display_name"] == "PetWoods 小红书日常短视频 v1"
+    assert payload["templates"][0]["user_selectable_providers"] == []
+
+
+def test_generation_template_task_endpoint_compiles_template_and_submits_request():
+    fake_generation_service.requests = []
+    app.dependency_overrides[get_generation_service] = get_fake_generation_service
+
+    try:
+        response = TestClient(app).post(
+            "/api/generation/templates/petwoods_xhs_daily_v1/tasks",
+            json={
+                "input": {"script": "Scene one."},
+                "metadata": {"experiment_id": "exp-1"},
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generation_task_id"] == "gen-task-1"
+    request = fake_generation_service.requests[0]
+    assert request.pipeline_id == "standard"
+    assert request.entry == "script"
+    assert request.input == {"script": "Scene one."}
+    assert request.params["compose_runtime"] == "html_ffmpeg"
+    assert request.metadata["production_template"]["id"] == "petwoods_xhs_daily_v1"
+
+
+def test_generation_template_task_endpoint_rejects_missing_runtime_capability(monkeypatch):
+    fake_generation_service.requests = []
+    app.dependency_overrides[get_generation_service] = get_fake_generation_service
+    monkeypatch.setattr(
+        generation_router,
+        "detect_available_generation_capabilities",
+        lambda: {"llm", "tts", "media", "ffmpeg", "persistence"},
+    )
+
+    try:
+        response = TestClient(app).post(
+            "/api/generation/templates/petwoods_xhs_quality_explainer_v1/tasks",
+            json={"input": {"script": "Scene one."}},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert "hyperframes" in response.json()["detail"]
+    assert fake_generation_service.requests == []
 
 
 def test_generation_tasks_endpoint_submits_generation_request():

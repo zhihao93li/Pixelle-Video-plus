@@ -180,6 +180,64 @@ async def test_ops_completed_generation_task_creates_content_item_from_result(st
 
 
 @pytest.mark.asyncio
+async def test_ops_asset_check_fails_when_generation_quality_review_failed(store, tmp_path):
+    video_path = tmp_path / "output" / "task" / "final.mp4"
+    video_path.parent.mkdir(parents=True)
+    video_path.write_bytes(b"mp4")
+    artifact = GenerationArtifact(
+        kind="video",
+        path=str(video_path),
+        role="primary_video",
+        media_type="video/mp4",
+    )
+    generation_result = GenerationResult(
+        task_id="gen-task-1",
+        pipeline_id="standard",
+        entry="script",
+        artifacts=[artifact],
+        primary_video=artifact,
+        duration=8.0,
+        file_size=3,
+        metadata={
+            "quality_review": {
+                "status": "failed",
+                "summary": "Video has no audio.",
+                "checks": [
+                    {
+                        "id": "audio_present",
+                        "status": "failed",
+                        "message": "Video has no audio.",
+                    }
+                ],
+            }
+        },
+    )
+    generation_service = FakeGenerationService(
+        _task(status="completed", result=generation_result)
+    )
+    service = OpsService(store=store, generation_service=generation_service)
+    _, _, experiment, draft = _seed_approved_draft(service)
+
+    completed = await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=draft["id"],
+        source=_source(),
+        wait_for_completion=True,
+    )
+
+    asset_check = service.check_generation_asset(
+        experiment_id=experiment["id"],
+        content_item_id=completed["content_item"]["id"],
+        source=_source(),
+    )
+
+    assert completed["content_item"]["asset_ref"]["quality_review"]["status"] == "failed"
+    assert asset_check["asset_check"]["status"] == "failed"
+    assert asset_check["asset_check"]["checks"]["quality_review_passed"] is False
+    assert asset_check["next_action"]["kind"] == "resolve_asset_issue"
+
+
+@pytest.mark.asyncio
 async def test_ops_failed_generation_task_records_structured_error(store):
     generation_service = FakeGenerationService(
         _task(

@@ -25,6 +25,11 @@ from pathlib import Path
 
 from loguru import logger
 
+from pixelle_video.generation.compose_runtime import (
+    ComposeRuntimeContext,
+    render_with_compose_runtime,
+)
+from pixelle_video.generation.quality import build_asset_manifest, run_quality_review
 from pixelle_video.models.progress import ProgressEvent
 from pixelle_video.models.storyboard import (
     Storyboard,
@@ -33,7 +38,6 @@ from pixelle_video.models.storyboard import (
     VideoGenerationResult,
 )
 from pixelle_video.pipelines.linear import LinearVideoPipeline, PipelineContext
-from pixelle_video.services.video import VideoService
 from pixelle_video.utils.content_generators import (
     generate_image_prompts,
     generate_narrations_from_topic,
@@ -415,17 +419,27 @@ class StandardPipeline(LinearVideoPipeline):
         
         storyboard = ctx.storyboard
         segment_paths = [frame.video_segment_path for frame in storyboard.frames]
-        
-        video_service = VideoService()
-        
-        final_video_path = video_service.concat_videos(
-            videos=segment_paths,
-            output=ctx.final_video_path,
-            bgm_path=ctx.params.get("bgm_path"),
-            bgm_volume=ctx.params.get("bgm_volume", 0.2),
-            bgm_mode=ctx.params.get("bgm_mode", "loop")
+
+        compose_runtime = ctx.params.get("compose_runtime", "html_ffmpeg")
+        compose_result = render_with_compose_runtime(
+            compose_runtime,
+            ComposeRuntimeContext(
+                segment_paths=segment_paths,
+                output_path=ctx.final_video_path,
+                task_dir=ctx.task_dir,
+                storyboard=storyboard,
+                bgm_path=ctx.params.get("bgm_path"),
+                bgm_volume=ctx.params.get("bgm_volume", 0.2),
+                bgm_mode=ctx.params.get("bgm_mode", "loop"),
+                params=ctx.params,
+            ),
         )
-        
+        ctx.params["_compose_runtime_result"] = {
+            "runtime_id": compose_result.runtime_id,
+            **compose_result.metadata,
+        }
+        final_video_path = compose_result.output_path
+
         storyboard.final_video_path = final_video_path
         storyboard.completed_at = datetime.now()
         
@@ -481,9 +495,23 @@ class StandardPipeline(LinearVideoPipeline):
             
             # Build metadata
             input_with_title = ctx.params.copy()
+            input_with_title.pop("_compose_runtime_result", None)
             input_with_title["text"] = ctx.input_text # Ensure text is included
             if not input_with_title.get("title"):
                 input_with_title["title"] = storyboard.title
+
+            quality_profile = ctx.params.get("quality_profile", "basic")
+            asset_manifest = build_asset_manifest(
+                video_path=result.video_path,
+                storyboard=storyboard,
+                bgm_path=ctx.params.get("bgm_path"),
+            )
+            quality_review = run_quality_review(
+                result.video_path,
+                expected_duration=result.duration,
+                quality_profile=quality_profile,
+                allow_silent=bool(ctx.params.get("allow_silent", False)),
+            )
             
             metadata = {
                 "task_id": task_id,
@@ -497,7 +525,12 @@ class StandardPipeline(LinearVideoPipeline):
                     "video_path": result.video_path,
                     "duration": result.duration,
                     "file_size": result.file_size,
-                    "n_frames": len(storyboard.frames)
+                    "n_frames": len(storyboard.frames),
+                    "asset_manifest": asset_manifest,
+                    "quality_review": quality_review,
+                    "compose_runtime": ctx.params.get("compose_runtime", "html_ffmpeg"),
+                    "compose_runtime_result": ctx.params.get("_compose_runtime_result"),
+                    "quality_profile": quality_profile,
                 },
                 
                 "config": {
