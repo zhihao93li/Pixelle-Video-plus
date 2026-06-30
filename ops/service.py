@@ -16,7 +16,12 @@ from ops.cheat_workspace import (
 )
 from ops.models import ExperimentStage, OpsEventType
 from ops.store import OpsStore
-from pixelle_video.generation import GenerationRequest
+from pixelle_video.generation import (
+    GenerationRequest,
+    ProductionTemplateError,
+    build_default_production_template_registry,
+)
+from pixelle_video.generation.summaries import build_generation_summary
 
 
 class OpsError(Exception):
@@ -71,6 +76,7 @@ class OpsService:
         self.generation_runner = generation_runner
         self.generation_service = generation_service
         self.available_pipelines = tuple(dict.fromkeys(available_pipelines)) if available_pipelines is not None else None
+        self.production_template_registry = build_default_production_template_registry()
 
     def create_project(
         self,
@@ -82,13 +88,82 @@ class OpsService:
         description: str | None = None,
     ) -> dict[str, Any]:
         _require_confirmed_source(source)
+        default_template_id = self.production_template_registry.default_template_id(
+            project=product,
+            channel=channel,
+        )
+        generation_settings = (
+            {
+                "default_production_template_id": default_template_id,
+                "selection_source": "registry_default",
+            }
+            if default_template_id
+            else {}
+        )
         return self.store.create_project(
             name=name,
             product=product,
             channel=channel,
             description=description,
+            generation_settings=generation_settings,
             source=source,
         )
+
+    def list_production_templates(self, project_id: str | None = None) -> dict[str, Any]:
+        project = None
+        if project_id:
+            project = self.store.get_project(project_id)
+            if not project:
+                raise OpsError("project_not_found", "Production template listing requires an existing project.")
+        default_template_id = _project_default_production_template_id(
+            project,
+            registry=self.production_template_registry,
+        ) if project else self.production_template_registry.default_template_id(
+            project="PetWoods",
+            channel="xiaohongshu",
+        )
+        return {
+            "status": "ok",
+            "default_template": default_template_id,
+            "templates": [
+                template.model_dump(mode="json")
+                for template in self.production_template_registry.list()
+            ],
+            "next_action": {"kind": "select_production_template", "blocked": False},
+        }
+
+    def set_project_generation_settings(
+        self,
+        *,
+        project_id: str,
+        default_production_template_id: str,
+        source: dict[str, Any],
+    ) -> dict[str, Any]:
+        _require_confirmed_source(source)
+        project = self.store.get_project(project_id)
+        if not project:
+            raise OpsError("project_not_found", "Project generation settings require an existing project.")
+        try:
+            template = self.production_template_registry.get(default_production_template_id)
+        except ProductionTemplateError as exc:
+            raise OpsError("production_template_not_found", str(exc)) from None
+        generation_settings = {
+            **(project.get("generation_settings") or {}),
+            "default_production_template_id": template.id,
+            "selection_source": source.get("kind") or "unknown",
+        }
+        updated = self.store.update_project_generation_settings(
+            project_id=project_id,
+            generation_settings=generation_settings,
+        )
+        if updated is None:
+            raise OpsError("project_not_found", "Project generation settings require an existing project.")
+        return {
+            "status": "ok",
+            "project": updated,
+            "generation_settings": updated["generation_settings"],
+            "next_action": {"kind": "use_project_default_template", "blocked": False},
+        }
 
     def list_projects(self) -> dict[str, Any]:
         projects = []
@@ -363,6 +438,7 @@ class OpsService:
         pipeline: str = "standard",
         title: str | None = None,
         generation_params: dict[str, Any] | None = None,
+        production_template_id: str | None = None,
     ) -> dict[str, Any]:
         _require_confirmed_source(source)
         experiment = self._get_experiment_or_raise(experiment_id)
@@ -380,6 +456,7 @@ class OpsService:
                 "pipeline": pipeline,
                 "title": title,
                 "generation_params": generation_params or {},
+                "production_template_id": production_template_id,
             },
             source=source,
         )
@@ -427,23 +504,48 @@ class OpsService:
         if draft is None:
             raise OpsError("approved_draft_required", "Content generation requires an approved generation draft.")
         text = draft["payload"]["text"]
-        pipeline = draft["payload"].get("pipeline") or "standard"
+        project = self.store.get_project(experiment["project_id"]) or {}
+        raw_pipeline = draft["payload"].get("pipeline") or "standard"
         title = draft["payload"].get("title")
-        generation_params = _generation_params_for_approved_draft(
-            pipeline=pipeline,
-            title=title,
-            generation_params=draft["payload"].get("generation_params") or {},
+        draft_generation_params = draft["payload"].get("generation_params") or {}
+        production_template_id = _production_template_id_for_draft(
+            project=project,
+            draft_payload=draft["payload"],
+            registry=self.production_template_registry,
         )
-        await self._require_known_pipeline(pipeline)
         generation_request = None
-        generation_task = None
-        if self.generation_service is not None:
+        if production_template_id:
             generation_request = _generation_request_for_ops_draft(
                 text=text,
+                pipeline=raw_pipeline,
+                title=title,
+                generation_params=draft_generation_params,
+                production_template_id=production_template_id,
+                registry=self.production_template_registry,
+            )
+            pipeline = generation_request.pipeline_id
+            generation_params = _generation_runner_params_for_request(
+                generation_request,
+                text=text,
+                title=title,
+            )
+        else:
+            pipeline = raw_pipeline
+            generation_params = _generation_params_for_approved_draft(
                 pipeline=pipeline,
                 title=title,
-                generation_params=generation_params,
+                generation_params=draft_generation_params,
             )
+        await self._require_known_pipeline(pipeline)
+        generation_task = None
+        if self.generation_service is not None:
+            if generation_request is None:
+                generation_request = _generation_request_for_ops_draft(
+                    text=text,
+                    pipeline=pipeline,
+                    title=title,
+                    generation_params=generation_params,
+                )
             generation_task = self.generation_service.submit(generation_request)
 
         operation_context = {
@@ -459,10 +561,12 @@ class OpsService:
             "title": title,
             "operation_context": operation_context,
             "generation_params": generation_params,
+            "production_template_id": production_template_id,
         }
+        if generation_request is not None:
+            generation_payload["generation_request_snapshot"] = generation_request.model_dump(mode="json")
         if generation_task is not None and generation_request is not None:
             generation_payload["generation_task_id"] = generation_task.task_id
-            generation_payload["generation_request_snapshot"] = generation_request.model_dump(mode="json")
         event = self.store.append_event(
             project_id=experiment["project_id"],
             cycle_id=experiment["cycle_id"],
@@ -1008,6 +1112,7 @@ class OpsService:
                 pipeline=draft["payload"].get("pipeline", "standard"),
                 title=draft["payload"].get("title"),
                 generation_params=draft["payload"].get("generation_params"),
+                production_template_id=draft["payload"].get("production_template_id"),
             )
         elif draft["operation"] == "record_publish_evidence":
             result = self.record_publish(
@@ -1472,7 +1577,30 @@ def _generation_request_for_ops_draft(
     pipeline: str,
     title: str | None,
     generation_params: dict[str, Any],
+    production_template_id: str | None = None,
+    registry: Any | None = None,
 ) -> GenerationRequest:
+    if production_template_id:
+        if registry is None:
+            registry = build_default_production_template_registry()
+        input_payload = _production_template_input_for_ops_draft(
+            registry=registry,
+            production_template_id=production_template_id,
+            text=text,
+            generation_params=generation_params,
+        )
+        try:
+            request = registry.compile_request(
+                production_template_id,
+                input=input_payload,
+                metadata={"source": "ops"},
+            )
+        except ProductionTemplateError as exc:
+            raise OpsError("production_template_invalid", str(exc)) from None
+        if title:
+            request.params["title"] = title
+        return request
+
     params = dict(generation_params)
     entry = "script"
     input_payload = {"script": text}
@@ -1491,6 +1619,42 @@ def _generation_request_for_ops_draft(
         params=params,
         metadata={"source": "ops"},
     )
+
+
+def _production_template_input_for_ops_draft(
+    *,
+    registry: Any,
+    production_template_id: str,
+    text: str,
+    generation_params: dict[str, Any],
+) -> dict[str, Any]:
+    template = registry.get(production_template_id)
+    if template.entry == "assets":
+        input_payload = {
+            "assets": generation_params.get("assets"),
+            "intent": generation_params.get("intent") or text,
+        }
+        if generation_params.get("scenes"):
+            input_payload["scenes"] = generation_params["scenes"]
+        return input_payload
+    if template.entry == "script":
+        return {"script": text}
+    return {template.entry: generation_params.get(template.entry) or text}
+
+
+def _generation_runner_params_for_request(
+    request: GenerationRequest,
+    *,
+    text: str,
+    title: str | None,
+) -> dict[str, Any]:
+    params = dict(request.params)
+    if request.entry == "assets":
+        params["assets"] = request.input.get("assets")
+        params.setdefault("intent", request.input.get("intent") or text)
+        if title:
+            params.setdefault("video_title", title)
+    return params
 
 
 def _asset_ref_from_generation_result(result: Any) -> dict[str, Any]:
@@ -1571,6 +1735,38 @@ def _generation_params_for_approved_draft(
         if title and "title" not in params:
             params["title"] = title
     return params
+
+
+def _production_template_id_for_draft(
+    *,
+    project: dict[str, Any],
+    draft_payload: dict[str, Any],
+    registry: Any,
+) -> str | None:
+    explicit_template_id = draft_payload.get("production_template_id")
+    if explicit_template_id:
+        return explicit_template_id
+    pipeline = draft_payload.get("pipeline") or "standard"
+    if pipeline != "standard":
+        return None
+    return _project_default_production_template_id(project, registry=registry)
+
+
+def _project_default_production_template_id(
+    project: dict[str, Any] | None,
+    *,
+    registry: Any,
+) -> str | None:
+    if not project:
+        return None
+    settings = project.get("generation_settings") or {}
+    configured = settings.get("default_production_template_id")
+    if configured:
+        return configured
+    return registry.default_template_id(
+        project=project.get("product") or "",
+        channel=project.get("channel") or "",
+    )
 
 
 def _select_content_item(
@@ -1671,6 +1867,7 @@ def _build_asset_check_payload(
         "asset_ref": asset_ref,
         "asset_path": asset_path,
         "checks": checks,
+        "summary": build_generation_summary(asset_ref),
     }
 
 
@@ -1808,6 +2005,8 @@ def _with_current_content_item(view: dict[str, Any]) -> dict[str, Any]:
     content_item = _current_content_item_for_events(content_items, events)
     content_item_id = content_item["id"] if content_item else None
     view["content_item"] = content_item
+    if content_item:
+        content_item["generation_summary"] = build_generation_summary(content_item.get("asset_ref"))
     view["asset_check"] = _latest_asset_check(events, content_item_id) if content_item_id else None
     return view
 

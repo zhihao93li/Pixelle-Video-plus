@@ -72,34 +72,36 @@ def render_single_output(pixelle_video, video_params):
 
         selected_pipeline_id = "standard"
         selected_entry_id = "topic" if mode == "generate" else "script"
-        pipeline_registry = getattr(pixelle_video, "pipeline_registry", None)
-        if pipeline_registry:
-            manifests = pipeline_registry.list_manifests()
-            if manifests:
-                manifest_by_id = {manifest.id: manifest for manifest in manifests}
-                pipeline_ids = list(manifest_by_id.keys())
-                selected_pipeline_id = st.selectbox(
-                    "Pipeline",
-                    pipeline_ids,
-                    index=pipeline_ids.index("standard") if "standard" in pipeline_ids else 0,
-                    format_func=lambda pipeline_id: manifest_by_id[pipeline_id].name,
-                    key="generation_pipeline_select",
+        selected_production_template_id = None
+        if mode != "generate":
+            from pixelle_video.generation import build_default_production_template_registry
+
+            production_template_registry = build_default_production_template_registry()
+            templates = [
+                template
+                for template in production_template_registry.list()
+                if template.entry == selected_entry_id and not template.requires_user_assets
+            ]
+            if templates:
+                default_template_id = production_template_registry.default_template_id(
+                    project="PetWoods",
+                    channel="xiaohongshu",
                 )
-                selected_manifest = manifest_by_id[selected_pipeline_id]
-                entry_ids = [entry.id for entry in selected_manifest.entries]
-                preferred_entry = "topic" if mode == "generate" else "script"
-                if preferred_entry not in entry_ids:
-                    preferred_entry = selected_manifest.default_entry or entry_ids[0]
-                selected_entry_id = st.selectbox(
-                    "Entry",
-                    entry_ids,
-                    index=entry_ids.index(preferred_entry),
-                    format_func=lambda entry_id: selected_manifest.entry(entry_id).name,
-                    key=f"generation_entry_select_{selected_pipeline_id}",
+                template_ids = [template.id for template in templates]
+                template_by_id = {template.id: template for template in templates}
+                selected_production_template_id = st.selectbox(
+                    "Production template",
+                    template_ids,
+                    index=template_ids.index(default_template_id) if default_template_id in template_ids else 0,
+                    format_func=lambda template_id: template_by_id[template_id].display_name,
+                    key="generation_production_template_select",
                 )
-                entry_spec = selected_manifest.entry(selected_entry_id)
-                required_fields = ", ".join(field.name for field in entry_spec.required_fields)
-                st.caption(f"{selected_manifest.description} Required: {required_fields}")
+                selected_template = template_by_id[selected_production_template_id]
+                selected_pipeline_id = selected_template.pipeline_id
+                selected_entry_id = selected_template.entry
+                st.caption(
+                    f"{selected_template.runtime_label} · {selected_template.estimated_turnaround}"
+                )
         
         # Generate Button
         if st.button(tr("btn.generate"), type="primary", use_container_width=True):
@@ -171,6 +173,7 @@ def render_single_output(pixelle_video, video_params):
                         video_params=generation_params,
                         pipeline_id=selected_pipeline_id,
                         entry_id=selected_entry_id,
+                        production_template_id=selected_production_template_id,
                         progress_callback=update_progress,
                     )
                 )

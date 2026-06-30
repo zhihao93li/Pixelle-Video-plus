@@ -21,6 +21,7 @@ from typing import List, Dict, Optional, Any
 from pathlib import Path
 from loguru import logger
 
+from pixelle_video.generation.summaries import build_generation_summary
 from pixelle_video.services.persistence import PersistenceService
 
 
@@ -103,6 +104,7 @@ class HistoryManager:
         return {
             "metadata": metadata,
             "storyboard": storyboard,
+            "generation_summary": build_generation_summary(metadata.get("result")),
         }
     
     async def get_statistics(self) -> Dict[str, Any]:
@@ -221,4 +223,3 @@ class HistoryManager:
         """
         logger.warning("export_task is not implemented yet (Phase 3 feature)")
         return None
-

@@ -15,6 +15,11 @@ def test_store_initializes_entities_events_and_current_view(tmp_path):
         channel="xiaohongshu",
         description="Test operating project",
         source=_source(),
+        generation_settings={"default_production_template_id": "petwoods_xhs_daily_v1"},
+    )
+    updated_project = store.update_project_generation_settings(
+        project_id=project["id"],
+        generation_settings={"default_production_template_id": "petwoods_xhs_quality_explainer_v1"},
     )
     cycle = store.create_cycle(
         project_id=project["id"],
@@ -54,6 +59,12 @@ def test_store_initializes_entities_events_and_current_view(tmp_path):
     assert event["id"]
     assert [row["event_type"] for row in events] == ["generation_completed"]
     assert view["project"]["name"] == "PetWoods"
+    assert view["project"]["generation_settings"]["default_production_template_id"] == (
+        "petwoods_xhs_quality_explainer_v1"
+    )
+    assert updated_project["generation_settings"]["default_production_template_id"] == (
+        "petwoods_xhs_quality_explainer_v1"
+    )
     assert view["cycle"]["name"] == "Launch week"
     assert view["experiment"]["title"] == "Hook test"
     assert view["content_items"][0]["asset_ref"]["path"] == "output/video.mp4"

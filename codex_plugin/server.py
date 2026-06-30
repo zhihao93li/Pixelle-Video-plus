@@ -24,6 +24,8 @@ PIXELLE_OPS_REQUIRED_TOOLS = (
     "pixelle_create_cycle",
     "pixelle_create_experiment",
     "pixelle_lock_prediction",
+    "pixelle_list_production_templates",
+    "pixelle_set_project_generation_settings",
     "pixelle_list_generation_pipelines",
     "pixelle_submit_generation_draft",
     "pixelle_approve_generation_draft",
@@ -48,7 +50,8 @@ PIXELLE_OPS_CONVERSATION_GATES = {
     "channel_account_gate": True,
     "content_shape_gate": True,
     "existing_generation_gate": True,
-    "pipeline_selection_gate": True,
+    "pipeline_selection_gate": False,
+    "production_template_selection_gate": True,
     "draft_approval_gate": True,
     "async_generation_status": True,
     "asset_check_gate": True,
@@ -118,9 +121,11 @@ PIXELLE_OPS_INTENT_ROUTES = {
         "writes_state": True,
     },
     "video_generation": {
-        "requires_pipeline_selection": True,
-        "requires_user_pipeline_choice": True,
-        "default_pipeline_requires_user_acceptance": True,
+        "requires_pipeline_selection": False,
+        "requires_user_pipeline_choice": False,
+        "uses_project_default_template": True,
+        "default_pipeline_requires_user_acceptance": False,
+        "allows_production_template_override": True,
         "requires_draft_approval": True,
         "writes_state": True,
     },
@@ -191,10 +196,12 @@ async def pixelle_get_capabilities() -> dict[str, Any]:
             "full_operations_experiment",
         ],
         "default_pipeline": "standard",
+        "default_production_template": "petwoods_xhs_daily_v1",
         "p2_capabilities": {
             "cheat_workspace_summary": True,
             "context_export": True,
             "writeback_draft": True,
+            "production_templates": True,
             "writeback_operations": sorted(WRITEBACK_OPERATIONS),
             "ui_is_cheat_operation_entry": False,
         },
@@ -451,6 +458,26 @@ async def pixelle_list_generation_pipelines() -> dict[str, Any]:
     return await _run_tool(lambda: service.list_generation_pipelines())
 
 
+async def pixelle_list_production_templates(project_id: str | None = None) -> dict[str, Any]:
+    """Return product-facing production templates and the effective project default."""
+    return await _run_tool(lambda: _build_service().list_production_templates(project_id=project_id))
+
+
+async def pixelle_set_project_generation_settings(
+    project_id: str,
+    default_production_template_id: str,
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist the default production template for a Pixelle operating project."""
+    return await _run_tool(
+        lambda: _build_service().set_project_generation_settings(
+            project_id=project_id,
+            default_production_template_id=default_production_template_id,
+            source=source,
+        )
+    )
+
+
 async def pixelle_submit_generation_draft(
     experiment_id: str,
     text: str,
@@ -458,6 +485,7 @@ async def pixelle_submit_generation_draft(
     pipeline: str = "standard",
     title: str | None = None,
     generation_params: dict[str, Any] | None = None,
+    production_template_id: str | None = None,
 ) -> dict[str, Any]:
     return await _run_tool(
         lambda: _build_service().submit_generation_draft(
@@ -467,6 +495,7 @@ async def pixelle_submit_generation_draft(
             pipeline=pipeline,
             title=title,
             generation_params=generation_params,
+            production_template_id=production_template_id,
         )
     )
 
@@ -664,6 +693,8 @@ for tool in (
     pixelle_reject_writeback_draft,
     pixelle_list_writeback_drafts,
     pixelle_lock_prediction,
+    pixelle_list_production_templates,
+    pixelle_set_project_generation_settings,
     pixelle_list_generation_pipelines,
     pixelle_submit_generation_draft,
     pixelle_approve_generation_draft,

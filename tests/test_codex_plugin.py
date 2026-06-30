@@ -247,6 +247,8 @@ async def test_plugin_reports_capabilities(plugin_service):
     assert "pixelle_list_projects" in result["required_tools"]
     assert "pixelle_create_channel_account" in result["required_tools"]
     assert "pixelle_get_capabilities" in result["required_tools"]
+    assert "pixelle_list_production_templates" in result["required_tools"]
+    assert "pixelle_set_project_generation_settings" in result["required_tools"]
     assert "pixelle_submit_generation_draft" in result["required_tools"]
     assert "pixelle_approve_generation_draft" in result["required_tools"]
     assert "pixelle_set_project_cheat_workspace" in result["required_tools"]
@@ -265,7 +267,8 @@ async def test_plugin_reports_capabilities(plugin_service):
     assert result["conversation_gates"]["channel_account_gate"] is True
     assert result["conversation_gates"]["content_shape_gate"] is True
     assert result["conversation_gates"]["existing_generation_gate"] is True
-    assert result["conversation_gates"]["pipeline_selection_gate"] is True
+    assert result["conversation_gates"]["pipeline_selection_gate"] is False
+    assert result["conversation_gates"]["production_template_selection_gate"] is True
     assert result["conversation_contract_version"] == "p0.9.20260622"
     assert result["conversation_contract"]["requires_capability_first"] is True
     assert result["conversation_contract"]["first_tool"] == "pixelle_get_capabilities"
@@ -290,8 +293,9 @@ async def test_plugin_reports_capabilities(plugin_service):
     assert result["intent_routes"]["project_selection"]["required_when_multiple_projects"] is True
     assert result["intent_routes"]["channel_account_selection"]["required_when_multiple_accounts"] is True
     assert result["intent_routes"]["video_generation"]["requires_draft_approval"] is True
-    assert result["intent_routes"]["video_generation"]["requires_user_pipeline_choice"] is True
-    assert result["intent_routes"]["video_generation"]["default_pipeline_requires_user_acceptance"] is True
+    assert result["intent_routes"]["video_generation"]["requires_user_pipeline_choice"] is False
+    assert result["intent_routes"]["video_generation"]["uses_project_default_template"] is True
+    assert result["intent_routes"]["video_generation"]["default_pipeline_requires_user_acceptance"] is False
     assert result["intent_routes"]["full_operations_experiment"]["cheat_generated_experiment_creation"] == {
         "requires_writeback_draft": True,
         "operation": "create_content_experiment",
@@ -493,6 +497,35 @@ async def test_plugin_lists_generation_pipelines(plugin_service):
     assert result["pipeline_names"] == ["standard", "custom", "asset_based"]
     assert result["default_pipeline"] == "standard"
     assert result["next_action"]["kind"] == "select_generation_pipeline"
+
+
+@pytest.mark.asyncio
+async def test_plugin_lists_production_templates_and_sets_project_default(plugin_service):
+    project = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+
+    listed = await server.pixelle_list_production_templates(project_id=project["entity"]["id"])
+    settings = await server.pixelle_set_project_generation_settings(
+        project_id=project["entity"]["id"],
+        default_production_template_id="petwoods_xhs_quality_explainer_v1",
+        source=_source(),
+    )
+    current = await server.pixelle_get_current(project_id=project["entity"]["id"])
+
+    assert listed["status"] == "ok"
+    assert listed["default_template"] == "petwoods_xhs_daily_v1"
+    assert listed["templates"][0]["user_selectable_providers"] == []
+    assert listed["templates"][1]["runtime_label"] == "高质量动效合成"
+    assert settings["generation_settings"]["default_production_template_id"] == (
+        "petwoods_xhs_quality_explainer_v1"
+    )
+    assert current["project"]["generation_settings"]["default_production_template_id"] == (
+        "petwoods_xhs_quality_explainer_v1"
+    )
 
 
 @pytest.mark.asyncio
@@ -704,6 +737,8 @@ async def test_fastmcp_client_can_call_pixelle_tools(plugin_service):
 
     assert "pixelle_create_project" in tool_names
     assert "pixelle_get_capabilities" in tool_names
+    assert "pixelle_list_production_templates" in tool_names
+    assert "pixelle_set_project_generation_settings" in tool_names
     assert "pixelle_list_generation_pipelines" in tool_names
     assert "pixelle_submit_generation_draft" in tool_names
     assert "pixelle_approve_generation_draft" in tool_names

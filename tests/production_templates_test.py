@@ -49,6 +49,9 @@ def test_project_default_template_resolves_without_runtime_provider_choice():
     assert template.entry == "script"
     assert template.user_selectable_runtime is False
     assert template.user_selectable_providers == []
+    assert template.use_case == "daily"
+    assert template.runtime_label == "标准稳定合成"
+    assert template.advanced_controls_hidden is True
 
 
 def test_template_compile_fails_when_required_capability_is_unavailable():
@@ -94,3 +97,46 @@ def test_high_quality_template_does_not_fallback_when_new_runtime_is_unavailable
             input={"script": "Scene one."},
             available_capabilities={"llm", "tts", "media", "ffmpeg", "persistence"},
         )
+
+
+def test_templates_include_product_metadata_and_light_montage_options():
+    registry = build_default_production_template_registry()
+
+    templates = {template.id: template for template in registry.list()}
+
+    assert list(templates) == [
+        "petwoods_xhs_daily_v1",
+        "petwoods_xhs_quality_explainer_v1",
+        "petwoods_xhs_asset_enhanced_v1",
+        "petwoods_xhs_real_material_montage_v1",
+    ]
+    assert templates["petwoods_xhs_quality_explainer_v1"].use_case == "high_quality"
+    assert templates["petwoods_xhs_quality_explainer_v1"].runtime_label == "高质量动效合成"
+    assert "渲染环境" in templates["petwoods_xhs_quality_explainer_v1"].failure_guidance
+    assert templates["petwoods_xhs_real_material_montage_v1"].requires_user_assets is True
+    assert templates["petwoods_xhs_real_material_montage_v1"].pipeline_id == "asset_based"
+    assert templates["petwoods_xhs_real_material_montage_v1"].entry == "assets"
+    assert templates["petwoods_xhs_real_material_montage_v1"].user_selectable_providers == []
+
+
+def test_asset_montage_template_compiles_to_asset_based_request_without_provider_choice():
+    registry = build_default_production_template_registry()
+
+    request = registry.compile_request(
+        "petwoods_xhs_real_material_montage_v1",
+        input={
+            "assets": [
+                {"kind": "video", "path": "footage/cat-1.mp4", "role": "source_footage"},
+                {"kind": "image", "path": "footage/cat-cover.png", "role": "cover"},
+            ],
+            "intent": "猫咪生活方式科普",
+        },
+    )
+
+    assert request.pipeline_id == "asset_based"
+    assert request.entry == "assets"
+    assert request.input["assets"][0]["role"] == "source_footage"
+    assert request.params["compose_runtime"] == "html_ffmpeg"
+    assert request.params["quality_profile"] == "basic"
+    assert "provider" not in request.params
+    assert request.metadata["production_template"]["id"] == "petwoods_xhs_real_material_montage_v1"

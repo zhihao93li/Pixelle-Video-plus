@@ -140,9 +140,14 @@ def test_generation_templates_endpoint_lists_builtin_production_templates():
     assert [template["id"] for template in payload["templates"]] == [
         "petwoods_xhs_daily_v1",
         "petwoods_xhs_quality_explainer_v1",
+        "petwoods_xhs_asset_enhanced_v1",
+        "petwoods_xhs_real_material_montage_v1",
     ]
     assert payload["templates"][0]["display_name"] == "PetWoods 小红书日常短视频 v1"
     assert payload["templates"][0]["user_selectable_providers"] == []
+    assert payload["templates"][0]["use_case"] == "daily"
+    assert payload["templates"][1]["runtime_label"] == "高质量动效合成"
+    assert payload["templates"][3]["requires_user_assets"] is True
 
 
 def test_generation_template_task_endpoint_compiles_template_and_submits_request():

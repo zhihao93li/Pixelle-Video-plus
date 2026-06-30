@@ -34,6 +34,7 @@ class OpsStore:
                     product TEXT NOT NULL,
                     channel TEXT NOT NULL,
                     description TEXT,
+                    generation_settings_json TEXT NOT NULL DEFAULT '{}',
                     source_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
@@ -135,6 +136,7 @@ class OpsStore:
                 );
                 """
             )
+            self._ensure_operating_projects_generation_settings(conn)
             self._migrate_legacy_social_accounts(conn)
 
     def create_project(
@@ -145,6 +147,7 @@ class OpsStore:
         channel: str,
         source: dict[str, Any],
         description: str | None = None,
+        generation_settings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         row = {
             "id": _new_id("op"),
@@ -152,6 +155,7 @@ class OpsStore:
             "product": product,
             "channel": channel,
             "description": description,
+            "generation_settings_json": _to_json(generation_settings or {}),
             "source_json": _to_json(source),
             "created_at": _now(),
         }
@@ -492,6 +496,23 @@ class OpsStore:
     def get_project(self, project_id: str) -> dict[str, Any] | None:
         return self._fetch_one("SELECT * FROM operating_projects WHERE id = ?", (project_id,))
 
+    def update_project_generation_settings(
+        self,
+        *,
+        project_id: str,
+        generation_settings: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE operating_projects
+                SET generation_settings_json = ?
+                WHERE id = ?
+                """,
+                (_to_json(generation_settings), project_id),
+            )
+        return self.get_project(project_id)
+
     def get_channel_account(self, channel_account_id: str) -> dict[str, Any] | None:
         return self._fetch_one("SELECT * FROM channel_accounts WHERE id = ?", (channel_account_id,))
 
@@ -651,6 +672,17 @@ class OpsStore:
                 created_at
             FROM social_accounts
             """
+        )
+
+    def _ensure_operating_projects_generation_settings(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(operating_projects)").fetchall()
+        }
+        if "generation_settings_json" in columns:
+            return
+        conn.execute(
+            "ALTER TABLE operating_projects ADD COLUMN generation_settings_json TEXT NOT NULL DEFAULT '{}'"
         )
 
     def _fetch_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:

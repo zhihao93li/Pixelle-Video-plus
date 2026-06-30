@@ -60,6 +60,33 @@ def test_build_generation_request_from_video_params_uses_manifest_entry_fields()
     assert request.params["media_height"] == 1024
 
 
+def test_build_generation_request_from_video_params_can_use_production_template():
+    from web.utils.generation_tasks import build_generation_request_from_video_params
+
+    registry = _registry_with_pipeline(RecordingPipeline())
+
+    request = build_generation_request_from_video_params(
+        pipeline_registry=registry,
+        video_params={
+            "text": "Scene one.\nScene two.",
+            "mode": "fixed",
+            "title": "Approved script",
+            "tts_voice": "should-not-override-template",
+            "media_workflow": "should-not-override-template",
+        },
+        production_template_id="petwoods_xhs_daily_v1",
+    )
+
+    assert request.pipeline_id == "standard"
+    assert request.entry == "script"
+    assert request.input == {"script": "Scene one.\nScene two."}
+    assert request.params["title"] == "Approved script"
+    assert request.params["tts_voice"] == "zh-CN-YunjianNeural"
+    assert request.params["compose_runtime"] == "html_ffmpeg"
+    assert "media_workflow" not in request.params
+    assert request.metadata["production_template"]["id"] == "petwoods_xhs_daily_v1"
+
+
 @pytest.mark.asyncio
 async def test_submit_video_params_as_generation_task_does_not_call_legacy_generate_video():
     from web.utils.generation_tasks import submit_video_params_as_generation_task
@@ -113,3 +140,5 @@ def test_single_output_preview_uses_generation_task_helper():
 
     assert "submit_video_params_as_generation_task" in source
     assert "pixelle_video.generate_video" not in source
+    assert "build_default_production_template_registry" in source
+    assert "generation_pipeline_select" not in source
