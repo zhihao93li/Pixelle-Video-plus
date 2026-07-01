@@ -11,6 +11,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!apps/production-template-demo/src/lib/
+!apps/production-template-demo/src/lib/**
 lib64/
 parts/
 sdist/
