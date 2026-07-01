@@ -6,6 +6,7 @@
 适用范围：Pixelle 视频生成、生产模板、Ops/Codex 生成闭环、未来 pipeline 扩展
 目标读者：产品、后端、前端、Codex/自动化执行者
 配套技术方案：`docs/zh/product/pixelle-montage-capability-integration-technical-plan.md`
+产品化改造 PRD：`docs/zh/product/pixelle-production-template-productization-prd.md`
 
 ## 1. 一句话目标
 
