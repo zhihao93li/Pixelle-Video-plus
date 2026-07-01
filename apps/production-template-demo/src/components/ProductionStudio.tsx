@@ -3,6 +3,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock3,
+  Copy,
   FileText,
   Loader2,
   Play,
@@ -42,6 +43,12 @@ import {
   type GenerationTask,
   type ProductionTemplate,
 } from "@/lib/generationApi"
+import {
+  buildAssetItems,
+  buildQualitySummary,
+  type AssetManifestInput,
+  type QualityReviewInput,
+} from "@/lib/resultSummary"
 import { cn } from "@/lib/utils"
 
 const DAILY_TEMPLATE_ID = "petwoods_xhs_daily_v1"
@@ -371,12 +378,13 @@ function TaskPanel({
   pollError: string | null
 }) {
   const videoUrl = artifactFileUrl(result?.primary_video)
-  const qualityReview = result?.metadata?.quality_review as
-    | { status?: string; summary?: string }
-    | undefined
-  const assetManifest = result?.metadata?.asset_manifest as
-    | { summary?: { total?: number } }
-    | undefined
+  const qualitySummary = buildQualitySummary(
+    result?.metadata?.quality_review as QualityReviewInput | undefined
+  )
+  const assetManifest = result?.metadata
+    ?.asset_manifest as AssetManifestInput | undefined
+  const assetItems = buildAssetItems(assetManifest)
+  const assetCount = assetManifest?.assets?.length ?? assetItems.length
 
   return (
     <aside className="flex flex-col gap-5">
@@ -407,7 +415,18 @@ function TaskPanel({
                     {task.task_id}
                   </div>
                 </div>
-                <StatusBadge status={task.status} />
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button
+                    aria-label="复制任务 ID"
+                    onClick={() => void navigator.clipboard?.writeText(task.task_id)}
+                    size="icon-sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    <Copy />
+                  </Button>
+                  <StatusBadge status={task.status} />
+                </div>
               </div>
 
               <div className="rounded-lg border bg-muted/30 p-3">
@@ -477,26 +496,80 @@ function TaskPanel({
               )}
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <Fact label="duration" value={formatDuration(result.duration)} />
-                <Fact label="file size" value={formatBytes(result.file_size)} />
+                <Fact label="时长" value={formatDuration(result.duration)} />
+                <Fact label="文件大小" value={formatBytes(result.file_size)} />
                 <Fact
-                  label="quality"
-                  value={qualityReview?.status || "未返回"}
+                  label="发布判断"
+                  value={qualitySummary.label}
                 />
                 <Fact
-                  label="assets"
-                  value={
-                    assetManifest?.summary?.total != null
-                      ? `${assetManifest.summary.total} 项`
-                      : "未返回"
-                  }
+                  label="素材记录"
+                  value={assetCount ? `${assetCount} 项` : "未返回"}
                 />
               </div>
 
               <Separator />
 
+              <div className="rounded-lg border bg-background p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-medium">质量检查</div>
+                  <QualityBadge tone={qualitySummary.tone} label={qualitySummary.label} />
+                </div>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {qualitySummary.summary}
+                </p>
+                <QualityMessages
+                  failures={qualitySummary.failures}
+                  warnings={qualitySummary.warnings}
+                />
+              </div>
+
+              <div className="rounded-lg border bg-background p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-medium">素材清单</div>
+                  <Badge variant="outline">
+                    {assetCount ? `${assetCount} 项` : "未返回"}
+                  </Badge>
+                </div>
+                {assetItems.length > 0 ? (
+                  <div className="mt-3 flex flex-col gap-2">
+                    {assetItems.map((asset, index) => (
+                      <div
+                        className="rounded-lg bg-muted/40 p-3"
+                        key={`${asset.label}-${index}`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-medium">{asset.label}</div>
+                          <Badge
+                            variant={
+                              asset.statusLabel === "缺失"
+                                ? "destructive"
+                                : "secondary"
+                            }
+                          >
+                            {asset.statusLabel}
+                          </Badge>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {asset.kind}
+                        </div>
+                        <div className="mt-2 line-clamp-2 break-all font-mono text-xs text-muted-foreground">
+                          {asset.detail}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
+                    后端没有返回素材清单。
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
               <div>
-                <div className="text-sm font-medium">primary_video.path</div>
+                <div className="text-sm font-medium">成片路径</div>
                 <div className="mt-2 break-all rounded-lg bg-muted/40 p-3 font-mono text-xs text-muted-foreground">
                   {result.primary_video.path}
                 </div>
@@ -506,6 +579,57 @@ function TaskPanel({
         </CardContent>
       </Card>
     </aside>
+  )
+}
+
+function QualityBadge({
+  tone,
+  label,
+}: {
+  tone: ReturnType<typeof buildQualitySummary>["tone"]
+  label: string
+}) {
+  if (tone === "failed") {
+    return <Badge variant="destructive">{label}</Badge>
+  }
+  if (tone === "warning" || tone === "missing") {
+    return <Badge variant="outline">{label}</Badge>
+  }
+  return <Badge variant="secondary">{label}</Badge>
+}
+
+function QualityMessages({
+  failures,
+  warnings,
+}: {
+  failures: string[]
+  warnings: string[]
+}) {
+  const messages = [
+    ...failures.map((message) => ({ tone: "failed", message })),
+    ...warnings.map((message) => ({ tone: "warning", message })),
+  ]
+
+  if (messages.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      {messages.map((item, index) => (
+        <div
+          className={cn(
+            "rounded-lg px-3 py-2 text-sm leading-6",
+            item.tone === "failed"
+              ? "bg-destructive/10 text-destructive"
+              : "bg-muted/60 text-muted-foreground"
+          )}
+          key={`${item.tone}-${index}`}
+        >
+          {item.message}
+        </div>
+      ))}
+    </div>
   )
 }
 
