@@ -72,6 +72,7 @@ class ImageAnalysisService(ComfyBaseService):
         # ComfyUI connection (optional overrides)
         comfyui_url: Optional[str] = None,
         runninghub_api_key: Optional[str] = None,
+        runninghub_instance_type: Optional[str] = None,
         # Additional workflow parameters
         **params
     ) -> str:
@@ -84,6 +85,7 @@ class ImageAnalysisService(ComfyBaseService):
             workflow: Workflow filename (optional, overrides source-based resolution)
             comfyui_url: ComfyUI URL (optional, overrides config)
             runninghub_api_key: RunningHub API key (optional, overrides config)
+            runninghub_instance_type: RunningHub instance type (optional, overrides config)
             **params: Additional workflow parameters
         
         Returns:
@@ -132,9 +134,20 @@ class ImageAnalysisService(ComfyBaseService):
         logger.debug(f"Workflow parameters: {workflow_params}")
         
         # 4. Execute workflow using shared ComfyKit instance from core
+        kit = None
+        should_close_kit = False
         try:
-            # Get shared ComfyKit instance (lazy initialization + config hot-reload)
-            kit = await self.core._get_or_create_comfykit()
+            if comfyui_url or runninghub_api_key or runninghub_instance_type:
+                kit_config = self._prepare_comfykit_config(
+                    comfyui_url=comfyui_url,
+                    runninghub_api_key=runninghub_api_key,
+                    runninghub_instance_type=runninghub_instance_type,
+                )
+                kit = ComfyKit(**kit_config)
+                should_close_kit = True
+            else:
+                # Get shared ComfyKit instance (lazy initialization + config hot-reload)
+                kit = await self.core._get_or_create_comfykit()
             
             # Determine what to pass to ComfyKit based on source
             if workflow_info["source"] == "runninghub" and "workflow_id" in workflow_info:
@@ -156,10 +169,14 @@ class ImageAnalysisService(ComfyBaseService):
             
             # Extract text description from result (format varies by source)
             description = None
+
+            # Try format 0: ComfyKit normalized texts array
+            if result.texts and len(result.texts) > 0:
+                description = result.texts[0]
             
             # Try format 1: Selfhost outputs (direct text in outputs)
             # Format: {'6': {'text': ['description text']}}
-            if result.outputs:
+            if not description and result.outputs:
                 for node_id, node_output in result.outputs.items():
                     if 'text' in node_output:
                         text_list = node_output['text']
@@ -195,3 +212,6 @@ class ImageAnalysisService(ComfyBaseService):
         except Exception as e:
             logger.error(f"Image analysis error: {e}")
             raise
+        finally:
+            if should_close_kit and kit is not None:
+                await kit.close()

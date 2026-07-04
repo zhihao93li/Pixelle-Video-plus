@@ -18,10 +18,16 @@ from api.routers.content import router as content_router
 from api.routers.files import router as files_router
 from api.routers.frame import router as frame_router
 from api.routers.generation import router as generation_router
+from api.routers.generation_settings import router as generation_settings_router
+from api.routers.help import router as help_router
+from api.routers.history import router as history_router
 from api.routers.health import router as health_router
 from api.routers.image import router as image_router
 from api.routers.llm import router as llm_router
+from api.routers.media import router as media_router
+from api.routers.publish import router as publish_router
 from api.routers.resources import router as resources_router
+from api.routers.settings import router as settings_router
 from api.routers.tasks import router as tasks_router
 from api.routers.tts import router as tts_router
 from api.routers.video import router as video_router
@@ -31,6 +37,7 @@ __all__ = [
     "llm_router",
     "tts_router",
     "image_router",
+    "media_router",
     "content_router",
     "video_router",
     "tasks_router",
@@ -38,4 +45,9 @@ __all__ = [
     "resources_router",
     "frame_router",
     "generation_router",
+    "generation_settings_router",
+    "help_router",
+    "history_router",
+    "publish_router",
+    "settings_router",
 ]

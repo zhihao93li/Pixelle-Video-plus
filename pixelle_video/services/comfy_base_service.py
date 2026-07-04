@@ -238,6 +238,7 @@ class ComfyBaseService:
         comfyui_url: Optional[str] = None,
         runninghub_api_key: Optional[str] = None,
         runninghub_instance_type: Optional[str] = None,
+        runninghub_timeout: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Prepare ComfyKit configuration
@@ -246,6 +247,7 @@ class ComfyBaseService:
             comfyui_url: ComfyUI URL (optional, overrides config)
             runninghub_api_key: RunningHub API key (optional, overrides config)
             runninghub_instance_type: RunningHub instance type (optional, overrides config)
+            runninghub_timeout: RunningHub task timeout in seconds (optional, overrides config)
         
         Returns:
             ComfyKit configuration dict
@@ -279,9 +281,25 @@ class ComfyBaseService:
         )
         if final_instance_type and final_instance_type.strip():
             kit_config["runninghub_instance_type"] = final_instance_type
+
+        final_timeout = (
+            runninghub_timeout
+            or self.global_config.get("runninghub_timeout")
+            or os.getenv("RUNNINGHUB_TIMEOUT")
+        )
+        if final_timeout:
+            kit_config["runninghub_timeout"] = int(final_timeout)
         
-        logger.debug(f"ComfyKit config: {kit_config}")
+        logger.debug(f"ComfyKit config: {self._redact_sensitive_config(kit_config)}")
         return kit_config
+
+    @staticmethod
+    def _redact_sensitive_config(config: Dict[str, Any]) -> Dict[str, Any]:
+        sensitive_fragments = ("api_key", "token", "secret", "password")
+        return {
+            key: "***" if value and any(fragment in key.lower() for fragment in sensitive_fragments) else value
+            for key, value in config.items()
+        }
     
     def list_workflows(self) -> List[Dict[str, Any]]:
         """
@@ -329,4 +347,3 @@ class ComfyBaseService:
             f"default={default!r} "
             f"available=[{available}]>"
         )
-

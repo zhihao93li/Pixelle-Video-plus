@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ from pixelle_video.generation.compose_runtime import (
     ComposeRuntimeError,
     ComposeRuntimeRegistry,
     ComposeRuntimeResult,
+    HyperframesComposeRuntime,
     render_with_compose_runtime,
 )
 
@@ -76,3 +78,44 @@ def test_render_with_compose_runtime_does_not_fallback_after_runtime_failure(tmp
     assert len(hyperframes.calls) == 1
     assert html_ffmpeg.calls == []
     assert not (tmp_path / "fallback.mp4").exists()
+
+
+def test_hyperframes_render_uses_non_interactive_npx_yes(monkeypatch, tmp_path):
+    commands = []
+    output_path = tmp_path / "final.mp4"
+
+    def fake_run(self, command, *, cwd):
+        commands.append(command)
+        if "render" in command:
+            output_path.write_bytes(b"video")
+
+    monkeypatch.setattr("pixelle_video.generation.compose_runtime.shutil.which", lambda name: "/usr/bin/npx")
+    monkeypatch.setattr(HyperframesComposeRuntime, "_run", fake_run)
+
+    result = HyperframesComposeRuntime().render(
+        ComposeRuntimeContext(
+            segment_paths=[str(_context(tmp_path).segment_paths[0])],
+            output_path=str(output_path),
+            task_dir=str(tmp_path),
+        )
+    )
+
+    assert result.runtime_id == "hyperframes"
+    assert [command[:3] for command in commands] == [
+        ["npx", "--yes", "hyperframes"],
+        ["npx", "--yes", "hyperframes"],
+        ["npx", "--yes", "hyperframes"],
+    ]
+
+
+def test_hyperframes_run_reports_timeout_as_runtime_error(monkeypatch, tmp_path):
+    def fake_run(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, timeout=180)
+
+    monkeypatch.setattr("pixelle_video.generation.compose_runtime.subprocess.run", fake_run)
+
+    with pytest.raises(ComposeRuntimeError, match="timed out after 180s"):
+        HyperframesComposeRuntime()._run(
+            ["npx", "--yes", "hyperframes", "lint"],
+            cwd=tmp_path,
+        )

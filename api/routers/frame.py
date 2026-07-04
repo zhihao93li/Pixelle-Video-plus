@@ -69,7 +69,8 @@ async def render_frame(
         frame_path = await generator.generate_frame(
             title=request.title,
             text=request.text,
-            image=request.image
+            image=request.image,
+            ext={"index": 1, **request.template_params},
         )
         
         return FrameRenderResponse(
@@ -158,4 +159,3 @@ async def get_template_params(
     except Exception as e:
         logger.error(f"Get template params error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-

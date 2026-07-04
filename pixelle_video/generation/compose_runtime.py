@@ -94,11 +94,12 @@ class HyperframesComposeRuntime:
             encoding="utf-8",
         )
 
-        self._run(["npx", "hyperframes", "lint"], cwd=project_dir)
-        self._run(["npx", "hyperframes", "inspect", "--samples", "5"], cwd=project_dir)
+        self._run(["npx", "--yes", "hyperframes", "lint"], cwd=project_dir)
+        self._run(["npx", "--yes", "hyperframes", "inspect", "--samples", "5"], cwd=project_dir)
         self._run(
             [
                 "npx",
+                "--yes",
                 "hyperframes",
                 "render",
                 "--output",
@@ -283,14 +284,19 @@ Warm editorial pet-care explainer with tactile caption cards, soft cream surface
 """
 
     def _run(self, command: list[str], *, cwd: Path) -> None:
-        completed = subprocess.run(
-            command,
-            cwd=str(cwd),
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(cwd),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ComposeRuntimeError(
+                f"HyperFrames command timed out after {exc.timeout:g}s: {' '.join(command)}"
+            ) from exc
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or "").strip()
             raise ComposeRuntimeError(

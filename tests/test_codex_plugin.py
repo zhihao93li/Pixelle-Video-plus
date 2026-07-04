@@ -519,7 +519,9 @@ async def test_plugin_lists_production_templates_and_sets_project_default(plugin
     assert listed["status"] == "ok"
     assert listed["default_template"] == "petwoods_xhs_daily_v1"
     assert listed["templates"][0]["user_selectable_providers"] == []
-    assert listed["templates"][1]["runtime_label"] == "高质量动效合成"
+    templates = {template["id"]: template for template in listed["templates"]}
+    assert templates["petwoods_xhs_topic_to_video_v1"]["input_requirements"] == ["topic"]
+    assert templates["petwoods_xhs_quality_explainer_v1"]["runtime_label"] == "高质量动效合成"
     assert settings["generation_settings"]["default_production_template_id"] == (
         "petwoods_xhs_quality_explainer_v1"
     )

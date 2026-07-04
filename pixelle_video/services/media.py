@@ -17,12 +17,15 @@ Supports both image and video generation workflows.
 Automatically detects output type based on ExecuteResult.
 """
 
-from typing import Optional
+from typing import Callable, Optional
 
 from comfykit import ComfyKit
 from loguru import logger
 
 from pixelle_video.services.comfy_base_service import ComfyBaseService
+from pixelle_video.services.provider_execution import (
+    execute_workflow_with_provider_progress,
+)
 from pixelle_video.models.media import MediaResult
 
 
@@ -125,6 +128,7 @@ class MediaService(ComfyBaseService):
         seed: Optional[int] = None,
         cfg: Optional[float] = None,
         sampler: Optional[str] = None,
+        provider_progress_callback: Optional[Callable[[dict], None]] = None,
         **params
     ) -> MediaResult:
         """
@@ -240,7 +244,13 @@ class MediaService(ComfyBaseService):
                 workflow_input = workflow_info["path"]
                 logger.info(f"Executing selfhost workflow: {workflow_input}")
             
-            result = await kit.execute(workflow_input, workflow_params)
+            result = await execute_workflow_with_provider_progress(
+                kit,
+                workflow_input,
+                workflow_params,
+                source=workflow_info["source"],
+                provider_progress_callback=provider_progress_callback,
+            )
             
             # 5. Handle result based on specified media_type
             if result.status != "completed":

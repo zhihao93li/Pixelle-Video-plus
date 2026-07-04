@@ -16,7 +16,9 @@ File service endpoints
 Provides access to generated files (videos, images, audio) and resource files.
 """
 
+import re
 from pathlib import Path
+from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from loguru import logger
@@ -115,9 +117,7 @@ async def get_file(file_path: str):
         return FileResponse(
             path=str(abs_path),
             media_type=media_type,
-            headers={
-                "Content-Disposition": f'inline; filename="{abs_path.name}"'
-            }
+            headers={"Content-Disposition": _inline_content_disposition(abs_path.name)},
         )
         
     except HTTPException:
@@ -126,3 +126,14 @@ async def get_file(file_path: str):
         logger.error(f"File access error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+def _inline_content_disposition(filename: str) -> str:
+    fallback = _ascii_fallback_filename(filename)
+    encoded = quote(filename, safe="")
+    return f"inline; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+
+
+def _ascii_fallback_filename(filename: str) -> str:
+    fallback = filename.encode("ascii", "ignore").decode("ascii")
+    fallback = re.sub(r'[\\"]+', "_", fallback).strip(" ._")
+    return fallback or "file"

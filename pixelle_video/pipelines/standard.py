@@ -336,7 +336,9 @@ class StandardPipeline(LinearVideoPipeline):
                                 frame_current=i+1,
                                 frame_total=len(storyboard.frames),
                                 step=event.step,
-                                action=event.action
+                                action=event.action,
+                                extra_info=event.extra_info,
+                                detail=event.detail,
                             )
                             ctx.progress_callback(adjusted_event)
                     
@@ -390,7 +392,9 @@ class StandardPipeline(LinearVideoPipeline):
                             frame_current=event.frame_current,
                             frame_total=event.frame_total,
                             step=event.step,
-                            action=event.action
+                            action=event.action,
+                            extra_info=event.extra_info,
+                            detail=event.detail,
                         )
                         ctx.progress_callback(adjusted_event)
                 
@@ -421,7 +425,8 @@ class StandardPipeline(LinearVideoPipeline):
         segment_paths = [frame.video_segment_path for frame in storyboard.frames]
 
         compose_runtime = ctx.params.get("compose_runtime", "html_ffmpeg")
-        compose_result = render_with_compose_runtime(
+        compose_result = await asyncio.to_thread(
+            render_with_compose_runtime,
             compose_runtime,
             ComposeRuntimeContext(
                 segment_paths=segment_paths,

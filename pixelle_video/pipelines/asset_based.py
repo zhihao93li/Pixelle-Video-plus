@@ -222,7 +222,11 @@ class AssetBasedPipeline(LinearVideoPipeline):
             if asset_type == "image":
                 # Analyze image using ImageAnalysisService
                 analysis_source = context.request.get("source", "runninghub")
-                description = await self.core.image_analysis(asset_path, source=analysis_source)
+                runninghub_instance_type = context.request.get("runninghub_instance_type")
+                analysis_kwargs = {"source": analysis_source}
+                if runninghub_instance_type:
+                    analysis_kwargs["runninghub_instance_type"] = runninghub_instance_type
+                description = await self.core.image_analysis(asset_path, **analysis_kwargs)
 
                 self.asset_index[asset_path] = {
                     "path": asset_path,
@@ -236,8 +240,12 @@ class AssetBasedPipeline(LinearVideoPipeline):
             elif asset_type == "video":
                 # Analyze video using VideoAnalysisService
                 analysis_source = context.request.get("source", "runninghub")
+                runninghub_instance_type = context.request.get("runninghub_instance_type")
+                analysis_kwargs = {"source": analysis_source}
+                if runninghub_instance_type:
+                    analysis_kwargs["runninghub_instance_type"] = runninghub_instance_type
                 try:
-                    description = await self.core.video_analysis(asset_path, source=analysis_source)
+                    description = await self.core.video_analysis(asset_path, **analysis_kwargs)
 
                     self.asset_index[asset_path] = {
                         "path": asset_path,
@@ -868,4 +876,3 @@ class AssetBasedPipeline(LinearVideoPipeline):
             return "video"
         else:
             return "unknown"
-

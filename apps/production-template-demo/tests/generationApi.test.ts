@@ -1,0 +1,581 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+
+import {
+  addRunninghubWorkflow,
+  cancelGenerationTask,
+  checkPublishConfiguration,
+  createGenerationBatch,
+  createGenerationTemplateTask,
+  createScriptReviewDraftSet,
+  fetchBufferChannels,
+  generateMediaPreview,
+  getFrameTemplateParams,
+  getScriptReviewDraftSet,
+  getHelpFaq,
+  getHistoryTaskDetail,
+  getGenerationBatch,
+  getPublishRecord,
+  getSettingsConfig,
+  getSettingsDiagnostics,
+  listResourceBgm,
+  listResourceMediaWorkflows,
+  listResourceTemplates,
+  listResourceTtsWorkflows,
+  listRunninghubWorkflows,
+  listGenerationProjects,
+  listGenerationBatches,
+  listHistoryTasks,
+  listPublishTimezones,
+  listScriptReviewDraftSets,
+  listScriptReviewTemplates,
+  loadLlmModels,
+  publishTask,
+  renderFramePreview,
+  resetSettingsConfig,
+  retryGenerationBatchItem,
+  submitScriptReviewDraftSetTasks,
+  synthesizeTtsPreview,
+  testComfyuiConnection,
+  testLlmConnection,
+  uploadGenerationAssets,
+  uploadResourceBgm,
+  updateScriptReviewDraftSet,
+  updateSettingsConfig,
+  updateProjectGenerationSettings,
+} from "../src/lib/generationApi.ts"
+
+type FetchCall = {
+  url: string
+  init?: RequestInit
+}
+
+function installFetchMock(responseBody: unknown, status = 200) {
+  const calls: FetchCall[] = []
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init })
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status >= 200 && status < 300 ? "OK" : "Error",
+      text: async () => JSON.stringify(responseBody),
+    } as Response
+  }) as typeof fetch
+  return calls
+}
+
+test("history list API sends pagination and filter query parameters", async () => {
+  const calls = installFetchMock({ tasks: [], total: 0, page: 2, page_size: 10 })
+
+  await listHistoryTasks({
+    page: 2,
+    pageSize: 10,
+    status: "completed",
+    sortBy: "completed_at",
+    sortOrder: "asc",
+  })
+
+  assert.equal(
+    calls[0].url,
+    "http://127.0.0.1:8000/api/history/tasks?page=2&page_size=10&status=completed&sort_by=completed_at&sort_order=asc"
+  )
+})
+
+test("history detail and publish record APIs use task-scoped routes", async () => {
+  const calls = installFetchMock({ task_id: "task-1", record: null })
+
+  await getHistoryTaskDetail("task-1")
+  await getPublishRecord("task-1")
+
+  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/history/tasks/task-1")
+  assert.equal(
+    calls[1].url,
+    "http://127.0.0.1:8000/api/publish/tasks/task-1/record"
+  )
+})
+
+test("publish APIs send selected platforms and copy without provider choices", async () => {
+  const calls = installFetchMock({ checks: [] })
+
+  await listPublishTimezones()
+  await checkPublishConfiguration(["youtube", "instagram"])
+  await publishTask("task-1", {
+    platforms: ["youtube"],
+    caption: "Caption #petcare",
+    title: "Title",
+    dueAt: "2026-07-04T09:00:00+08:00",
+  })
+
+  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/publish/timezones")
+  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/publish/check")
+  assert.equal(
+    calls[1].init?.body,
+    JSON.stringify({ platforms: ["youtube", "instagram"] })
+  )
+  assert.equal(calls[2].url, "http://127.0.0.1:8000/api/publish/tasks/task-1")
+  assert.equal(
+    calls[2].init?.body,
+    JSON.stringify({
+      platforms: ["youtube"],
+      caption: "Caption #petcare",
+      title: "Title",
+      due_at: "2026-07-04T09:00:00+08:00",
+    })
+  )
+})
+
+test("project generation settings APIs read projects and persist default template", async () => {
+  const calls = installFetchMock({ status: "ok", projects: [] })
+
+  await listGenerationProjects()
+  await updateProjectGenerationSettings(
+    "project-1",
+    "petwoods_xhs_quality_explainer_v1"
+  )
+
+  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/generation/projects")
+  assert.equal(
+    calls[1].url,
+    "http://127.0.0.1:8000/api/generation/projects/project-1/generation-settings"
+  )
+  assert.equal(
+    calls[1].init?.body,
+    JSON.stringify({
+      default_production_template_id: "petwoods_xhs_quality_explainer_v1",
+    })
+  )
+})
+
+test("resource APIs read BGM templates and workflows", async () => {
+  const calls = installFetchMock({ bgm_files: [], templates: [], workflows: [] })
+
+  await listResourceBgm()
+  await listResourceTemplates()
+  await listResourceMediaWorkflows()
+  await listResourceTtsWorkflows()
+
+  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/resources/bgm")
+  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/resources/templates")
+  assert.equal(
+    calls[2].url,
+    "http://127.0.0.1:8000/api/resources/workflows/media"
+  )
+  assert.equal(
+    calls[3].url,
+    "http://127.0.0.1:8000/api/resources/workflows/tts"
+  )
+})
+
+test("preview APIs call existing TTS and frame endpoints", async () => {
+  const calls = installFetchMock({
+    success: true,
+    audio_path: "/tmp/output/tts-preview.mp3",
+    duration: 2.4,
+    frame_path: "/tmp/output/frame-preview.png",
+    width: 1080,
+    height: 1920,
+    template: "1080x1920/image_default.html",
+    media_width: 1080,
+    media_height: 1440,
+    params: {},
+  })
+
+  await synthesizeTtsPreview({
+    text: "Preview copy",
+    inferenceMode: "fish",
+    referenceId: "voice-1",
+    speed: 1.1,
+    fishModel: "s2-pro",
+  })
+  await renderFramePreview({
+    template: "1080x1920/image_default.html",
+    title: "Preview title",
+    text: "Preview copy",
+    templateParams: { accent_color: "#ff0000" },
+  })
+  await generateMediaPreview({
+    prompt: "warm pet care image",
+    workflow: "runninghub/image_flux.json",
+    mediaType: "image",
+    width: 1080,
+    height: 1440,
+  })
+  await getFrameTemplateParams("1080x1920/image_default.html")
+
+  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/tts/synthesize")
+  assert.equal(
+    calls[0].init?.body,
+    JSON.stringify({
+      text: "Preview copy",
+      inference_mode: "fish",
+      reference_id: "voice-1",
+      speed: 1.1,
+      fish_model: "s2-pro",
+    })
+  )
+  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/frame/render")
+  assert.equal(
+    calls[1].init?.body,
+    JSON.stringify({
+      template: "1080x1920/image_default.html",
+      title: "Preview title",
+      text: "Preview copy",
+      template_params: { accent_color: "#ff0000" },
+    })
+  )
+  assert.equal(calls[2].url, "http://127.0.0.1:8000/api/media/generate")
+  assert.equal(
+    calls[2].init?.body,
+    JSON.stringify({
+      prompt: "warm pet care image",
+      workflow: "runninghub/image_flux.json",
+      media_type: "image",
+      width: 1080,
+      height: 1440,
+    })
+  )
+  assert.equal(
+    calls[3].url,
+    "http://127.0.0.1:8000/api/frame/template/params?template=1080x1920%2Fimage_default.html"
+  )
+})
+
+test("settings config APIs read and save shared app configuration", async () => {
+  const calls = installFetchMock({ configured: true, config: {} })
+
+  await getSettingsConfig()
+  await updateSettingsConfig({
+    llm: {
+      api_key: "llm-key",
+      base_url: "https://aihubmix.com/v1",
+      model: "deepseek-v4-flash",
+    },
+    publish: {
+      buffer: {
+        api_key: "buffer-key",
+        channels: { youtube: "yt-channel" },
+      },
+    },
+  })
+  await resetSettingsConfig()
+
+  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/settings/config")
+  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/settings/config")
+  assert.equal(calls[1].init?.method, "PUT")
+  assert.equal(
+    calls[1].init?.body,
+    JSON.stringify({
+      llm: {
+        api_key: "llm-key",
+        base_url: "https://aihubmix.com/v1",
+        model: "deepseek-v4-flash",
+      },
+      publish: {
+        buffer: {
+          api_key: "buffer-key",
+          channels: { youtube: "yt-channel" },
+        },
+      },
+    })
+  )
+  assert.equal(
+    calls[2].url,
+    "http://127.0.0.1:8000/api/settings/config/reset"
+  )
+  assert.equal(calls[2].init?.method, "POST")
+})
+
+test("settings diagnostics API reads redacted readiness checks", async () => {
+  const calls = installFetchMock({ ok: true, checks: [] })
+
+  await getSettingsDiagnostics()
+
+  assert.equal(
+    calls[0].url,
+    "http://127.0.0.1:8000/api/settings/diagnostics"
+  )
+})
+
+test("settings action APIs call real backend utilities", async () => {
+  const calls = installFetchMock({
+    models: [],
+    ok: true,
+    message: "ok",
+    model_count: 0,
+    workflows: [],
+    channels: [],
+    detected_channels: {},
+  })
+
+  await loadLlmModels("llm-key", "https://aihubmix.com/v1")
+  await testLlmConnection("llm-key", "https://aihubmix.com/v1")
+  await testComfyuiConnection("http://127.0.0.1:8188")
+  await listRunninghubWorkflows()
+  await addRunninghubWorkflow({
+    kind: "video",
+    name: "wan custom",
+    workflowId: "1985909483975188481",
+    overwrite: true,
+  })
+  await fetchBufferChannels("buffer-key")
+  await getHelpFaq("zh_CN")
+
+  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/settings/llm/models")
+  assert.equal(
+    calls[0].init?.body,
+    JSON.stringify({ api_key: "llm-key", base_url: "https://aihubmix.com/v1" })
+  )
+  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/settings/llm/test")
+  assert.equal(calls[2].url, "http://127.0.0.1:8000/api/settings/comfyui/test")
+  assert.equal(
+    calls[2].init?.body,
+    JSON.stringify({ comfyui_url: "http://127.0.0.1:8188" })
+  )
+  assert.equal(
+    calls[3].url,
+    "http://127.0.0.1:8000/api/settings/runninghub/workflows"
+  )
+  assert.equal(
+    calls[4].url,
+    "http://127.0.0.1:8000/api/settings/runninghub/workflows"
+  )
+  assert.equal(
+    calls[4].init?.body,
+    JSON.stringify({
+      kind: "video",
+      name: "wan custom",
+      workflow_id: "1985909483975188481",
+      overwrite: true,
+    })
+  )
+  assert.equal(
+    calls[5].url,
+    "http://127.0.0.1:8000/api/settings/buffer/channels"
+  )
+  assert.equal(calls[5].init?.body, JSON.stringify({ api_key: "buffer-key" }))
+  assert.equal(calls[6].url, "http://127.0.0.1:8000/api/help/faq?language=zh_CN")
+})
+
+test("asset upload API sends multipart form data without JSON content type", async () => {
+  const calls = installFetchMock({ count: 1, assets: [] })
+  const file = new File(["image-bytes"], "cat.jpg", { type: "image/jpeg" })
+  const bgmFile = new File(["audio-bytes"], "fresh.mp3", { type: "audio/mpeg" })
+
+  await uploadGenerationAssets([file])
+  await uploadResourceBgm(bgmFile)
+
+  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/generation/assets")
+  assert.equal(calls[0].init?.method, "POST")
+  assert.ok(calls[0].init?.body instanceof FormData)
+  assert.equal(
+    (calls[0].init?.headers as Record<string, string> | undefined)?.[
+      "Content-Type"
+    ],
+    undefined
+  )
+  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/resources/bgm/upload")
+  assert.equal(calls[1].init?.method, "POST")
+  assert.ok(calls[1].init?.body instanceof FormData)
+  assert.equal(
+    (calls[1].init?.headers as Record<string, string> | undefined)?.[
+      "Content-Type"
+    ],
+    undefined
+  )
+})
+
+test("generic production template task API sends asset template input and metadata", async () => {
+  const calls = installFetchMock({ success: true, generation_task_id: "task-1" })
+
+  await createGenerationTemplateTask(
+    "petwoods_xhs_asset_enhanced_v1",
+    {
+      assets: ["/tmp/cat.jpg"],
+      video_title: "猫咪日常",
+      intent: "用用户素材包装成小红书短视频",
+      duration: 30,
+    },
+    {
+      source: "react_p8_demo",
+      uploaded_assets: [{ path: "/tmp/cat.jpg", kind: "image" }],
+    }
+  )
+
+  assert.equal(
+    calls[0].url,
+    "http://127.0.0.1:8000/api/generation/templates/petwoods_xhs_asset_enhanced_v1/tasks"
+  )
+  assert.equal(
+    calls[0].init?.body,
+    JSON.stringify({
+      input: {
+        assets: ["/tmp/cat.jpg"],
+        video_title: "猫咪日常",
+        intent: "用用户素材包装成小红书短视频",
+        duration: 30,
+      },
+      metadata: {
+        source: "react_p8_demo",
+        uploaded_assets: [{ path: "/tmp/cat.jpg", kind: "image" }],
+      },
+    })
+  )
+})
+
+test("generation task cancel API uses task-scoped delete route", async () => {
+  const calls = installFetchMock({ task_id: "task-1", status: "cancelled" })
+
+  await cancelGenerationTask("task-1")
+
+  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/generation/tasks/task-1")
+  assert.equal(calls[0].init?.method, "DELETE")
+})
+
+test("generation batch APIs persist real task batches", async () => {
+  const calls = installFetchMock({ batches: [], batch_id: "batch-1", items: [] })
+
+  await createGenerationBatch({
+    templateId: "petwoods_xhs_topic_to_video_v1",
+    items: [
+      {
+        input: { topic: "Cat hydration" },
+        metadata: { row: 1 },
+      },
+    ],
+    metadata: { source: "react_batch" },
+    idempotencyKey: "batch-key",
+  })
+  await getGenerationBatch("batch-1")
+  await retryGenerationBatchItem("batch-1", 2)
+  await listGenerationBatches()
+
+  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/generation/batches")
+  assert.equal(
+    calls[0].init?.body,
+    JSON.stringify({
+      template_id: "petwoods_xhs_topic_to_video_v1",
+      items: [
+        {
+          input: { topic: "Cat hydration" },
+          metadata: { row: 1 },
+          idempotency_key: null,
+        },
+      ],
+      metadata: { source: "react_batch" },
+      idempotency_key: "batch-key",
+    })
+  )
+  assert.equal(
+    calls[1].url,
+    "http://127.0.0.1:8000/api/generation/batches/batch-1"
+  )
+  assert.equal(
+    calls[2].url,
+    "http://127.0.0.1:8000/api/generation/batches/batch-1/items/2/retry"
+  )
+  assert.equal(calls[2].init?.method, "POST")
+  assert.equal(calls[3].url, "http://127.0.0.1:8000/api/generation/batches")
+})
+
+test("script review APIs persist drafts and submit reviewed tasks", async () => {
+  const calls = installFetchMock({
+    default_languages: ["Chinese", "English"],
+    draft_set_id: "draft-set-1",
+    draft_sets: [],
+    drafts: [],
+    batch: { batch_id: "batch-1", items: [] },
+  })
+
+  await listScriptReviewTemplates()
+  await createScriptReviewDraftSet({
+    topics: ["Cat hydration"],
+    languages: ["English"],
+    scriptTemplateName: "Short Oral Script",
+    splitTemplateName: "Copy-Safe Scene Split",
+    scriptModel: "model-a",
+    splitModel: "model-b",
+    languageScriptTemplates: { English: "English prompt" },
+    languageScriptModels: { English: "model-en" },
+    metadata: { source: "react_script_review" },
+    idempotencyKey: "draft-key",
+  })
+  await listScriptReviewDraftSets()
+  await getScriptReviewDraftSet("draft-set-1")
+  await updateScriptReviewDraftSet("draft-set-1", {
+    drafts: [{ topic: "Cat hydration", selected_for_generation: true }],
+    metadata: { reviewed: true },
+  })
+  await submitScriptReviewDraftSetTasks("draft-set-1", {
+    drafts: [{ topic: "Cat hydration", selected_for_generation: true }],
+    baseParams: { frame_template: "1080x1920/image_default.html" },
+    languageTtsOverrides: {
+      English: {
+        tts_inference_mode: "fish",
+        tts_voice: "voice-en",
+        tts_speed: 1,
+      },
+    },
+    metadata: { source: "react_script_review_submit" },
+    idempotencyKey: "submit-key",
+  })
+
+  assert.equal(
+    calls[0].url,
+    "http://127.0.0.1:8000/api/generation/script-review/templates"
+  )
+  assert.equal(
+    calls[1].url,
+    "http://127.0.0.1:8000/api/generation/script-review/draft-sets"
+  )
+  assert.equal(
+    calls[1].init?.body,
+    JSON.stringify({
+      topics: ["Cat hydration"],
+      languages: ["English"],
+      script_template_name: "Short Oral Script",
+      split_template_name: "Copy-Safe Scene Split",
+      script_model: "model-a",
+      split_model: "model-b",
+      language_script_templates: { English: "English prompt" },
+      language_script_models: { English: "model-en" },
+      metadata: { source: "react_script_review" },
+      idempotency_key: "draft-key",
+    })
+  )
+  assert.equal(
+    calls[2].url,
+    "http://127.0.0.1:8000/api/generation/script-review/draft-sets"
+  )
+  assert.equal(
+    calls[3].url,
+    "http://127.0.0.1:8000/api/generation/script-review/draft-sets/draft-set-1"
+  )
+  assert.equal(calls[4].init?.method, "PUT")
+  assert.equal(
+    calls[4].init?.body,
+    JSON.stringify({
+      drafts: [{ topic: "Cat hydration", selected_for_generation: true }],
+      metadata: { reviewed: true },
+    })
+  )
+  assert.equal(
+    calls[5].url,
+    "http://127.0.0.1:8000/api/generation/script-review/draft-sets/draft-set-1/tasks"
+  )
+  assert.equal(
+    calls[5].init?.body,
+    JSON.stringify({
+      drafts: [{ topic: "Cat hydration", selected_for_generation: true }],
+      base_params: { frame_template: "1080x1920/image_default.html" },
+      language_tts_overrides: {
+        English: {
+          tts_inference_mode: "fish",
+          tts_voice: "voice-en",
+          tts_speed: 1,
+        },
+      },
+      metadata: { source: "react_script_review_submit" },
+      idempotency_key: "submit-key",
+    })
+  )
+})

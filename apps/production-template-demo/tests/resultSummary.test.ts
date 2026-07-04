@@ -3,6 +3,7 @@ import test from "node:test"
 
 import {
   buildAssetItems,
+  buildProgressRuntimeItems,
   buildQualitySummary,
 } from "../src/lib/resultSummary.ts"
 
@@ -50,4 +51,25 @@ test("asset items keep the user-facing roles visible", () => {
     ["成片视频", "旁白音频", "主要画面", "字幕文案"]
   )
   assert.equal(assets[2].statusLabel, "缺失")
+})
+
+test("progress runtime items summarize provider detail without exposing choices", () => {
+  const items = buildProgressRuntimeItems({
+    provider: "runninghub",
+    workflow: "runninghub/image_flux.json",
+    media_type: "image",
+    runninghub_timeout: 600,
+    provider_task_id: "rh-task-1",
+    provider_status: "QUEUED",
+    ignored: "",
+  })
+
+  assert.deepEqual(items, [
+    { label: "媒体服务", value: "runninghub" },
+    { label: "工作流", value: "runninghub/image_flux.json" },
+    { label: "类型", value: "image" },
+    { label: "超时", value: "600 秒" },
+    { label: "服务任务", value: "rh-task-1" },
+    { label: "服务状态", value: "QUEUED" },
+  ])
 })

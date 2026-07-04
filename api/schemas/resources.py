@@ -67,3 +67,10 @@ class BGMListResponse(BaseModel):
     message: str = "Success"
     bgm_files: List[BGMInfo] = Field(..., description="List of available BGM files")
 
+
+class BGMUploadResponse(BaseModel):
+    """BGM upload response"""
+    success: bool = True
+    message: str = "Success"
+    bgm_file: BGMInfo = Field(..., description="Uploaded BGM file")
+    bgm_files: List[BGMInfo] = Field(..., description="Updated list of available BGM files")

@@ -29,6 +29,11 @@ from pixelle_video.generation.defaults import build_default_pipeline_manifests
 from pixelle_video.pipelines.asset_based import AssetBasedPipeline
 from pixelle_video.pipelines.custom import CustomPipeline
 from pixelle_video.pipelines.standard import StandardPipeline
+from pixelle_video.pipelines.workflow_video import (
+    ActionTransferPipeline,
+    DigitalHumanPipeline,
+    ImageToVideoPipeline,
+)
 from pixelle_video.services.frame_processor import FrameProcessor
 from pixelle_video.services.history_manager import HistoryManager
 from pixelle_video.services.image_analysis import ImageAnalysisService
@@ -129,6 +134,9 @@ class PixelleVideoCore:
         instance_type = comfyui_config.get("runninghub_instance_type")
         if instance_type and instance_type.strip():
             kit_config["runninghub_instance_type"] = instance_type
+        runninghub_timeout = comfyui_config.get("runninghub_timeout")
+        if runninghub_timeout:
+            kit_config["runninghub_timeout"] = runninghub_timeout
         
         return kit_config
     
@@ -174,12 +182,22 @@ class PixelleVideoCore:
             
             # Create new instance with current config
             logger.info("✨ Creating ComfyKit instance...")
-            logger.debug(f"ComfyKit config: {current_config}")
+            logger.debug(f"ComfyKit config: {self._redact_sensitive_config(current_config)}")
             self._comfykit = ComfyKit(**current_config)
             self._comfykit_config_hash = current_hash
             logger.info("✅ ComfyKit instance created")
         
         return self._comfykit
+
+    @staticmethod
+    def _redact_sensitive_config(config: dict) -> dict:
+        sensitive_fragments = ("api_key", "token", "secret", "password")
+        return {
+            key: "***"
+            if value and any(fragment in key.lower() for fragment in sensitive_fragments)
+            else value
+            for key, value in config.items()
+        }
     
     async def initialize(self):
         """
@@ -219,6 +237,9 @@ class PixelleVideoCore:
             "standard": StandardPipeline(self),
             "custom": CustomPipeline(self),
             "asset_based": AssetBasedPipeline(self),
+            "i2v": ImageToVideoPipeline(self),
+            "action_transfer": ActionTransferPipeline(self),
+            "digital_human": DigitalHumanPipeline(self),
         }
         self.pipeline_registry = build_pipeline_registry(
             build_default_pipeline_manifests(),

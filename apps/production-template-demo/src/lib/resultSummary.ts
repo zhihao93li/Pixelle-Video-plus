@@ -39,6 +39,11 @@ export type AssetItem = {
   detail: string
 }
 
+export type ProgressRuntimeItem = {
+  label: string
+  value: string
+}
+
 const roleLabels: Record<string, string> = {
   final_video: "成片视频",
   primary_video: "成片视频",
@@ -97,6 +102,43 @@ export function buildAssetItems(
   }))
 }
 
+export function buildProgressRuntimeItems(
+  detail: Record<string, unknown> | null | undefined
+): ProgressRuntimeItem[] {
+  if (!detail) {
+    return []
+  }
+
+  const items: ProgressRuntimeItem[] = []
+  const provider = readString(detail.provider)
+  const workflow = readString(detail.workflow)
+  const mediaType = readString(detail.media_type)
+  const runninghubTimeout = readNumber(detail.runninghub_timeout)
+  const providerTaskId = readString(detail.provider_task_id)
+  const providerStatus = readString(detail.provider_status)
+
+  if (provider) {
+    items.push({ label: "媒体服务", value: provider })
+  }
+  if (workflow) {
+    items.push({ label: "工作流", value: workflow })
+  }
+  if (mediaType) {
+    items.push({ label: "类型", value: mediaType })
+  }
+  if (runninghubTimeout !== null) {
+    items.push({ label: "超时", value: `${runninghubTimeout} 秒` })
+  }
+  if (providerTaskId) {
+    items.push({ label: "服务任务", value: providerTaskId })
+  }
+  if (providerStatus) {
+    items.push({ label: "服务状态", value: providerStatus })
+  }
+
+  return items
+}
+
 function checkMessages(qualityReview: QualityReviewInput, status: string) {
   return (qualityReview.checks || [])
     .filter((check) => check.status === status)
@@ -111,4 +153,18 @@ function assetStatusLabel(asset: Asset): AssetItem["statusLabel"] {
     return "可用"
   }
   return "未知"
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : ""
+}
+
+function readNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value)
+  }
+  return null
 }

@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -58,9 +59,37 @@ class FailingPipeline:
         raise RuntimeError("tts provider unavailable")
 
 
+class DetailedProgressPipeline:
+    async def __call__(self, **kwargs):
+        kwargs["progress_callback"](
+            ProgressEvent(
+                event_type="frame_step",
+                progress=0.42,
+                frame_current=1,
+                frame_total=1,
+                step=2,
+                action="media",
+                extra_info="RunningHub media workflow queued",
+                detail={
+                    "provider": "runninghub",
+                    "workflow": "runninghub/image_flux.json",
+                    "media_type": "image",
+                    "runninghub_timeout": 600,
+                },
+            )
+        )
+        return _video_result()
+
+
 def _service_for_pipeline(pipeline):
     manifest = build_default_pipeline_manifests()[0]
     registry = build_pipeline_registry([manifest], pipelines={"standard": pipeline})
+    return GenerationService(pipeline_registry=registry, task_id_factory=lambda: "gen-task-1")
+
+
+def _service_for_asset_pipeline(pipeline):
+    manifest = build_default_pipeline_manifests()[2]
+    registry = build_pipeline_registry([manifest], pipelines={"asset_based": pipeline})
     return GenerationService(pipeline_registry=registry, task_id_factory=lambda: "gen-task-1")
 
 
@@ -123,6 +152,40 @@ async def test_generation_service_records_structured_runtime_error():
     assert failed.error.layer == "runtime"
     assert failed.error.exception_type == "RuntimeError"
     assert "tts provider unavailable" in failed.error.message
+
+
+@pytest.mark.asyncio
+async def test_generation_service_preserves_provider_progress_detail():
+    service = _service_for_pipeline(DetailedProgressPipeline())
+    progress_snapshots = []
+
+    task = service.submit(
+        GenerationRequest(
+            pipeline_id="standard",
+            entry="script",
+            input={"script": "Scene one."},
+        ),
+        progress_callback=lambda task: progress_snapshots.append(task.model_copy(deep=True)),
+    )
+
+    completed = await service.wait_for_task(task.task_id)
+
+    assert completed.status == "completed"
+    provider_progress = [
+        snapshot.progress
+        for snapshot in progress_snapshots
+        if snapshot.progress.stage == "frame_step"
+    ]
+    assert provider_progress
+    assert provider_progress[-1].detail == {
+        "action": "media",
+        "step": 2,
+        "extra_info": "RunningHub media workflow queued",
+        "provider": "runninghub",
+        "workflow": "runninghub/image_flux.json",
+        "media_type": "image",
+        "runninghub_timeout": 600,
+    }
 
 
 def test_generation_service_rejects_missing_required_entry_field():
@@ -238,3 +301,37 @@ async def test_generation_result_includes_quality_review_and_asset_manifest(tmp_
         "bgm",
         "subtitle_text",
     }.issubset(asset_roles)
+
+
+@pytest.mark.asyncio
+async def test_generation_service_accepts_asset_pipeline_context_final_video_path(tmp_path):
+    video_path = tmp_path / "asset-final.mp4"
+    video_path.write_bytes(b"fake video")
+
+    class AssetContextPipeline:
+        async def __call__(self, **kwargs):
+            return SimpleNamespace(
+                final_video_path=str(video_path),
+                storyboard=Storyboard(
+                    title="Asset Video",
+                    config=StoryboardConfig(media_width=1080, media_height=1920),
+                    final_video_path=str(video_path),
+                    total_duration=15.0,
+                ),
+            )
+
+    service = _service_for_asset_pipeline(AssetContextPipeline())
+    task = service.submit(
+        GenerationRequest(
+            pipeline_id="asset_based",
+            entry="assets",
+            input={"assets": ["/tmp/petwoods.jpg"]},
+        )
+    )
+
+    completed = await service.wait_for_task(task.task_id)
+
+    assert completed.status == "completed"
+    assert completed.result is not None
+    assert completed.result.primary_video.path == str(video_path)
+    assert completed.result.file_size == video_path.stat().st_size

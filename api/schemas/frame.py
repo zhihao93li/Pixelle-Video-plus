@@ -27,6 +27,10 @@ class FrameRenderRequest(BaseModel):
     title: Optional[str] = Field(None, description="Frame title (optional)")
     text: str = Field(..., description="Frame text content")
     image: Optional[str] = Field(None, description="Image path or URL (optional)")
+    template_params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Custom template parameters parsed from the selected HTML template"
+    )
     
     class Config:
         json_schema_extra = {
@@ -34,7 +38,8 @@ class FrameRenderRequest(BaseModel):
                 "template": "1080x1920/default.html",
                 "title": "Sample Title",
                 "text": "This is a sample text for the frame.",
-                "image": "resources/example.png"
+                "image": "resources/example.png",
+                "template_params": {"accent_color": "#ff0000"}
             }
         }
 
@@ -66,4 +71,3 @@ class TemplateParamsResponse(BaseModel):
         default_factory=dict,
         description="Custom parameters defined in template. Key is parameter name, value is config."
     )
-

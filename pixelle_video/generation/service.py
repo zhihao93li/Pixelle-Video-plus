@@ -189,6 +189,7 @@ class GenerationService:
             value = getattr(event, key)
             if value is not None:
                 detail[key] = value
+        detail.update(event.detail)
 
         task.progress = GenerationProgress(
             stage=event.event_type,
@@ -207,7 +208,10 @@ class GenerationService:
             callback(task)
 
     def _to_generation_result(self, task: GenerationTask, pipeline_result) -> GenerationResult:
-        video_path = self._get_result_value(pipeline_result, "video_path")
+        video_path = (
+            self._get_result_value(pipeline_result, "video_path")
+            or self._get_result_value(pipeline_result, "final_video_path")
+        )
         if not video_path:
             raise ValueError("Pipeline completed without a video_path")
 

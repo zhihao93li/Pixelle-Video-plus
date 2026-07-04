@@ -18,6 +18,7 @@ from api.schemas.base import BaseResponse, ErrorResponse
 from api.schemas.llm import LLMChatRequest, LLMChatResponse
 from api.schemas.tts import TTSSynthesizeRequest, TTSSynthesizeResponse
 from api.schemas.image import ImageGenerateRequest, ImageGenerateResponse
+from api.schemas.media import MediaGenerateRequest, MediaGenerateResponse
 from api.schemas.content import (
     NarrationGenerateRequest,
     NarrationGenerateResponse,
@@ -45,6 +46,8 @@ __all__ = [
     # Image
     "ImageGenerateRequest",
     "ImageGenerateResponse",
+    "MediaGenerateRequest",
+    "MediaGenerateResponse",
     # Content
     "NarrationGenerateRequest",
     "NarrationGenerateResponse",
@@ -57,4 +60,3 @@ __all__ = [
     "VideoGenerateResponse",
     "VideoGenerateAsyncResponse",
 ]
-

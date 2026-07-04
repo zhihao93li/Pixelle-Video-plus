@@ -14,7 +14,14 @@ def _field_names(fields):
 def test_default_pipeline_manifests_describe_current_pipeline_entries():
     manifests = build_default_pipeline_manifests()
 
-    assert [manifest.id for manifest in manifests] == ["standard", "custom", "asset_based"]
+    assert [manifest.id for manifest in manifests] == [
+        "standard",
+        "custom",
+        "asset_based",
+        "i2v",
+        "action_transfer",
+        "digital_human",
+    ]
 
     standard = next(manifest for manifest in manifests if manifest.id == "standard")
     assert standard.default_entry == "topic"
@@ -33,6 +40,24 @@ def test_default_pipeline_manifests_describe_current_pipeline_entries():
     assert asset_based.default_entry == "assets"
     assert {entry.id for entry in asset_based.entries} == {"assets"}
     assert _field_names(asset_based.entry("assets").required_fields) == ["assets"]
+
+    i2v = next(manifest for manifest in manifests if manifest.id == "i2v")
+    assert i2v.default_entry == "assets"
+    assert _field_names(i2v.entry("assets").required_fields) == ["assets", "prompt"]
+
+    action_transfer = next(manifest for manifest in manifests if manifest.id == "action_transfer")
+    assert action_transfer.default_entry == "video"
+    assert _field_names(action_transfer.entry("video").required_fields) == [
+        "reference_video",
+        "assets",
+        "prompt",
+    ]
+
+    digital_human = next(manifest for manifest in manifests if manifest.id == "digital_human")
+    assert digital_human.default_entry == "assets"
+    assert _field_names(digital_human.entry("assets").required_fields) == [
+        "character_assets",
+    ]
 
 
 def test_pipeline_registry_lists_manifests_and_rejects_duplicate_ids():
@@ -53,7 +78,14 @@ def test_pipeline_registry_lists_manifests_and_rejects_duplicate_ids():
 def test_default_pipeline_registry_can_be_built_without_running_generation():
     registry = build_default_pipeline_registry()
 
-    assert registry.pipeline_ids() == ["standard", "custom", "asset_based"]
+    assert registry.pipeline_ids() == [
+        "standard",
+        "custom",
+        "asset_based",
+        "i2v",
+        "action_transfer",
+        "digital_human",
+    ]
     assert registry.get_manifest("custom").default_entry == "script"
     assert registry.get_pipeline("custom") is None
 
@@ -65,7 +97,16 @@ async def test_pixelle_core_registers_pipeline_instances_and_manifests():
     core = PixelleVideoCore()
     await core.initialize()
 
-    assert core.pipeline_registry.pipeline_ids() == ["standard", "custom", "asset_based"]
+    assert core.pipeline_registry.pipeline_ids() == [
+        "standard",
+        "custom",
+        "asset_based",
+        "i2v",
+        "action_transfer",
+        "digital_human",
+    ]
     assert set(core.pipeline_registry.pipeline_ids()) == set(core.pipelines.keys())
     assert core.pipeline_registry.get_pipeline("standard") is core.pipelines["standard"]
     assert core.pipeline_registry.get_manifest("asset_based").default_entry == "assets"
+    assert core.pipeline_registry.get_pipeline("i2v") is core.pipelines["i2v"]
+    assert core.pipeline_registry.get_manifest("digital_human").default_entry == "assets"

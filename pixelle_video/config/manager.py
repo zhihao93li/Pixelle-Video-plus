@@ -134,6 +134,7 @@ class ConfigManager:
             "runninghub_api_key": self.config.comfyui.runninghub_api_key,
             "runninghub_concurrent_limit": self.config.comfyui.runninghub_concurrent_limit,
             "runninghub_instance_type": self.config.comfyui.runninghub_instance_type,
+            "runninghub_timeout": self.config.comfyui.runninghub_timeout,
             "tts": {
                 "inference_mode": self.config.comfyui.tts.inference_mode,
                 "local": self.config.comfyui.tts.local.model_dump(),
@@ -157,7 +158,8 @@ class ConfigManager:
         comfyui_api_key: Optional[str] = None,
         runninghub_api_key: Optional[str] = None,
         runninghub_concurrent_limit: Optional[int] = None,
-        runninghub_instance_type: Optional[str] = None
+        runninghub_instance_type: Optional[str] = None,
+        runninghub_timeout: Optional[int] = None,
     ):
         """Set ComfyUI global configuration"""
         updates = {}
@@ -172,6 +174,8 @@ class ConfigManager:
         if runninghub_instance_type is not None:
             # Empty string means disable (treat as None for storage)
             updates["runninghub_instance_type"] = runninghub_instance_type if runninghub_instance_type else None
+        if runninghub_timeout is not None:
+            updates["runninghub_timeout"] = runninghub_timeout
         
         if updates:
             self.update({"comfyui": updates})

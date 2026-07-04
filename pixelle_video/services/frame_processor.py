@@ -102,9 +102,15 @@ class FrameProcessor:
                         frame_current=frame_num,
                         frame_total=total_frames,
                         step=2,
-                        action="media"
+                        action="media",
+                        detail=self._build_media_progress_detail(config),
                     ))
-                await self._step_generate_media(frame, config)
+                await self._step_generate_media(
+                    frame,
+                    config,
+                    progress_callback=progress_callback,
+                    total_frames=total_frames,
+                )
             elif has_existing_media:
                 # Log appropriate message based on media type
                 if frame.video_path:
@@ -203,7 +209,9 @@ class FrameProcessor:
     async def _step_generate_media(
         self,
         frame: StoryboardFrame,
-        config: StoryboardConfig
+        config: StoryboardConfig,
+        progress_callback: Optional[Callable[[ProgressEvent], None]] = None,
+        total_frames: int = 1,
     ):
         """Step 2: Generate media (image or video) using ComfyKit"""
         logger.debug(f"  2/4: Generating media for frame {frame.index}...")
@@ -233,7 +241,27 @@ class FrameProcessor:
             logger.info(f"  → Generating video with target duration: {frame.duration:.2f}s (from TTS audio)")
         
         # Call Media generation
-        media_result = await self.core.media(**media_params)
+        base_detail = self._build_media_progress_detail(config)
+
+        def provider_progress_callback(provider_detail: dict):
+            if not progress_callback:
+                return
+            progress_callback(
+                ProgressEvent(
+                    event_type="frame_step",
+                    progress=0.25,
+                    frame_current=frame.index + 1,
+                    frame_total=total_frames,
+                    step=2,
+                    action="media",
+                    detail={**base_detail, **provider_detail},
+                )
+            )
+
+        media_result = await self.core.media(
+            **media_params,
+            provider_progress_callback=provider_progress_callback,
+        )
         
         # Store media type
         frame.media_type = media_result.media_type
@@ -270,6 +298,46 @@ class FrameProcessor:
         
         else:
             raise ValueError(f"Unknown media type: {media_result.media_type}")
+
+    def _build_media_progress_detail(self, config: StoryboardConfig) -> dict:
+        workflow = config.media_workflow or self._default_media_workflow()
+        media_type = "video" if "video_" in (workflow or "").lower() else "image"
+        provider = self._provider_from_workflow(workflow)
+
+        detail = {
+            "provider": provider,
+            "workflow": workflow or "default",
+            "media_type": media_type,
+        }
+        if provider == "runninghub":
+            timeout = self._runninghub_timeout()
+            if timeout:
+                detail["runninghub_timeout"] = timeout
+        return detail
+
+    def _default_media_workflow(self) -> Optional[str]:
+        core_config = getattr(self.core, "config", {}) or {}
+        comfyui_config = core_config.get("comfyui", {}) if isinstance(core_config, dict) else {}
+        image_config = comfyui_config.get("image", {}) if isinstance(comfyui_config, dict) else {}
+        if isinstance(image_config, dict):
+            return image_config.get("default_workflow")
+        return None
+
+    def _provider_from_workflow(self, workflow: Optional[str]) -> str:
+        if not workflow:
+            return "default"
+        if "/" not in workflow:
+            return "default"
+        return workflow.split("/", 1)[0] or "default"
+
+    def _runninghub_timeout(self) -> Optional[int]:
+        core_config = getattr(self.core, "config", {}) or {}
+        comfyui_config = core_config.get("comfyui", {}) if isinstance(core_config, dict) else {}
+        timeout = comfyui_config.get("runninghub_timeout") if isinstance(comfyui_config, dict) else None
+        try:
+            return int(timeout) if timeout else None
+        except (TypeError, ValueError):
+            return None
     
     async def _step_compose_frame(
         self,

@@ -27,6 +27,9 @@ def build_default_pipeline_manifests() -> list[PipelineManifest]:
         _standard_manifest(),
         _custom_manifest(),
         _asset_based_manifest(),
+        _i2v_manifest(),
+        _action_transfer_manifest(),
+        _digital_human_manifest(),
     ]
 
 
@@ -177,4 +180,121 @@ def _asset_based_manifest() -> PipelineManifest:
             PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
         ],
         outputs=_standard_outputs(),
+    )
+
+
+def _workflow_video_outputs() -> list[PipelineOutputSpec]:
+    return [
+        PipelineOutputSpec(kind="video", role="primary_video", description="Final workflow video"),
+        PipelineOutputSpec(
+            kind="metadata",
+            role="workflow_metadata",
+            description="Workflow execution metadata",
+            required=False,
+        ),
+    ]
+
+
+def _i2v_manifest() -> PipelineManifest:
+    return PipelineManifest(
+        id="i2v",
+        name="Image-to-Video Pipeline",
+        description="Workflow-driven video generation from an uploaded image and prompt.",
+        category="workflow_video",
+        default_entry="assets",
+        required_capabilities=["media", "persistence"],
+        entries=[
+            PipelineEntrySpec(
+                id="assets",
+                name="Image and Prompt",
+                description="Use an uploaded image and prompt to generate a video clip.",
+                required_fields=[
+                    _field("assets", "array", "Image file paths"),
+                    _field("prompt", description="Image-to-video prompt"),
+                ],
+                optional_fields=[
+                    _field("title", description="Optional video title"),
+                    _field("workflow_key", description="Fixed workflow key"),
+                ],
+                start_stage="execute_workflow",
+            )
+        ],
+        stages=[
+            PipelineStageSpec(id="execute_workflow", name="Execute Workflow"),
+            PipelineStageSpec(id="download_video", name="Save Video"),
+            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+        ],
+        outputs=_workflow_video_outputs(),
+    )
+
+
+def _action_transfer_manifest() -> PipelineManifest:
+    return PipelineManifest(
+        id="action_transfer",
+        name="Action Transfer Pipeline",
+        description="Workflow-driven video generation from a reference video, target image, and prompt.",
+        category="workflow_video",
+        default_entry="video",
+        required_capabilities=["media", "persistence"],
+        entries=[
+            PipelineEntrySpec(
+                id="video",
+                name="Reference Video and Target Image",
+                description="Transfer action from a reference video to a target image.",
+                required_fields=[
+                    _field("reference_video", description="Reference action video path"),
+                    _field("assets", "array", "Target image file paths"),
+                    _field("prompt", description="Action transfer prompt"),
+                ],
+                optional_fields=[
+                    _field("duration", "integer", "Target duration in seconds"),
+                    _field("workflow_key", description="Fixed workflow key"),
+                ],
+                start_stage="execute_workflow",
+            )
+        ],
+        stages=[
+            PipelineStageSpec(id="execute_workflow", name="Execute Workflow"),
+            PipelineStageSpec(id="download_video", name="Save Video"),
+            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+        ],
+        outputs=_workflow_video_outputs(),
+    )
+
+
+def _digital_human_manifest() -> PipelineManifest:
+    return PipelineManifest(
+        id="digital_human",
+        name="Digital Human Pipeline",
+        description="Workflow-driven presenter video generation from character imagery and copy.",
+        category="workflow_video",
+        default_entry="assets",
+        required_capabilities=["tts", "media", "persistence"],
+        entries=[
+            PipelineEntrySpec(
+                id="assets",
+                name="Character Assets and Script",
+                description="Generate a presenter video from character image, product assets, and script.",
+                required_fields=[
+                    _field("character_assets", "array", "Character image file paths"),
+                ],
+                optional_fields=[
+                    _field("script", description="Presenter script or product copy"),
+                    _field("goods_assets", "array", "Product image file paths"),
+                    _field("goods_title", description="Product title"),
+                    _field("mode", description="digital or customize", default="customize"),
+                    _field("workflow_paths", "object", "Fixed workflow paths"),
+                    _field("tts_voice", description="TTS voice or Fish reference id"),
+                ],
+                start_stage="generate_tts",
+            )
+        ],
+        stages=[
+            PipelineStageSpec(id="compose_image", name="Compose Presenter Image"),
+            PipelineStageSpec(id="generate_tts", name="Generate TTS"),
+            PipelineStageSpec(id="execute_workflow", name="Execute Workflow"),
+            PipelineStageSpec(id="download_video", name="Save Video"),
+            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+        ],
+        outputs=_workflow_video_outputs(),
     )

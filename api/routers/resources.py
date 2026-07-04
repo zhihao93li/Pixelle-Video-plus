@@ -16,8 +16,9 @@ Resource discovery endpoints
 Provides endpoints to discover available workflows, templates, and BGM.
 """
 
+import re
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from loguru import logger
 
 from api.dependencies import PixelleVideoDep
@@ -28,11 +29,14 @@ from api.schemas.resources import (
     TemplateListResponse,
     BGMInfo,
     BGMListResponse,
+    BGMUploadResponse,
 )
 from pixelle_video.utils.os_util import list_resource_files, get_root_path, get_data_path
 from pixelle_video.utils.template_util import get_all_templates_with_info
 
 router = APIRouter(prefix="/resources", tags=["Resources"])
+
+BGM_AUDIO_EXTENSIONS = ('.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg')
 
 
 @router.get("/workflows/tts", response_model=WorkflowListResponse)
@@ -225,45 +229,89 @@ async def list_bgm():
     ```
     """
     try:
-        # Supported audio extensions
-        audio_extensions = ('.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg')
-        
-        # Collect BGM files from both locations
-        bgm_files_dict = {}  # {filename: {"path": str, "source": str}}
-        
-        # Scan default bgm/ directory
-        default_bgm_dir = Path(get_root_path("bgm"))
-        if default_bgm_dir.exists() and default_bgm_dir.is_dir():
-            for item in default_bgm_dir.iterdir():
-                if item.is_file() and item.suffix.lower() in audio_extensions:
-                    bgm_files_dict[item.name] = {
-                        "path": f"bgm/{item.name}",
-                        "source": "default"
-                    }
-        
-        # Scan custom data/bgm/ directory (overrides default)
-        custom_bgm_dir = Path(get_data_path("bgm"))
-        if custom_bgm_dir.exists() and custom_bgm_dir.is_dir():
-            for item in custom_bgm_dir.iterdir():
-                if item.is_file() and item.suffix.lower() in audio_extensions:
-                    bgm_files_dict[item.name] = {
-                        "path": f"data/bgm/{item.name}",
-                        "source": "custom"
-                    }
-        
-        # Convert to response format
-        bgm_files = [
-            BGMInfo(
-                name=name,
-                path=info["path"],
-                source=info["source"]
-            )
-            for name, info in sorted(bgm_files_dict.items())
-        ]
-        
-        return BGMListResponse(bgm_files=bgm_files)
+        return BGMListResponse(bgm_files=_list_bgm_files())
         
     except Exception as e:
         logger.error(f"List BGM error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.post("/bgm/upload", response_model=BGMUploadResponse)
+async def upload_bgm(file: UploadFile = File(...)):
+    """
+    Upload a reusable BGM file into the custom data/bgm resource directory.
+    """
+    try:
+        filename = _safe_bgm_filename(file.filename or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="BGM file is empty")
+
+    bgm_dir = Path(get_data_path("bgm"))
+    bgm_dir.mkdir(parents=True, exist_ok=True)
+    target_path = bgm_dir / filename
+    target_path.write_bytes(content)
+
+    bgm_file = BGMInfo(
+        name=filename,
+        path=f"data/bgm/{filename}",
+        source="custom",
+    )
+    return BGMUploadResponse(
+        message="BGM uploaded",
+        bgm_file=bgm_file,
+        bgm_files=_list_bgm_files(),
+    )
+
+
+def _list_bgm_files() -> list[BGMInfo]:
+    bgm_files_dict = {}
+
+    default_bgm_dir = Path(get_root_path("bgm"))
+    if default_bgm_dir.exists() and default_bgm_dir.is_dir():
+        for item in default_bgm_dir.iterdir():
+            if item.is_file() and item.suffix.lower() in BGM_AUDIO_EXTENSIONS:
+                bgm_files_dict[item.name] = {
+                    "path": f"bgm/{item.name}",
+                    "source": "default",
+                }
+
+    custom_bgm_dir = Path(get_data_path("bgm"))
+    if custom_bgm_dir.exists() and custom_bgm_dir.is_dir():
+        for item in custom_bgm_dir.iterdir():
+            if item.is_file() and item.suffix.lower() in BGM_AUDIO_EXTENSIONS:
+                bgm_files_dict[item.name] = {
+                    "path": f"data/bgm/{item.name}",
+                    "source": "custom",
+                }
+
+    return [
+        BGMInfo(
+            name=name,
+            path=info["path"],
+            source=info["source"],
+        )
+        for name, info in sorted(bgm_files_dict.items())
+    ]
+
+
+def _safe_bgm_filename(filename: str) -> str:
+    raw_name = (filename or "").replace("\\", "/")
+    name = Path(raw_name).name.strip()
+    suffix = Path(name).suffix.lower()
+
+    if suffix not in BGM_AUDIO_EXTENSIONS:
+        allowed = ", ".join(BGM_AUDIO_EXTENSIONS)
+        raise ValueError(
+            f"Unsupported BGM file type: {suffix or 'missing extension'}; allowed: {allowed}"
+        )
+
+    stem = Path(name).stem.strip()
+    safe_stem = re.sub(r"[^\w.-]+", "_", stem, flags=re.UNICODE).strip("._-")
+    if not safe_stem:
+        safe_stem = "bgm"
+
+    return f"{safe_stem}{suffix}"

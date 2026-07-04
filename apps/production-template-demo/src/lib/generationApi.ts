@@ -1,5 +1,12 @@
+type ImportMetaWithEnv = ImportMeta & {
+  env?: {
+    VITE_PIXELLE_API_BASE_URL?: string
+  }
+}
+
 export const API_BASE_URL =
-  import.meta.env.VITE_PIXELLE_API_BASE_URL ?? "http://127.0.0.1:8000/api"
+  (import.meta as ImportMetaWithEnv).env?.VITE_PIXELLE_API_BASE_URL ??
+  "http://127.0.0.1:8000/api"
 
 export type GenerationStatus =
   | "pending"
@@ -30,6 +37,13 @@ export type ProductionTemplate = {
   required_capabilities: string[]
   user_selectable_runtime: boolean
   user_selectable_providers: string[]
+  enabled: boolean
+  migration_status: "ready" | "partial" | "legacy_only" | "planned"
+  product_entry: string
+  streamlit_source: string | null
+  migration_notes: string
+  allowed_user_params: string[]
+  passthrough_input_fields: string[]
 }
 
 export type TemplateListResponse = {
@@ -86,11 +100,493 @@ export type GenerationResult = {
   metadata: Record<string, unknown>
 }
 
+export type GenerationBatchItem = {
+  index: number
+  input: Record<string, unknown>
+  params: Record<string, unknown>
+  metadata: Record<string, unknown>
+  task_id: string | null
+  status: string
+  progress: GenerationProgress | null
+  error: GenerationError | null
+}
+
+export type GenerationBatch = {
+  batch_id: string
+  template_id: string
+  status: string
+  total_count: number
+  submitted_count: number
+  failed_count: number
+  created_at: string
+  updated_at: string
+  metadata: Record<string, unknown>
+  items: GenerationBatchItem[]
+}
+
+export type GenerationBatchListResponse = {
+  batches: GenerationBatch[]
+}
+
+export type GenerationBatchCreateInput = {
+  templateId: string
+  items: Array<{
+    input: Record<string, unknown>
+    metadata?: Record<string, unknown>
+    idempotencyKey?: string
+  }>
+  metadata?: Record<string, unknown>
+  idempotencyKey?: string
+}
+
+export type ScriptReviewPromptTemplate = {
+  name: string
+  content: string
+  source: string
+}
+
+export type ScriptReviewTemplateListResponse = {
+  default_languages: string[]
+  script_templates: ScriptReviewPromptTemplate[]
+  split_templates: ScriptReviewPromptTemplate[]
+}
+
+export type ScriptReviewLanguageDraft = {
+  title: string
+  script: string
+  narrations: string[]
+}
+
+export type ScriptReviewDraft = {
+  index?: number
+  topic: string
+  title?: string
+  language_drafts?: Record<string, ScriptReviewLanguageDraft>
+  selected_languages?: string[]
+  selected_for_generation?: boolean
+  script_model?: string
+  split_model?: string
+  workflow_mode?: string
+  [key: string]: unknown
+}
+
+export type ScriptReviewDraftSet = {
+  draft_set_id: string
+  status: string
+  created_at: string
+  updated_at: string
+  topics: string[]
+  languages: string[]
+  metadata: Record<string, unknown>
+  draft_settings: Record<string, unknown>
+  drafts: ScriptReviewDraft[]
+  errors: Array<Record<string, unknown>>
+  submissions: Array<Record<string, unknown>>
+}
+
+export type ScriptReviewDraftSetListResponse = {
+  draft_sets: ScriptReviewDraftSet[]
+}
+
+export type ScriptReviewCreateInput = {
+  topics: string[]
+  languages: string[]
+  scriptTemplateName?: string
+  splitTemplateName?: string
+  scriptModel?: string
+  splitModel?: string
+  languageScriptTemplates?: Record<string, string>
+  languageScriptModels?: Record<string, string>
+  metadata?: Record<string, unknown>
+  idempotencyKey?: string
+}
+
+export type ScriptReviewUpdateInput = {
+  drafts: ScriptReviewDraft[]
+  metadata?: Record<string, unknown>
+}
+
+export type ScriptReviewSubmitInput = {
+  drafts?: ScriptReviewDraft[]
+  baseParams?: Record<string, unknown>
+  languageTtsOverrides?: Record<string, Record<string, unknown>>
+  metadata?: Record<string, unknown>
+  idempotencyKey?: string
+}
+
+export type ScriptReviewSubmitResponse = {
+  draft_set: ScriptReviewDraftSet
+  batch: GenerationBatch
+}
+
 export type GenerationSubmitResponse = {
   success: boolean
   message: string
   generation_task_id: string
   task: GenerationTask
+}
+
+export type UploadedGenerationAsset = {
+  original_filename: string
+  filename: string
+  path: string
+  kind: "image" | "video" | "audio" | string
+  content_type: string | null
+  size: number
+}
+
+export type GenerationAssetUploadResponse = {
+  count: number
+  assets: UploadedGenerationAsset[]
+}
+
+export type TtsPreviewInput = {
+  text: string
+  inferenceMode?: "local" | "comfyui" | "fish"
+  workflow?: string
+  refAudio?: string
+  voiceId?: string
+  referenceId?: string
+  speed?: number
+  fishModel?: "s1" | "s2-pro"
+}
+
+export type TtsPreviewResponse = {
+  success: boolean
+  message: string
+  audio_path: string
+  duration: number
+}
+
+export type FramePreviewInput = {
+  template: string
+  title?: string
+  text: string
+  image?: string
+  templateParams?: Record<string, unknown>
+}
+
+export type FramePreviewResponse = {
+  success: boolean
+  message: string
+  frame_path: string
+  width: number
+  height: number
+}
+
+export type MediaPreviewInput = {
+  prompt: string
+  workflow?: string
+  mediaType: "image" | "video"
+  width: number
+  height: number
+  duration?: number
+}
+
+export type MediaPreviewResponse = {
+  success: boolean
+  message: string
+  media_type: "image" | "video"
+  media_path: string
+  duration: number | null
+}
+
+export type TemplateParamConfig = {
+  type: string
+  default: unknown
+  label: string
+}
+
+export type TemplateParamsResponse = {
+  success: boolean
+  message: string
+  template: string
+  media_width: number
+  media_height: number
+  params: Record<string, TemplateParamConfig>
+}
+
+export type HistoryTaskSummary = {
+  task_id: string
+  status: GenerationStatus | string
+  title?: string | null
+  created_at?: string | null
+  completed_at?: string | null
+  result?: Record<string, unknown> | null
+  input?: Record<string, unknown> | null
+}
+
+export type HistoryTaskListResponse = {
+  tasks: HistoryTaskSummary[]
+  total: number
+  page: number
+  page_size: number
+  total_pages?: number
+}
+
+export type HistoryTaskDetail = {
+  metadata: Record<string, unknown>
+  storyboard: Record<string, unknown> | null
+  generation_summary: Record<string, unknown>
+}
+
+export type HistoryStatistics = {
+  total_tasks?: number
+  completed?: number
+  failed?: number
+  [key: string]: unknown
+}
+
+export type PublishPlatform = {
+  id: string
+  label: string
+}
+
+export type PublishPlatformListResponse = {
+  platforms: PublishPlatform[]
+}
+
+export type PublishTimezoneListResponse = {
+  default_timezone: string
+  timezones: string[]
+}
+
+export type PublishJob = {
+  platform: string
+  status: string
+  buffer_channel_id?: string | null
+  public_video_url?: string | null
+  buffer_post_id?: string | null
+  due_at?: string | null
+  error?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type PublishRecord = {
+  task_id: string
+  title?: string | null
+  caption?: string | null
+  public_video_url?: string | null
+  jobs?: PublishJob[]
+  created_at?: string | null
+  updated_at?: string | null
+  [key: string]: unknown
+}
+
+export type PublishRecordResponse = {
+  task_id: string
+  record: PublishRecord | null
+}
+
+export type PublishCheck = {
+  name: string
+  ok: boolean
+  message: string
+}
+
+export type PublishCheckResponse = {
+  checks: PublishCheck[]
+}
+
+export type PublishTaskInput = {
+  platforms: string[]
+  caption: string
+  title?: string
+  dueAt?: string | null
+}
+
+export type PublishTaskResponse = {
+  task_id: string
+  record: PublishRecord
+}
+
+export type GenerationProject = {
+  id: string
+  name: string
+  product: string
+  channel: string
+  generation_settings?: {
+    default_production_template_id?: string
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+export type GenerationProjectsResponse = {
+  status: string
+  projects: GenerationProject[]
+}
+
+export type ProjectGenerationSettingsResponse = {
+  status: string
+  generation_settings: {
+    default_production_template_id?: string
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+export type AppSettingsConfig = {
+  project_name?: string
+  llm: {
+    api_key: string
+    base_url: string
+    model: string
+  }
+  comfyui: {
+    comfyui_url: string
+    comfyui_api_key?: string | null
+    runninghub_api_key?: string | null
+    runninghub_concurrent_limit: number
+    runninghub_instance_type?: string | null
+    runninghub_timeout?: number | null
+    tts: {
+      inference_mode?: string
+      fish_audio: {
+        api_key: string
+        base_url: string
+        model: "s1" | "s2-pro"
+        reference_id?: string | null
+      }
+      [key: string]: unknown
+    }
+    [key: string]: unknown
+  }
+  publish: {
+    buffer: {
+      api_key: string
+      channels: Record<string, string>
+    }
+    cos: {
+      region: string
+      bucket: string
+      secret_id: string
+      secret_key: string
+      public_base_url: string
+      endpoint_url?: string | null
+    }
+  }
+  [key: string]: unknown
+}
+
+export type SettingsConfigResponse = {
+  configured: boolean
+  config: AppSettingsConfig
+}
+
+export type SettingsDiagnosticCheck = {
+  id: string
+  label: string
+  ok: boolean
+  severity: "info" | "warning" | "error"
+  message: string
+}
+
+export type SettingsDiagnosticsResponse = {
+  ok: boolean
+  checks: SettingsDiagnosticCheck[]
+}
+
+export type SettingsConfigUpdate = Partial<{
+  llm: Partial<AppSettingsConfig["llm"]>
+  comfyui: Partial<AppSettingsConfig["comfyui"]>
+  publish: Partial<AppSettingsConfig["publish"]>
+}>
+
+export type ResourceWorkflow = {
+  name: string
+  display_name: string
+  source: string
+  path: string
+  key: string
+  workflow_id?: string | null
+}
+
+export type ResourceTemplate = {
+  name: string
+  display_name: string
+  size: string
+  width: number
+  height: number
+  orientation: string
+  path: string
+  key: string
+}
+
+export type ResourceBgm = {
+  name: string
+  path: string
+  source: string
+}
+
+export type ResourceBgmUploadResponse = {
+  success: boolean
+  message: string
+  bgm_file: ResourceBgm
+  bgm_files: ResourceBgm[]
+}
+
+export type LlmModelListResponse = {
+  models: string[]
+}
+
+export type LlmConnectionResponse = {
+  ok: boolean
+  message: string
+  model_count: number
+}
+
+export type ComfyuiConnectionResponse = {
+  ok: boolean
+  message: string
+}
+
+export type RunninghubWorkflow = {
+  filename: string
+  key: string
+  path: string
+  workflow_id: string
+}
+
+export type RunninghubWorkflowCreateInput = {
+  kind: "video" | "image" | "tts"
+  name: string
+  workflowId: string
+  overwrite: boolean
+}
+
+export type RunninghubWorkflowListResponse = {
+  workflows: RunninghubWorkflow[]
+}
+
+export type RunninghubWorkflowCreateResponse = {
+  workflow: RunninghubWorkflow
+  workflows: RunninghubWorkflow[]
+}
+
+export type BufferChannel = {
+  id: string | null
+  name: string | null
+  displayName: string | null
+  service: string | null
+  isQueuePaused: boolean | null
+}
+
+export type BufferChannelsResponse = {
+  channels: BufferChannel[]
+  detected_channels: Record<string, string>
+}
+
+export type FaqSection = {
+  question: string
+  answer: string
+}
+
+export type FaqResponse = {
+  language: string
+  content: string
+  sections: FaqSection[]
 }
 
 export class ApiError extends Error {
@@ -109,20 +605,203 @@ export async function listTemplates() {
   return fetchJson<TemplateListResponse>("/generation/templates")
 }
 
-export async function createDailyVideoTask(templateId: string, script: string) {
+export async function createGenerationTemplateTask(
+  templateId: string,
+  input: Record<string, unknown>,
+  metadata: Record<string, unknown> = { source: "react_p8_demo" }
+) {
   return fetchJson<GenerationSubmitResponse>(
     `/generation/templates/${templateId}/tasks`,
     {
       method: "POST",
       body: JSON.stringify({
-        input: {
-          script,
-        },
-        metadata: {
-          source: "react_p0_demo",
-        },
+        input,
+        metadata,
       }),
     }
+  )
+}
+
+export async function createDailyVideoTask(templateId: string, script: string) {
+  return createGenerationTemplateTask(
+    templateId,
+    { script },
+    { source: "react_p0_demo" }
+  )
+}
+
+export async function createGenerationBatch(input: GenerationBatchCreateInput) {
+  return fetchJson<GenerationBatch>("/generation/batches", {
+    method: "POST",
+    body: JSON.stringify({
+      template_id: input.templateId,
+      items: input.items.map((item) => ({
+        input: item.input,
+        metadata: item.metadata ?? {},
+        idempotency_key: item.idempotencyKey ?? null,
+      })),
+      metadata: input.metadata ?? {},
+      idempotency_key: input.idempotencyKey ?? null,
+    }),
+  })
+}
+
+export async function getGenerationBatch(batchId: string) {
+  return fetchJson<GenerationBatch>(`/generation/batches/${batchId}`)
+}
+
+export async function retryGenerationBatchItem(batchId: string, itemIndex: number) {
+  return fetchJson<GenerationBatch>(
+    `/generation/batches/${batchId}/items/${itemIndex}/retry`,
+    { method: "POST" }
+  )
+}
+
+export async function listGenerationBatches() {
+  return fetchJson<GenerationBatchListResponse>("/generation/batches")
+}
+
+export async function listScriptReviewTemplates() {
+  return fetchJson<ScriptReviewTemplateListResponse>(
+    "/generation/script-review/templates"
+  )
+}
+
+export async function createScriptReviewDraftSet(input: ScriptReviewCreateInput) {
+  return fetchJson<ScriptReviewDraftSet>("/generation/script-review/draft-sets", {
+    method: "POST",
+    body: JSON.stringify({
+      topics: input.topics,
+      languages: input.languages,
+      script_template_name: input.scriptTemplateName || null,
+      split_template_name: input.splitTemplateName || null,
+      script_model: input.scriptModel || null,
+      split_model: input.splitModel || null,
+      language_script_templates: input.languageScriptTemplates ?? {},
+      language_script_models: input.languageScriptModels ?? {},
+      metadata: input.metadata ?? {},
+      idempotency_key: input.idempotencyKey ?? null,
+    }),
+  })
+}
+
+export async function listScriptReviewDraftSets() {
+  return fetchJson<ScriptReviewDraftSetListResponse>(
+    "/generation/script-review/draft-sets"
+  )
+}
+
+export async function getScriptReviewDraftSet(draftSetId: string) {
+  return fetchJson<ScriptReviewDraftSet>(
+    `/generation/script-review/draft-sets/${draftSetId}`
+  )
+}
+
+export async function updateScriptReviewDraftSet(
+  draftSetId: string,
+  input: ScriptReviewUpdateInput
+) {
+  return fetchJson<ScriptReviewDraftSet>(
+    `/generation/script-review/draft-sets/${draftSetId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        drafts: input.drafts,
+        metadata: input.metadata ?? {},
+      }),
+    }
+  )
+}
+
+export async function submitScriptReviewDraftSetTasks(
+  draftSetId: string,
+  input: ScriptReviewSubmitInput
+) {
+  return fetchJson<ScriptReviewSubmitResponse>(
+    `/generation/script-review/draft-sets/${draftSetId}/tasks`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        drafts: input.drafts ?? null,
+        base_params: input.baseParams ?? {},
+        language_tts_overrides: input.languageTtsOverrides ?? {},
+        metadata: input.metadata ?? {},
+        idempotency_key: input.idempotencyKey ?? null,
+      }),
+    }
+  )
+}
+
+export async function uploadGenerationAssets(files: File[]) {
+  const formData = new FormData()
+  for (const file of files) {
+    formData.append("files", file, file.name)
+  }
+
+  return fetchApi<GenerationAssetUploadResponse>("/generation/assets", {
+    method: "POST",
+    body: formData,
+  })
+}
+
+export async function uploadResourceBgm(file: File) {
+  const formData = new FormData()
+  formData.append("file", file, file.name)
+
+  return fetchApi<ResourceBgmUploadResponse>("/resources/bgm/upload", {
+    method: "POST",
+    body: formData,
+  })
+}
+
+export async function synthesizeTtsPreview(input: TtsPreviewInput) {
+  return fetchJson<TtsPreviewResponse>("/tts/synthesize", {
+    method: "POST",
+    body: JSON.stringify({
+      text: input.text,
+      inference_mode: input.inferenceMode,
+      workflow: input.workflow || undefined,
+      ref_audio: input.refAudio || undefined,
+      voice_id: input.voiceId || undefined,
+      reference_id: input.referenceId || undefined,
+      speed: input.speed,
+      fish_model: input.fishModel,
+    }),
+  })
+}
+
+export async function renderFramePreview(input: FramePreviewInput) {
+  return fetchJson<FramePreviewResponse>("/frame/render", {
+    method: "POST",
+    body: JSON.stringify({
+      template: input.template,
+      title: input.title || undefined,
+      text: input.text,
+      image: input.image || undefined,
+      template_params: input.templateParams ?? {},
+    }),
+  })
+}
+
+export async function generateMediaPreview(input: MediaPreviewInput) {
+  return fetchJson<MediaPreviewResponse>("/media/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: input.prompt,
+      workflow: input.workflow || undefined,
+      media_type: input.mediaType,
+      width: input.width,
+      height: input.height,
+      duration: input.mediaType === "video" ? input.duration : undefined,
+    }),
+  })
+}
+
+export async function getFrameTemplateParams(template: string) {
+  const params = new URLSearchParams()
+  params.set("template", template)
+  return fetchJson<TemplateParamsResponse>(
+    `/frame/template/params?${params.toString()}`
   )
 }
 
@@ -130,8 +809,212 @@ export async function getTask(taskId: string) {
   return fetchJson<GenerationTask>(`/generation/tasks/${taskId}`)
 }
 
+export async function cancelGenerationTask(taskId: string) {
+  return fetchJson<GenerationTask>(`/generation/tasks/${taskId}`, {
+    method: "DELETE",
+  })
+}
+
 export async function getTaskResult(taskId: string) {
   return fetchJson<GenerationResult>(`/generation/tasks/${taskId}/result`)
+}
+
+export async function listHistoryTasks({
+  page = 1,
+  pageSize = 20,
+  status,
+  sortBy = "created_at",
+  sortOrder = "desc",
+}: {
+  page?: number
+  pageSize?: number
+  status?: string
+  sortBy?: string
+  sortOrder?: "asc" | "desc"
+} = {}) {
+  const params = new URLSearchParams()
+  params.set("page", String(page))
+  params.set("page_size", String(pageSize))
+  if (status && status !== "all") {
+    params.set("status", status)
+  }
+  params.set("sort_by", sortBy)
+  params.set("sort_order", sortOrder)
+  return fetchJson<HistoryTaskListResponse>(`/history/tasks?${params.toString()}`)
+}
+
+export async function getHistoryTaskDetail(taskId: string) {
+  return fetchJson<HistoryTaskDetail>(`/history/tasks/${taskId}`)
+}
+
+export async function getHistoryStatistics() {
+  return fetchJson<HistoryStatistics>("/history/statistics")
+}
+
+export async function deleteHistoryTask(taskId: string) {
+  return fetchJson<{ deleted: boolean; task_id: string }>(
+    `/history/tasks/${taskId}`,
+    { method: "DELETE" }
+  )
+}
+
+export async function listPublishPlatforms() {
+  return fetchJson<PublishPlatformListResponse>("/publish/platforms")
+}
+
+export async function listPublishTimezones() {
+  return fetchJson<PublishTimezoneListResponse>("/publish/timezones")
+}
+
+export async function getPublishRecord(taskId: string) {
+  return fetchJson<PublishRecordResponse>(`/publish/tasks/${taskId}/record`)
+}
+
+export async function checkPublishConfiguration(platforms: string[]) {
+  return fetchJson<PublishCheckResponse>("/publish/check", {
+    method: "POST",
+    body: JSON.stringify({ platforms }),
+  })
+}
+
+export async function publishTask(taskId: string, input: PublishTaskInput) {
+  return fetchJson<PublishTaskResponse>(`/publish/tasks/${taskId}`, {
+    method: "POST",
+    body: JSON.stringify({
+      platforms: input.platforms,
+      caption: input.caption,
+      title: input.title ?? "",
+      due_at: input.dueAt || null,
+    }),
+  })
+}
+
+export async function listGenerationProjects() {
+  return fetchJson<GenerationProjectsResponse>("/generation/projects")
+}
+
+export async function updateProjectGenerationSettings(
+  projectId: string,
+  defaultProductionTemplateId: string
+) {
+  return fetchJson<ProjectGenerationSettingsResponse>(
+    `/generation/projects/${projectId}/generation-settings`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        default_production_template_id: defaultProductionTemplateId,
+      }),
+    }
+  )
+}
+
+export async function getSettingsConfig() {
+  return fetchJson<SettingsConfigResponse>("/settings/config")
+}
+
+export async function getSettingsDiagnostics() {
+  return fetchJson<SettingsDiagnosticsResponse>("/settings/diagnostics")
+}
+
+export async function updateSettingsConfig(updates: SettingsConfigUpdate) {
+  return fetchJson<SettingsConfigResponse>("/settings/config", {
+    method: "PUT",
+    body: JSON.stringify(updates),
+  })
+}
+
+export async function resetSettingsConfig() {
+  return fetchJson<SettingsConfigResponse>("/settings/config/reset", {
+    method: "POST",
+  })
+}
+
+export async function loadLlmModels(apiKey: string, baseUrl: string) {
+  return fetchJson<LlmModelListResponse>("/settings/llm/models", {
+    method: "POST",
+    body: JSON.stringify({ api_key: apiKey, base_url: baseUrl }),
+  })
+}
+
+export async function testLlmConnection(apiKey: string, baseUrl: string) {
+  return fetchJson<LlmConnectionResponse>("/settings/llm/test", {
+    method: "POST",
+    body: JSON.stringify({ api_key: apiKey, base_url: baseUrl }),
+  })
+}
+
+export async function testComfyuiConnection(comfyuiUrl: string) {
+  return fetchJson<ComfyuiConnectionResponse>("/settings/comfyui/test", {
+    method: "POST",
+    body: JSON.stringify({ comfyui_url: comfyuiUrl }),
+  })
+}
+
+export async function listRunninghubWorkflows() {
+  return fetchJson<RunninghubWorkflowListResponse>(
+    "/settings/runninghub/workflows"
+  )
+}
+
+export async function addRunninghubWorkflow(
+  input: RunninghubWorkflowCreateInput
+) {
+  return fetchJson<RunninghubWorkflowCreateResponse>(
+    "/settings/runninghub/workflows",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        kind: input.kind,
+        name: input.name,
+        workflow_id: input.workflowId,
+        overwrite: input.overwrite,
+      }),
+    }
+  )
+}
+
+export async function fetchBufferChannels(apiKey: string) {
+  return fetchJson<BufferChannelsResponse>("/settings/buffer/channels", {
+    method: "POST",
+    body: JSON.stringify({ api_key: apiKey }),
+  })
+}
+
+export async function getHelpFaq(language = "zh_CN") {
+  const params = new URLSearchParams()
+  params.set("language", language)
+  return fetchJson<FaqResponse>(`/help/faq?${params.toString()}`)
+}
+
+export async function listResourceBgm() {
+  return fetchJson<{ bgm_files: ResourceBgm[] }>("/resources/bgm")
+}
+
+export function resourceFileUrl(path: string | null | undefined) {
+  if (!path) {
+    return null
+  }
+  if (/^https?:\/\//.test(path)) {
+    return path
+  }
+  const encodedPath = path
+    .replaceAll("\\", "/")
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/")
+  return `${API_BASE_URL.replace(/\/$/, "")}/files/${encodedPath}`
+}
+
+export async function listResourceTemplates() {
+  return fetchJson<{ templates: ResourceTemplate[] }>("/resources/templates")
+}
+
+export async function listResourceMediaWorkflows() {
+  return fetchJson<{ workflows: ResourceWorkflow[] }>("/resources/workflows/media")
+}
+
+export async function listResourceTtsWorkflows() {
+  return fetchJson<{ workflows: ResourceWorkflow[] }>("/resources/workflows/tts")
 }
 
 export function artifactFileUrl(artifact: GenerationArtifact | null | undefined) {
@@ -143,7 +1026,15 @@ export function artifactFileUrl(artifact: GenerationArtifact | null | undefined)
     return artifact.url
   }
 
-  const relativePath = outputRelativePath(artifact.path)
+  return fileUrlFromPath(artifact.path)
+}
+
+export function fileUrlFromPath(path: string | null | undefined) {
+  if (!path) {
+    return null
+  }
+
+  const relativePath = outputRelativePath(path)
   if (!relativePath) {
     return null
   }
@@ -156,14 +1047,20 @@ export function isTerminalStatus(status: GenerationStatus) {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  return fetchApi<T>(path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  })
+}
+
+async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
     response = await fetch(`${API_BASE_URL.replace(/\/$/, "")}${path}`, {
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
     })
   } catch (error) {
     throw new ApiError(
@@ -222,4 +1119,3 @@ function outputRelativePath(path: string) {
 
   return null
 }
-

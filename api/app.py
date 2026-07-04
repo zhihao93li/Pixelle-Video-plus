@@ -48,10 +48,16 @@ from api.routers import (
     files_router,
     frame_router,
     generation_router,
+    generation_settings_router,
+    help_router,
+    history_router,
     health_router,
     image_router,
     llm_router,
+    media_router,
+    publish_router,
     resources_router,
+    settings_router,
     tasks_router,
     tts_router,
     video_router,
@@ -129,6 +135,7 @@ app.include_router(health_router)
 app.include_router(llm_router, prefix=api_config.api_prefix)
 app.include_router(tts_router, prefix=api_config.api_prefix)
 app.include_router(image_router, prefix=api_config.api_prefix)
+app.include_router(media_router, prefix=api_config.api_prefix)
 app.include_router(content_router, prefix=api_config.api_prefix)
 app.include_router(video_router, prefix=api_config.api_prefix)
 app.include_router(tasks_router, prefix=api_config.api_prefix)
@@ -136,6 +143,11 @@ app.include_router(files_router, prefix=api_config.api_prefix)
 app.include_router(resources_router, prefix=api_config.api_prefix)
 app.include_router(frame_router, prefix=api_config.api_prefix)
 app.include_router(generation_router, prefix=api_config.api_prefix)
+app.include_router(generation_settings_router, prefix=api_config.api_prefix)
+app.include_router(help_router, prefix=api_config.api_prefix)
+app.include_router(history_router, prefix=api_config.api_prefix)
+app.include_router(publish_router, prefix=api_config.api_prefix)
+app.include_router(settings_router, prefix=api_config.api_prefix)
 
 
 @app.get("/")
@@ -150,6 +162,7 @@ async def root():
             "llm": f"{api_config.api_prefix}/llm",
             "tts": f"{api_config.api_prefix}/tts",
             "image": f"{api_config.api_prefix}/image",
+            "media": f"{api_config.api_prefix}/media",
             "content": f"{api_config.api_prefix}/content",
             "video": f"{api_config.api_prefix}/video",
             "tasks": f"{api_config.api_prefix}/tasks",
@@ -157,6 +170,9 @@ async def root():
             "resources": f"{api_config.api_prefix}/resources",
             "frame": f"{api_config.api_prefix}/frame",
             "generation": f"{api_config.api_prefix}/generation",
+            "help": f"{api_config.api_prefix}/help",
+            "history": f"{api_config.api_prefix}/history",
+            "publish": f"{api_config.api_prefix}/publish",
         }
     }
 
