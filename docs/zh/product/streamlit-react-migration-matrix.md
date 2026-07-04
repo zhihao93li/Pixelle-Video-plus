@@ -48,7 +48,7 @@ React 是新的主入口，Streamlit 在迁移完成前保留为 legacy/debug �
 | 素材增强视频 | `--real-template petwoods_xhs_asset_enhanced_v1 --no-cancel-on-timeout --timeout 300` 通过；generation task `7ebf5050-f636-435b-9822-3ed91595008c`，产物 `/output/20260703_221438_42da/猫咪日常素材.mp4` | 通过 |
 | 真实素材 montage | `--real-template petwoods_xhs_real_material_montage_v1 --no-cancel-on-timeout --timeout 300` 通过；generation task `0e4ebd8d-8d23-43d5-87e0-f928855a5b79`，产物 `/output/20260703_221543_4731/猫咪日常素材.mp4` | 通过 |
 | I2V | `--real-template pixelle_i2v_basic_v1 --no-cancel-on-timeout --timeout 300` 通过；RunningHub provider task `2073048268757229569`，generation task `3d112b8f-83d4-4168-97a6-740a4aca5723`，产物 `/output/20260703_221635_f679/final.mp4` | 通过 |
-| 动作迁移 | `--real-template pixelle_action_transfer_basic_v1 --no-cancel-on-timeout --timeout 300` 失败；RunningHub provider task `2073049508220198914` 返回 `FAILED`，本地 task `2ba7cf2d-214a-427d-bbcc-414a05004a9d` 失败，错误 `Workflow did not return a video. Check workflow configuration.` | 未通过，需要 RunningHub workflow 侧排查 |
+| 动作迁移 | 旧验收使用 verifier 自动生成的 2 秒黑色视频和默认图片，RunningHub provider task `2073049508220198914` 返回 `FAILED`；后续只读/最小验证显示远端 workflow `2013073105194852353` 使用 workflow 默认素材可产出 mp4，provider task `2073265964673368066` 最终 `SUCCESS`，结果包含 `WanVideo_SCAIL_00001_p83-audio_mqsse_1783140386.mp4`；verifier 已改为不再自动生成黑色视频，真实 E2E 必须显式传入 `--reference-video` 和 `--asset-image` | 未通过，当前缺有效用户侧动作迁移素材验收；不是 React/API contract 问题 |
 | 数字人视频 | `--real-template pixelle_digital_human_basic_v1 --no-cancel-on-timeout --timeout 300` 通过；generation task `ac5707f0-591e-4760-825c-4bf9b86f3bb3`，产物 `/output/20260703_222327_68f9/final.mp4` | 通过 |
 | Script Review 完整链路 | `--real-script-review --timeout 240 --poll-interval 2` 通过；draft set `9278b845a10f4c358067134333960d8d`，batch `c0aef6b29cf44094b0f6b2c60d942809`，item task `81dc0e2b-9f4b-4929-9d73-9dc4f85bd1f1` | 通过 |
 | 非发布管理/浏览器/配置 | `--management-readiness --provider-readiness --browser-smoke --completion-audit --timeout 120 --poll-interval 2` 中 management、browser smoke、provider readiness 通过；completion gate 失败是因为该命令不复用前面单项 E2E 证据，且发布未执行 | 非发布入口通过；严格 gate 仍未关闭 |
@@ -88,9 +88,18 @@ React 是新的主入口，Streamlit 在迁移完成前保留为 legacy/debug �
 
 ### 当前真实阻塞层级
 
-当前真实阻塞集中在 Action Transfer。`--provider-readiness` 已证明 LLM、FFmpeg、RunningHub 配置和 workflow 文件存在；I2V、Digital Human、标准媒体模板、素材/Montage 都已拿到最终 mp4。因此当前 Action Transfer 的失败层级不是 input、credentials、network、API contract、本地 workflow 文件缺失，也不是通用 provider 队列问题，而是 `workflows/runninghub/af_scail.json` 对应 RunningHub workflow runtime 未产出视频。
+当前真实阻塞集中在 Action Transfer 的“用户资产真实 E2E”。`--provider-readiness` 已证明 LLM、FFmpeg、RunningHub 配置和 workflow 文件存在；I2V、Digital Human、标准媒体模板、素材/Montage 都已拿到最终 mp4。对远端 workflow `2013073105194852353` 的最小验证表明 workflow 默认素材可产出 mp4，因此旧失败不能再简单归因为 workflow 文件不可用；更准确的层级是 input/workflow contract：动作迁移验收必须使用真实单人动作视频和匹配的目标人像，不能使用 verifier 自动生成的黑色视频或无人物图片。
 
-Action Transfer 失败证据：generation task `2ba7cf2d-214a-427d-bbcc-414a05004a9d`，RunningHub provider task `2073049508220198914`，provider status `FAILED`，本地错误 `Workflow did not return a video. Check workflow configuration.`。RunningHub 状态 API 只返回 `msg=success`，没有更细节点错误；下一步必须在 RunningHub 控制台查看该 task 的失败节点、输出和参数映射。
+Action Transfer 旧失败证据：generation task `2ba7cf2d-214a-427d-bbcc-414a05004a9d`，RunningHub provider task `2073049508220198914`，provider status `FAILED`，旧本地错误 `Workflow did not return a video. Check workflow configuration.`。本地 `_first_video()` 已改为当 provider 返回 `status=error` 时优先暴露 `Workflow execution failed: <provider msg>`，避免把 provider/runtime 失败包装成“没有视频”。下一步需要用真实素材复跑：
+
+```bash
+uv run python scripts/verify_streamlit_migration.py \
+  --real-template pixelle_action_transfer_basic_v1 \
+  --reference-video /path/to/single-person-action.mp4 \
+  --asset-image /path/to/target-person.jpg \
+  --no-cancel-on-timeout \
+  --timeout 1200
+```
 
 已补充 `runninghub_timeout` 设置，默认 600 秒，并在 React Settings 中开放配置。它不会让 provider queue 自动成功，但能避免外部任务无限等待；超时后应作为 provider runtime 失败暴露，而不是让用户一直看到进行中。
 
@@ -142,6 +151,6 @@ Action Transfer 失败证据：generation task `2ba7cf2d-214a-427d-bbcc-414a0500
 ### P5 下线 Streamlit
 
 - Streamlit 不能在当前阶段下线。
-- 下线前必须逐项证明：标准生成、素材/Montage、Batch、Script Review、I2V、Action Transfer、Digital Human、History、Publish、Settings、Help 都能在 React 完成真实流程；当前缺 Action Transfer 真实 E2E 和 Buffer 真实发布验收。
+- 下线前必须逐项证明：标准生成、素材/Montage、Batch、Script Review、I2V、Action Transfer、Digital Human、History、Publish、Settings、Help 都能在 React 完成真实流程；当前缺 Action Transfer 有效素材真实 E2E 和 Buffer 真实发布验收。
 - provider/workflow/source 选择按产品原则迁入模板配置/设置页，不作为普通用户每次生成入口。
 - 所有保留能力必须有 React 入口和真实验收记录；无法保留的能力必须有明确废弃说明。

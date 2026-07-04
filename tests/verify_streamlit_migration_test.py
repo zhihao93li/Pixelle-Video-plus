@@ -10,6 +10,7 @@ from scripts.verify_streamlit_migration import (
     Check,
     RealGenerationAssetPaths,
     SPECIAL_PIPELINE_TEMPLATE_IDS,
+    build_action_transfer_missing_reference_check,
     build_external_e2e_plan,
     build_streamlit_completion_gate,
     build_real_template_input,
@@ -18,6 +19,7 @@ from scripts.verify_streamlit_migration import (
     classify_task_blocker,
     missing_dict_paths,
     poll_generation_task_result,
+    prepare_real_generation_assets,
     run_existing_generation_task_check,
     run_existing_real_template_check,
     run_local_render_smoke_check,
@@ -246,6 +248,32 @@ def test_build_real_template_input_covers_enabled_template_shapes(tmp_path):
     digital_input = build_real_template_input("pixelle_digital_human_basic_v1", assets)
     assert digital_input["character_assets"] == [str(image)]
     assert digital_input["script"]
+
+
+def test_prepare_real_generation_assets_requires_explicit_action_reference(tmp_path):
+    image = tmp_path / "person.jpg"
+    image.write_bytes(b"fake-image")
+
+    try:
+        prepare_real_generation_assets(
+            image_path=str(image),
+            reference_video_path="",
+            needs_reference_video=True,
+        )
+    except ValueError as exc:
+        assert "requires --reference-video" in str(exc)
+        assert "black placeholder video" in str(exc)
+    else:
+        raise AssertionError("expected missing action reference video to fail")
+
+
+def test_action_transfer_missing_reference_check_reports_required_assets():
+    check = build_action_transfer_missing_reference_check(asset_image_path="/tmp/person.jpg")
+
+    assert check.ok is False
+    assert check.name == "real_generation_pixelle_action_transfer_basic_v1"
+    assert "--reference-video" in check.data["required_flags"]
+    assert "--asset-image /path/to/target-person.jpg" in check.data["example_command"]
 
 
 def test_build_real_template_input_rejects_unregistered_dedicated_template(tmp_path):

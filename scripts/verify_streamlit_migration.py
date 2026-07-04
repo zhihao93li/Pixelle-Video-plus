@@ -260,7 +260,10 @@ STREAMLIT_COMPLETION_CHECK_DETAILS = {
         "phase": "P4",
         "command": (
             "uv run python scripts/verify_streamlit_migration.py "
-            "--real-template pixelle_action_transfer_basic_v1 --no-cancel-on-timeout --timeout 900"
+            "--real-template pixelle_action_transfer_basic_v1 "
+            "--reference-video /path/to/single-person-action.mp4 "
+            "--asset-image /path/to/target-person.jpg "
+            "--no-cancel-on-timeout --timeout 1200"
         ),
         "requires_confirmation": True,
     },
@@ -1011,6 +1014,20 @@ def main() -> int:
             run_asset_pipelines=args.real_asset_pipelines,
             run_special_pipelines=args.real_special_pipelines,
         )
+        if (
+            "pixelle_action_transfer_basic_v1" in real_template_ids
+            and not args.reference_video.strip()
+        ):
+            checks.append(
+                build_action_transfer_missing_reference_check(
+                    asset_image_path=args.asset_image,
+                )
+            )
+            real_template_ids = [
+                template_id
+                for template_id in real_template_ids
+                if template_id != "pixelle_action_transfer_basic_v1"
+            ]
         if real_template_ids:
             asset_paths = prepare_real_generation_assets(
                 image_path=args.asset_image,
@@ -1347,19 +1364,54 @@ def prepare_real_generation_assets(
 
     reference_video: Path | None = None
     if needs_reference_video:
-        reference_video = (
-            Path(reference_video_path).expanduser()
-            if reference_video_path
-            else default_reference_video_path()
-        )
-        if not reference_video.exists():
-            create_reference_video(reference_video)
+        if not reference_video_path.strip():
+            raise ValueError(
+                "Action Transfer real E2E requires --reference-video with a real "
+                "single-person action video. The verifier no longer generates a "
+                "black placeholder video because it is not a valid input for the "
+                "RunningHub action-transfer workflow."
+            )
+        reference_video = Path(reference_video_path).expanduser()
         if not reference_video.exists():
             raise FileNotFoundError(f"Reference video does not exist: {reference_video}")
 
     return RealGenerationAssetPaths(
         image=image.resolve(),
         reference_video=reference_video.resolve() if reference_video else None,
+    )
+
+
+def build_action_transfer_missing_reference_check(*, asset_image_path: str) -> Check:
+    return Check(
+        "real_generation_pixelle_action_transfer_basic_v1",
+        False,
+        "Action Transfer real E2E requires an explicit reference action video",
+        {
+            "required_flags": {
+                "--reference-video": (
+                    "Path to a real single-person action video, 30 seconds or shorter. "
+                    "Do not use a blank/generated placeholder video."
+                ),
+                "--asset-image": (
+                    "Path to a target person image compatible with the action-transfer workflow."
+                ),
+            },
+            "received": {
+                "asset_image": asset_image_path or "",
+                "reference_video": "",
+            },
+            "example_command": (
+                "uv run python scripts/verify_streamlit_migration.py "
+                "--real-template pixelle_action_transfer_basic_v1 "
+                "--reference-video /path/to/single-person-action.mp4 "
+                "--asset-image /path/to/target-person.jpg "
+                "--no-cancel-on-timeout --timeout 1200"
+            ),
+            "reason": (
+                "The previous verifier-created black reference video is invalid for "
+                "this workflow and can produce false provider/runtime failures."
+            ),
+        },
     )
 
 
@@ -1373,39 +1425,6 @@ def default_image_asset_path() -> Path:
             return candidate
     raise FileNotFoundError(
         "No default image asset found. Pass --asset-image with a readable image path."
-    )
-
-
-def default_reference_video_path() -> Path:
-    return Path("/tmp/pixelle-streamlit-migration-reference.mp4")
-
-
-def create_reference_video(path: Path) -> None:
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        raise RuntimeError(
-            "ffmpeg is required to create a reference video. Pass --reference-video "
-            "with an existing mp4 or install ffmpeg."
-        )
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [
-            ffmpeg,
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=black:s=320x568:d=2",
-            "-vf",
-            "format=yuv420p",
-            "-movflags",
-            "+faststart",
-            str(path),
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
     )
 
 

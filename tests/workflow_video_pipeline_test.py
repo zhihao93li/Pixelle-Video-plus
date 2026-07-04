@@ -111,3 +111,16 @@ async def test_workflow_video_reports_runninghub_provider_task_status(
         "provider_status": "QUEUED",
         "workflow_id": "workflow-1",
     }
+
+
+def test_workflow_video_raises_provider_error_before_missing_video_message():
+    pipeline = ActionTransferPipeline(FakeCore())
+
+    with pytest.raises(ValueError, match="Workflow execution failed: provider failed"):
+        pipeline._first_video(
+            SimpleNamespace(
+                status="error",
+                msg="provider failed",
+                videos=[],
+            )
+        )

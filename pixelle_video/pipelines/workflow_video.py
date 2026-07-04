@@ -87,6 +87,11 @@ class WorkflowVideoPipeline(BasePipeline):
         shutil.copy2(source_path, destination_path)
 
     def _first_video(self, workflow_result) -> str:
+        status = str(getattr(workflow_result, "status", "") or "").lower()
+        if status and status not in {"completed", "success"}:
+            message = getattr(workflow_result, "msg", None) or status
+            raise ValueError(f"Workflow execution failed: {message}")
+
         videos = getattr(workflow_result, "videos", None)
         if videos:
             return str(videos[0])
