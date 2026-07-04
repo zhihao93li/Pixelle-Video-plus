@@ -42,6 +42,7 @@ import {
   type ScriptReviewLanguageDraft,
   type ScriptReviewTemplateListResponse,
 } from "@/lib/generationApi"
+import { buildScriptReviewDraftFeedback } from "@/lib/scriptReviewDraftFeedback"
 import { cn } from "@/lib/utils"
 
 const DEFAULT_FRAME_TEMPLATE = "1080x1920/image_default.html"
@@ -187,7 +188,9 @@ export function ScriptReviewWorkspace() {
         response,
         ...current.filter((item) => item.draft_set_id !== response.draft_set_id),
       ])
-      setNotice(`已生成 ${response.drafts.length} 组审核草稿。`)
+      const feedback = buildScriptReviewDraftFeedback(response)
+      setNotice(feedback.notice)
+      setError(feedback.errorMessage)
     } catch (createError) {
       setError(readableError(createError))
     } finally {
@@ -639,6 +642,8 @@ function DraftEditor({
   ) => void
   onToggleLanguage: (draftIndex: number, language: string) => void
 }) {
+  const feedback = draftSet ? buildScriptReviewDraftFeedback(draftSet) : null
+
   return (
     <Card className="rounded-lg">
       <CardHeader className="border-b">
@@ -659,12 +664,10 @@ function DraftEditor({
                 {draftSet.draft_set_id}
               </span>
             </div>
-            {draftSet.errors.length > 0 && (
+            {feedback?.errorMessage && (
               <InlineError
-                title="部分草稿生成失败"
-                message={draftSet.errors
-                  .map((error) => String(error.message ?? error.topic ?? "unknown"))
-                  .join("\n")}
+                title={feedback.errorTitle ?? "草稿生成失败"}
+                message={feedback.errorMessage}
               />
             )}
             {draftSet.drafts.map((draft, draftIndex) => {
