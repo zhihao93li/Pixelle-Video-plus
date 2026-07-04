@@ -18,6 +18,8 @@ https://github.com/user-attachments/assets/a42e7457-fcc8-40da-83fc-784c45a8b95d
 
 > **Pixelle-Video-plus** 是基于原始 [AIDC-AI/Pixelle-Video](https://github.com/AIDC-AI/Pixelle-Video) 的增强 fork，当前增加了 Fish Audio API TTS、WebUI 背景音乐上传，以及更完整的 TTS/BGM 配置入口。
 
+> **当前迁移分支说明**：本分支正在把旧 Streamlit Web UI 迁移到 React + shadcn 控制台。新的 React 入口通过 FastAPI task 接口提交真实生成任务、轮询状态、查看历史、配置设置和发布准备；Streamlit 仍保留为 legacy/debug 入口，直到 Action Transfer 真实 E2E 和 Buffer 真实发布验收完成。当前迁移状态见 [Streamlit 到 React 全功能迁移矩阵](docs/zh/product/streamlit-react-migration-matrix.md)。
+
 只需输入一个 **主题**，Pixelle-Video 就能自动完成：
 - ✍️ 撰写视频文案  
 - 🎨 生成 AI 配图/视频  
@@ -239,12 +241,25 @@ cd Pixelle-Video-plus
 
 #### 第二步：启动 Web 界面
 
+当前迁移分支有两个本地入口：
+
+**React 控制台（新的产品入口，开发中）**
+```bash
+uv run uvicorn api.app:app --host 127.0.0.1 --port 8000
+cd apps/production-template-demo
+npm install
+npm run dev
+```
+
+浏览器打开 `http://127.0.0.1:5173`。
+
+**Streamlit 旧入口（legacy/debug，对照保留）**
 ```bash
 # 使用 uv 运行（推荐，会自动安装依赖）
 uv run streamlit run web/app.py
 ```
 
-浏览器会自动打开 http://localhost:8501
+浏览器会自动打开 http://localhost:8501。
 
 #### 第三步：在 Web 界面配置
 

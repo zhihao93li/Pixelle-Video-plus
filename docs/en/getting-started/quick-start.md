@@ -6,6 +6,20 @@ Already installed and configured? Let's create your first video!
 
 ## Start the Web Interface
 
+!!! note "Current migration branch"
+    The React + shadcn console is the new product entry at `http://127.0.0.1:5173`; it uses the FastAPI task API at `http://127.0.0.1:8000` for real generation tasks. Streamlit remains available as a legacy/debug entry at `http://localhost:8501`.
+
+### React Console Users
+
+```bash
+uv run uvicorn api.app:app --host 127.0.0.1 --port 8000
+cd apps/production-template-demo
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:5173` in the browser.
+
 ### Windows All-in-One Package Users
 
 If you're using the Windows All-in-One Package, simply:
@@ -13,6 +27,8 @@ If you're using the Windows All-in-One Package, simply:
 2. Your browser will automatically open `http://localhost:8501`
 
 ### Install from Source Users
+
+The following starts the Streamlit legacy/debug entry:
 
 ```bash
 # Using uv
@@ -112,4 +128,3 @@ Next, you can:
 - **Clone Voices** - See the [Voice Cloning with Reference Audio](../tutorials/voice-cloning.md) tutorial
 - **Use API** - See the [API Usage Guide](../user-guide/api.md)
 - **Develop Templates** - See the [Template Development Guide](../user-guide/templates.md)
-

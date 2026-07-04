@@ -16,6 +16,8 @@ https://github.com/user-attachments/assets/a42e7457-fcc8-40da-83fc-784c45a8b95d
 
 > **Pixelle-Video-plus** is an enhanced fork based on the original [AIDC-AI/Pixelle-Video](https://github.com/AIDC-AI/Pixelle-Video). It currently adds Fish Audio API TTS, WebUI BGM upload, and fuller TTS/BGM configuration controls.
 
+> **Current migration branch**: this branch is moving the old Streamlit Web UI to a React + shadcn console. The new React entry uses FastAPI task APIs for real generation submission, polling, history, settings, and publish readiness. Streamlit remains as a legacy/debug entry until Action Transfer real E2E and Buffer real publish validation are closed. See [Streamlit-to-React migration matrix](docs/zh/product/streamlit-react-migration-matrix.md) for current status.
+
 Just input a **topic**, and Pixelle-Video will automatically:
 - ✍️ Write video script
 - 🎨 Generate AI images/videos  
@@ -235,12 +237,25 @@ cd Pixelle-Video-plus
 
 #### Step 2: Launch Web Interface
 
+This migration branch has two local entries:
+
+**React console (new product entry, in progress)**
+```bash
+uv run uvicorn api.app:app --host 127.0.0.1 --port 8000
+cd apps/production-template-demo
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:5173` in the browser.
+
+**Streamlit legacy/debug entry**
 ```bash
 # Run with uv (recommended, will automatically install dependencies)
 uv run streamlit run web/app.py
 ```
 
-Browser will automatically open http://localhost:8501
+Browser will automatically open http://localhost:8501.
 
 #### Step 3: Configure in Web Interface
 

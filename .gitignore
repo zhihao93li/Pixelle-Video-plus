@@ -53,6 +53,7 @@ config.yaml.bak
 
 # Test outputs
 test_outputs/
+.playwright-cli/
 *.mp3
 *.wav
 *.bak

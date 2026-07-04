@@ -6,6 +6,20 @@
 
 ## 启动 Web 界面
 
+!!! note "当前迁移分支"
+    React + shadcn 控制台是新的产品入口，运行在 `http://127.0.0.1:5173`，并通过 `http://127.0.0.1:8000` 的 FastAPI task 接口提交真实生成任务。Streamlit 仍保留为 legacy/debug 入口，运行在 `http://localhost:8501`。
+
+### React 控制台用户
+
+```bash
+uv run uvicorn api.app:app --host 127.0.0.1 --port 8000
+cd apps/production-template-demo
+npm install
+npm run dev
+```
+
+浏览器打开 `http://127.0.0.1:5173`。
+
 ### Windows 一键整合包用户
 
 如果你使用的是 Windows 一键整合包，只需：
@@ -13,6 +27,8 @@
 2. 浏览器会自动打开 `http://localhost:8501`
 
 ### 从源码安装用户
+
+以下是 Streamlit legacy/debug 入口：
 
 ```bash
 # 使用 uv 运行
@@ -112,4 +128,3 @@ uv run streamlit run web/app.py
 - **克隆声音** - 查看 [使用参考音频克隆声音](../tutorials/voice-cloning.md) 教程
 - **使用 API** - 查看 [API 使用指南](../user-guide/api.md)
 - **开发模板** - 查看 [模板开发指南](../user-guide/templates.md)
-
