@@ -399,6 +399,44 @@ test("generic production template task API sends asset template input and metada
   )
 })
 
+test("special template task API preserves recipe input and current project identity", async () => {
+  const calls = installFetchMock({
+    success: true,
+    generation_task_id: "task-special",
+  })
+
+  await createGenerationTemplateTask(
+    "my_digital_human",
+    {
+      character_assets: ["/tmp/character.png"],
+      script: "Hello",
+      mode: "customize",
+    },
+    { source: "react_special_pipeline", template_use_case: "digital_human" },
+    "project-42"
+  )
+
+  assert.equal(
+    calls[0].url,
+    "http://127.0.0.1:8000/api/generation/templates/my_digital_human/tasks"
+  )
+  assert.equal(
+    calls[0].init?.body,
+    JSON.stringify({
+      input: {
+        character_assets: ["/tmp/character.png"],
+        script: "Hello",
+        mode: "customize",
+      },
+      metadata: {
+        source: "react_special_pipeline",
+        template_use_case: "digital_human",
+        project_id: "project-42",
+      },
+    })
+  )
+})
+
 test("generation task cancel API uses task-scoped delete route", async () => {
   const calls = installFetchMock({ task_id: "task-1", status: "cancelled" })
 

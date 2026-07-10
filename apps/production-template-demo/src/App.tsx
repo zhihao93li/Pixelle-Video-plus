@@ -86,6 +86,7 @@ function renderRoute(route: ResolvedRoute): ReactNode {
         <SpecialPipelinesWorkspace
           initialMode={route.params.mode as SpecialPipelineMode}
           key={`${route.params.mode}:${route.params.templateId ?? "default"}`}
+          templateId={route.params.templateId}
         />
       )
     case "create-script-review":
