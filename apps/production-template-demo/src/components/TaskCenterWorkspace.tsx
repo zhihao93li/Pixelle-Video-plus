@@ -1,46 +1,179 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react"
 import {
-  ChevronDown,
-  ChevronUp,
+  Activity,
+  ChevronRight,
   FolderOpen,
   Loader2,
   Plus,
   RefreshCcw,
+  RotateCcw,
   Trash2,
+  XCircle,
 } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { BatchStatusCard } from "@/components/shared/BatchStatusCard"
+import { AsyncState } from "@/components/shared/AsyncState"
+import { EmptyState } from "@/components/shared/EmptyState"
 import { InlineError } from "@/components/shared/feedback"
+import { PageFrame } from "@/components/shared/PageFrame"
 import { Stat } from "@/components/shared/Stat"
 import { StatusBadge } from "@/components/shared/StatusBadge"
+import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
 import { artifactKindLabel, templateArtifactType } from "@/lib/artifactKind"
-import { isTerminalBatchStatus } from "@/lib/batchInput"
+import { getBatchPreviewTitle } from "@/lib/batchInput"
 import { formatDate, readableError } from "@/lib/format"
 import {
   cancelGenerationTask,
-  isTerminalStatus,
   listGenerationBatches,
   listTemplates,
   type GenerationBatch,
+  type GenerationBatchItem,
 } from "@/lib/generationApi"
-import { navigate } from "@/lib/router"
+import type {
+  ProductionRunChildViewModel,
+  ProductionRunViewModel,
+  RunState,
+} from "@/lib/productViewModels"
+import { routeHref } from "@/lib/router"
+import { useTaskCenter, type TrackedTask } from "@/lib/taskCenter"
 import { useBatchPolling } from "@/lib/useBatchPolling"
-import { useTaskCenter } from "@/lib/taskCenter"
 import { cn } from "@/lib/utils"
+
+type LoadState = "loading" | "ready" | "error" | "stale"
+type BatchTemplateInfo = { pipelineId: string; displayName: string }
+type OperationRun = ProductionRunViewModel & {
+  source: "batch" | "task"
+  trackedTaskId?: string
+}
 
 export function TaskCenterWorkspace() {
   const { tasks, updateTask, removeTask } = useTaskCenter()
+  const [batches, setBatches] = useState<GenerationBatch[]>([])
+  const [templateMap, setTemplateMap] = useState<
+    Record<string, BatchTemplateInfo>
+  >({})
+  const [loadState, setLoadState] = useState<LoadState>("loading")
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(true)
+  const [reloadToken, setReloadToken] = useState(0)
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const {
+    batch: polledBatch,
+    setBatch: setPolledBatch,
+    error: pollingError,
+    retryItem,
+    retryingItemIndex,
+  } = useBatchPolling()
+
+  useEffect(() => {
+    let cancelled = false
+
+    void Promise.all([listGenerationBatches(), listTemplates()])
+      .then(([batchResponse, templateResponse]) => {
+        if (cancelled) {
+          return
+        }
+        const nextTemplateMap: Record<string, BatchTemplateInfo> = {}
+        for (const template of templateResponse.templates) {
+          nextTemplateMap[template.id] = {
+            pipelineId: template.pipeline_id,
+            displayName: template.display_name,
+          }
+        }
+        setBatches(batchResponse.batches)
+        setTemplateMap(nextTemplateMap)
+        setLoadError(null)
+        setLoadState("ready")
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return
+        }
+        setLoadError(readableError(error))
+        setLoadState(batches.length > 0 || tasks.length > 0 ? "stale" : "error")
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsRefreshing(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+    // reloadToken 是显式刷新信号；已有数据用于判定 error / stale。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadToken])
+
+  const shownBatches = useMemo(
+    () =>
+      batches.map((batch) =>
+        polledBatch?.batch_id === batch.batch_id ? polledBatch : batch
+      ),
+    [batches, polledBatch]
+  )
+
+  const runs = useMemo(() => {
+    const batchTaskIds = new Set(
+      shownBatches.flatMap((batch) =>
+        batch.items.flatMap((item) => (item.task_id ? [item.task_id] : []))
+      )
+    )
+    const batchRuns = shownBatches.map((batch) =>
+      adaptBatchRun(batch, templateMap)
+    )
+    const taskRuns = tasks
+      .filter(({ task }) => !batchTaskIds.has(task.task_id))
+      .map((tracked) => adaptTrackedRun(tracked, cancellingId))
+
+    return [...batchRuns, ...taskRuns].sort(
+      (left, right) => dateValue(right.createdAt) - dateValue(left.createdAt)
+    )
+  }, [cancellingId, shownBatches, tasks, templateMap])
+
+  const selectedRun =
+    runs.find((run) => run.id === selectedRunId) ?? runs[0] ?? null
+  const effectiveSelectedRunId = selectedRun?.id ?? null
+
+  useEffect(() => {
+    const batch = batches.find(
+      (item) => item.batch_id === effectiveSelectedRunId
+    )
+    setPolledBatch(batch ?? null)
+  }, [batches, effectiveSelectedRunId, setPolledBatch])
+
+  const selectedBatch = selectedRun
+    ? (shownBatches.find((batch) => batch.batch_id === selectedRun.id) ?? null)
+    : null
+
+  const runningCount = runs.filter((run) =>
+    ["uploading", "submitting", "queued", "running", "cancelling"].includes(
+      run.state
+    )
+  ).length
+  const completedCount = runs.filter((run) => run.state === "completed").length
+  const failedCount = runs.filter((run) => run.state === "failed").length
 
   async function cancelTask(taskId: string) {
     setCancellingId(taskId)
     setActionError(null)
     try {
-      const latest = await cancelGenerationTask(taskId)
-      updateTask(latest)
+      updateTask(await cancelGenerationTask(taskId))
     } catch (error) {
       setActionError(readableError(error))
     } finally {
@@ -48,279 +181,568 @@ export function TaskCenterWorkspace() {
     }
   }
 
-  const runningCount = tasks.filter(
-    ({ task }) => !isTerminalStatus(task.status)
-  ).length
-  const completedCount = tasks.filter(
-    ({ task }) => task.status === "completed"
-  ).length
-  const failedCount = tasks.filter(({ task }) => task.status === "failed").length
+  function retryChild(childId: string) {
+    const item = selectedBatch?.items.find(
+      (candidate) => batchChildId(selectedBatch.batch_id, candidate) === childId
+    )
+    if (item) {
+      void retryItem(item.index)
+    }
+  }
 
   return (
-    <main className="flex max-w-[1240px] flex-col gap-6 p-4 lg:p-6">
-      <BatchesSection />
+    <PageFrame>
+      <WorkspaceHeader
+        actions={
+          <>
+            <Button
+              aria-label="刷新生产运行"
+              disabled={isRefreshing}
+              onClick={() => {
+                setIsRefreshing(true)
+                setReloadToken((token) => token + 1)
+              }}
+              size="icon-sm"
+              variant="outline"
+            >
+              <RefreshCcw className={cn(isRefreshing && "animate-spin")} />
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <a href={routeHref("/library")}>
+                <FolderOpen data-icon="inline-start" />
+                打开作品库
+              </a>
+            </Button>
+          </>
+        }
+        description="以一次提交为单位查看总体进度、子任务与恢复操作。"
+        title="生产运行"
+      />
 
-      <section className="flex flex-col">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-2 border-b pb-3">
-          <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
-            <Stat label="进行中" value={runningCount} />
-            <Stat label="已完成" value={completedCount} />
-            <Stat destructive={failedCount > 0} label="失败" value={failedCount} />
+      <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2 border-b pb-4">
+        <Stat label="进行中" value={runningCount} />
+        <Stat label="已完成" value={completedCount} />
+        <Stat destructive={failedCount > 0} label="失败" value={failedCount} />
+      </div>
+
+      {loadState === "stale" ? (
+        <AsyncState
+          action={
+            <Button
+              onClick={() => {
+                setIsRefreshing(true)
+                setReloadToken((token) => token + 1)
+              }}
+              size="sm"
+              variant="outline"
+            >
+              重新读取
+            </Button>
+          }
+          description={loadError}
+          state="stale"
+          title="运行列表可能不是最新状态"
+        />
+      ) : null}
+
+      {actionError || pollingError ? (
+        <InlineError
+          message={actionError || pollingError || "操作未完成"}
+          title="任务操作失败"
+        />
+      ) : null}
+
+      {loadState === "loading" && runs.length === 0 ? (
+        <AsyncState
+          description="正在同步近期提交与子任务进度。"
+          state="loading"
+          title="正在读取生产运行"
+        />
+      ) : null}
+
+      {loadState === "error" && runs.length === 0 ? (
+        <AsyncState
+          action={
+            <Button
+              onClick={() => {
+                setIsRefreshing(true)
+                setReloadToken((token) => token + 1)
+              }}
+              size="sm"
+              variant="outline"
+            >
+              重试
+            </Button>
+          }
+          description={loadError}
+          state="error"
+          title="无法读取生产运行"
+        />
+      ) : null}
+
+      {loadState === "ready" && runs.length === 0 ? (
+        <EmptyState
+          actions={
+            <Button asChild size="sm">
+              <a href={routeHref("/create")}>
+                <Plus data-icon="inline-start" />
+                快速生产
+              </a>
+            </Button>
+          }
+          description="提交第一条内容后，可以在这里持续查看进度。"
+          icon={Activity}
+          title="还没有生产运行"
+        />
+      ) : null}
+
+      {runs.length > 0 ? (
+        <div className="grid min-w-0 gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
+          <section aria-labelledby="run-list-heading" className="min-w-0">
+            <div className="flex items-baseline justify-between gap-3 border-b pb-2">
+              <h3 className="text-sm font-medium" id="run-list-heading">
+                最近运行
+              </h3>
+              <span className="text-xs text-muted-foreground">
+                {runs.length} 次
+              </span>
+            </div>
+            <div
+              className="-mx-4 flex snap-x snap-mandatory gap-2 overflow-x-auto px-4 pb-2 lg:mx-0 lg:block lg:overflow-visible lg:px-0 lg:pb-0"
+              role="list"
+            >
+              {runs.map((run, index) => (
+                <div
+                  className="w-[min(82vw,300px)] shrink-0 snap-start rounded-lg border lg:w-auto lg:rounded-none lg:border-x-0 lg:border-t-0 lg:last:border-b-0"
+                  key={run.id}
+                  role="listitem"
+                >
+                  <button
+                    aria-pressed={selectedRun?.id === run.id}
+                    className={cn(
+                      "group flex min-h-20 w-full items-center gap-3 px-2 py-3 text-left outline-none focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50",
+                      selectedRun?.id === run.id
+                        ? "bg-muted"
+                        : "hover:bg-muted/50"
+                    )}
+                    data-run-item
+                    onClick={() => setSelectedRunId(run.id)}
+                    onKeyDown={(event) =>
+                      handleRunListKeyDown(event, index, runs, setSelectedRunId)
+                    }
+                    type="button"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium">
+                          {run.title}
+                        </span>
+                        <StatusBadge status={run.state} />
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                        <span>{artifactKindLabel(run.artifactKind)}</span>
+                        <span>{Math.round(run.progress)}%</span>
+                      </div>
+                      <Progress className="mt-1.5" value={run.progress} />
+                    </div>
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-muted-foreground"
+                    />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {selectedRun ? (
+            <RunDetail
+              cancellingId={cancellingId}
+              onCancel={(taskId) => void cancelTask(taskId)}
+              onRemove={removeTask}
+              onRetryChild={retryChild}
+              retryingItemIndex={retryingItemIndex}
+              run={selectedRun}
+              selectedBatch={selectedBatch}
+            />
+          ) : null}
+        </div>
+      ) : null}
+    </PageFrame>
+  )
+}
+
+function RunDetail({
+  run,
+  selectedBatch,
+  retryingItemIndex,
+  cancellingId,
+  onRetryChild,
+  onCancel,
+  onRemove,
+}: {
+  run: OperationRun
+  selectedBatch: GenerationBatch | null
+  retryingItemIndex: number | null
+  cancellingId: string | null
+  onRetryChild: (childId: string) => void
+  onCancel: (taskId: string) => void
+  onRemove: (taskId: string) => void
+}) {
+  const terminal = ["completed", "failed", "cancelled", "interrupted"].includes(
+    run.state
+  )
+
+  return (
+    <section aria-labelledby="selected-run-heading" className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3
+              className="truncate text-lg font-medium"
+              id="selected-run-heading"
+            >
+              {run.title}
+            </h3>
+            <StatusBadge status={run.state} />
+            <Badge variant="outline">
+              {artifactKindLabel(run.artifactKind)}
+            </Badge>
           </div>
-          <Button
-            onClick={() => navigate("/library")}
-            size="sm"
-            variant="outline"
-          >
-            <FolderOpen data-icon="inline-start" />
-            打开作品库
-          </Button>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {run.createdAt
+              ? `提交于 ${formatDate(run.createdAt)}`
+              : "提交时间未知"}
+            {run.updatedAt ? ` · 更新于 ${formatDate(run.updatedAt)}` : ""}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {run.state === "completed" ? (
+            <Button asChild size="sm" variant="outline">
+              <a
+                href={routeHref(
+                  run.trackedTaskId
+                    ? `/library?task=${encodeURIComponent(run.trackedTaskId)}`
+                    : "/library"
+                )}
+              >
+                <FolderOpen data-icon="inline-start" />
+                查看产物
+              </a>
+            </Button>
+          ) : null}
+          {run.canCancel && run.trackedTaskId ? (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  disabled={cancellingId === run.trackedTaskId}
+                  size="sm"
+                  variant="destructive"
+                >
+                  {cancellingId === run.trackedTaskId ? (
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
+                  ) : (
+                    <XCircle data-icon="inline-start" />
+                  )}
+                  取消运行
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>取消这次生产运行？</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    已经完成的步骤不会回退，正在处理的步骤将请求停止。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>继续运行</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => onCancel(run.trackedTaskId!)}
+                  >
+                    取消运行
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : null}
+          {run.source === "task" && terminal && run.trackedTaskId ? (
+            <Button
+              aria-label="从最近运行中移除"
+              onClick={() => onRemove(run.trackedTaskId!)}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <Trash2 />
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid gap-5 py-5 sm:grid-cols-[minmax(0,1fr)_180px]">
+        <div className="min-w-0">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-sm font-medium">总体进度</span>
+            <span className="text-lg font-medium tabular-nums">
+              {Math.round(run.progress)}%
+            </span>
+          </div>
+          <Progress className="mt-2" value={run.progress} />
+          {run.message ? (
+            <p className="mt-2 text-xs text-muted-foreground">{run.message}</p>
+          ) : null}
+        </div>
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-1">
+          <div>
+            <dt className="text-xs text-muted-foreground">子任务</dt>
+            <dd className="mt-0.5 text-sm font-medium">
+              {run.children.length || 1}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">可恢复失败</dt>
+            <dd className="mt-0.5 text-sm font-medium">
+              {run.children.filter((child) => child.canRetry).length}
+            </dd>
+          </div>
+        </dl>
+      </div>
+
+      {run.error ? (
+        <InlineError message={run.error} title="本次运行未完成" />
+      ) : null}
+
+      <div className="border-t pt-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <h4 className="text-sm font-medium">子任务</h4>
+          {run.children.length > 0 ? (
+            <span className="text-xs text-muted-foreground">
+              {
+                run.children.filter((child) => child.state === "completed")
+                  .length
+              }
+              /{run.children.length} 完成
+            </span>
+          ) : null}
         </div>
 
-        {actionError && (
-          <InlineError title="任务操作失败" message={actionError} />
-        )}
-
-        {tasks.length === 0 ? (
-          <div className="flex flex-col items-start gap-3 py-10">
-            <div className="text-[13px] text-muted-foreground">
-              还没有生成任务。创建第一条内容后，进度会显示在这里。
-            </div>
-            <Button onClick={() => navigate("/create")} size="sm">
-              <Plus data-icon="inline-start" />
-              快速生产
-            </Button>
-          </div>
+        {run.children.length === 0 ? (
+          <p className="py-6 text-sm text-muted-foreground">
+            单条生产没有拆分子任务，总体状态即为当前状态。
+          </p>
         ) : (
-          <div className="mt-2 flex flex-col">
-            {tasks.map(({ task, templateName, submittedAt }) => {
-              const running = !isTerminalStatus(task.status)
+          <div className="mt-2 divide-y border-y">
+            {run.children.map((child) => {
+              const rawItem = selectedBatch?.items.find(
+                (item) =>
+                  batchChildId(selectedBatch.batch_id, item) === child.id
+              )
+              const retrying = rawItem?.index === retryingItemIndex
               return (
-                <div className="border-b py-2.5 last:border-0" key={task.task_id}>
-                  <div className="flex items-center gap-3">
-                    <StatusBadge status={task.status} />
+                <div className="py-3" key={child.id}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-medium">
-                        {templateName || "生成任务"}
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium">
+                          {child.label}
+                        </span>
+                        <StatusBadge status={child.state} />
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        提交于 {formatDate(submittedAt)}
-                      </div>
+                      {child.message ? (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {child.message}
+                        </p>
+                      ) : null}
+                      <Progress className="mt-2" value={child.progress} />
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      {task.status === "completed" && (
-                        <Button
-                          onClick={() =>
-                            navigate(`/library?task=${task.task_id}`)
-                          }
-                          size="sm"
-                          variant="ghost"
-                        >
-                          查看与发布
-                        </Button>
-                      )}
-                      {running && (
-                        <Button
-                          disabled={cancellingId === task.task_id}
-                          onClick={() => void cancelTask(task.task_id)}
-                          size="sm"
-                          variant="ghost"
-                        >
-                          {cancellingId === task.task_id && (
-                            <Loader2 className="animate-spin" />
-                          )}
-                          取消
-                        </Button>
-                      )}
-                      {!running && (
-                        <Button
-                          aria-label="从列表移除"
-                          onClick={() => removeTask(task.task_id)}
-                          size="icon-sm"
-                          variant="ghost"
-                        >
-                          <Trash2 />
-                        </Button>
-                      )}
-                    </div>
+                    {child.canRetry ? (
+                      <Button
+                        disabled={retryingItemIndex !== null}
+                        onClick={() => onRetryChild(child.id)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        {retrying ? (
+                          <Loader2
+                            className="animate-spin"
+                            data-icon="inline-start"
+                          />
+                        ) : (
+                          <RotateCcw data-icon="inline-start" />
+                        )}
+                        重试
+                      </Button>
+                    ) : null}
                   </div>
-
-                  {running && (task.progress.message || task.progress.stage) && (
-                    <div className="mt-1 pl-[3.75rem] text-xs text-muted-foreground">
-                      {task.progress.message || task.progress.stage} ·{" "}
-                      {Math.round(task.progress.percentage)}%
-                    </div>
-                  )}
-
-                  {task.status === "failed" && task.error && (
-                    <div className="mt-1 pl-[3.75rem] text-xs text-destructive">
-                      {task.error.message}
-                    </div>
-                  )}
+                  {child.error ? (
+                    <p className="mt-2 text-xs text-destructive">
+                      {child.error}
+                    </p>
+                  ) : null}
                 </div>
               )
             })}
           </div>
         )}
-      </section>
-    </main>
-  )
-}
-
-type BatchTemplateInfo = { pipelineId: string; displayName: string }
-
-/** 任务中心「批次」区：近期批次行（形态徽标 + 配方名 ×N + 汇总状态），可展开查看/重试。 */
-function BatchesSection() {
-  const [batches, setBatches] = useState<GenerationBatch[]>([])
-  const [templateMap, setTemplateMap] = useState<
-    Record<string, BatchTemplateInfo>
-  >({})
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [reloadToken, setReloadToken] = useState(0)
-  const {
-    batch: polledBatch,
-    setBatch: setPolledBatch,
-    retryItem,
-    retryingItemIndex,
-  } = useBatchPolling()
-
-  useEffect(() => {
-    let cancelled = false
-    void Promise.all([listGenerationBatches(), listTemplates()])
-      .then(([batchResponse, templateResponse]) => {
-        if (cancelled) {
-          return
-        }
-        setBatches(batchResponse.batches)
-        const map: Record<string, BatchTemplateInfo> = {}
-        for (const template of templateResponse.templates) {
-          map[template.id] = {
-            pipelineId: template.pipeline_id,
-            displayName: template.display_name,
-          }
-        }
-        setTemplateMap(map)
-        setError(null)
-      })
-      .catch((loadError) => {
-        if (!cancelled) {
-          setError(readableError(loadError))
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoading(false)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [reloadToken])
-
-  // 展开的批次交给轮询 hook（仅非终态轮询）；折叠则停
-  useEffect(() => {
-    setPolledBatch(
-      batches.find((batch) => batch.batch_id === expandedId) ?? null
-    )
-    // 只在展开项变化时重置，避免每次列表刷新打断轮询
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedId])
-
-  // 空批次时整区不渲染（不加空状态噪音）
-  if (!isLoading && batches.length === 0 && !error) {
-    return null
-  }
-
-  return (
-    <section className="flex flex-col">
-      <div className="flex items-center justify-between gap-3 border-b pb-2">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-sm font-medium">批次</span>
-          <span className="text-xs text-muted-foreground">
-            近期批量提交，展开看每条状态、失败可单条重试
-          </span>
-        </div>
-        <Button
-          disabled={isLoading}
-          onClick={() => setReloadToken((token) => token + 1)}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <RefreshCcw className={cn(isLoading && "animate-spin")} />
-        </Button>
-      </div>
-      <div className="mt-3">
-        {error && <InlineError title="批次读取失败" message={error} />}
-        <div className="flex flex-col gap-2">
-          {batches.slice(0, 12).map((batch) => {
-            const info = templateMap[batch.template_id]
-            const artifactLabel = info
-              ? artifactKindLabel(templateArtifactType(info.pipelineId))
-              : "产线"
-            const recipeName = info?.displayName ?? batch.template_id
-            const expanded = expandedId === batch.batch_id
-            const shown =
-              expanded && polledBatch?.batch_id === batch.batch_id
-                ? polledBatch
-                : batch
-            return (
-              <div
-                className="rounded-lg border bg-background"
-                key={batch.batch_id}
-              >
-                <button
-                  className="flex w-full items-center justify-between gap-3 p-3 text-left"
-                  onClick={() =>
-                    setExpandedId(expanded ? null : batch.batch_id)
-                  }
-                  type="button"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Badge variant="outline">{artifactLabel}</Badge>
-                    <span className="truncate text-sm font-medium">
-                      {recipeName} ×{shown.total_count}
-                    </span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {batchSummary(shown)}
-                    </span>
-                    {expanded ? (
-                      <ChevronUp className="size-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronDown className="size-4 text-muted-foreground" />
-                    )}
-                  </div>
-                </button>
-                {expanded && (
-                  <div className="border-t p-3">
-                    <BatchStatusCard
-                      artifactLabel={artifactLabel}
-                      bare
-                      batch={shown}
-                      onRetryItem={retryItem}
-                      retryingItemIndex={retryingItemIndex}
-                    />
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
       </div>
     </section>
   )
 }
 
-function batchSummary(batch: GenerationBatch): string {
-  const done = batch.items.filter((item) => item.status === "completed").length
-  const failed = batch.failed_count
-  if (isTerminalBatchStatus(batch.status) && done === batch.total_count) {
-    return "全部完成"
+function adaptBatchRun(
+  batch: GenerationBatch,
+  templateMap: Record<string, BatchTemplateInfo>
+): OperationRun {
+  const template = templateMap[batch.template_id]
+  const artifactKind = templateArtifactType(template?.pipelineId)
+  const children = batch.items.map((item) => adaptBatchChild(batch, item))
+  const progress =
+    children.length > 0
+      ? children.reduce((sum, child) => sum + child.progress, 0) /
+        children.length
+      : 0
+  const completed = children.filter(
+    (child) => child.state === "completed"
+  ).length
+  const failed = children.filter((child) => child.state === "failed").length
+
+  return {
+    id: batch.batch_id,
+    title: `${template?.displayName ?? "批量生产"} ×${batch.total_count}`,
+    artifactKind,
+    state: adaptRunState(batch.status),
+    progress: clampProgress(progress),
+    message:
+      failed > 0
+        ? `${completed}/${batch.total_count} 完成，${failed} 失败`
+        : `${completed}/${batch.total_count} 完成`,
+    error: null,
+    createdAt: batch.created_at,
+    updatedAt: batch.updated_at,
+    children,
+    artifact: null,
+    canCancel: false,
+    canRetry: children.some((child) => child.canRetry),
+    source: "batch",
   }
-  return (
-    `${done}/${batch.total_count} 完成` + (failed > 0 ? ` · ${failed} 失败` : "")
-  )
+}
+
+function adaptBatchChild(
+  batch: GenerationBatch,
+  item: GenerationBatchItem
+): ProductionRunChildViewModel {
+  const state = adaptRunState(item.status)
+  const progress =
+    state === "completed" ? 100 : clampProgress(item.progress?.percentage ?? 0)
+  return {
+    id: batchChildId(batch.batch_id, item),
+    label: getBatchPreviewTitle(item.input, Math.max(0, item.index - 1)),
+    state,
+    progress,
+    message: item.progress?.message || null,
+    error: item.error?.message || null,
+    artifact: null,
+    canRetry: state === "failed" || state === "cancelled",
+  }
+}
+
+function adaptTrackedRun(
+  tracked: TrackedTask,
+  cancellingId: string | null
+): OperationRun {
+  const { task } = tracked
+  const state =
+    cancellingId === task.task_id ? "cancelling" : adaptRunState(task.status)
+  return {
+    id: task.task_id,
+    title: tracked.templateName || "单条生产",
+    artifactKind: templateArtifactType(task.pipeline_id),
+    state,
+    progress:
+      state === "completed"
+        ? 100
+        : clampProgress(task.progress.percentage ?? 0),
+    message: task.progress.message || null,
+    error: task.error?.message || null,
+    createdAt: tracked.submittedAt || task.created_at,
+    updatedAt: task.updated_at,
+    children: [],
+    artifact: null,
+    canCancel: ["queued", "running", "submitting", "uploading"].includes(state),
+    canRetry: false,
+    source: "task",
+    trackedTaskId: task.task_id,
+  }
+}
+
+function adaptRunState(status: string): RunState {
+  switch (status) {
+    case "idle":
+    case "uploading":
+    case "submitting":
+    case "queued":
+    case "running":
+    case "completed":
+    case "failed":
+    case "cancelling":
+    case "cancelled":
+    case "interrupted":
+      return status
+    case "pending":
+    case "submitted":
+      return "queued"
+    case "processing":
+      return "running"
+    case "partial_failed":
+    case "error":
+      return "failed"
+    default:
+      return "interrupted"
+  }
+}
+
+function batchChildId(batchId: string, item: GenerationBatchItem) {
+  return `${batchId}:${item.index}`
+}
+
+function clampProgress(value: number) {
+  return Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0))
+}
+
+function dateValue(value?: string | null) {
+  if (!value) {
+    return 0
+  }
+  const parsed = new Date(value).getTime()
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+function handleRunListKeyDown(
+  event: KeyboardEvent<HTMLButtonElement>,
+  index: number,
+  runs: OperationRun[],
+  onSelect: (id: string) => void
+) {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+    return
+  }
+  event.preventDefault()
+  const nextIndex =
+    event.key === "ArrowDown"
+      ? Math.min(runs.length - 1, index + 1)
+      : Math.max(0, index - 1)
+  const next = runs[nextIndex]
+  if (!next) {
+    return
+  }
+  onSelect(next.id)
+  const list = event.currentTarget.closest('[role="list"]')
+  window.requestAnimationFrame(() => {
+    list
+      ?.querySelectorAll<HTMLButtonElement>("[data-run-item]")
+      .item(nextIndex)
+      .focus()
+  })
 }

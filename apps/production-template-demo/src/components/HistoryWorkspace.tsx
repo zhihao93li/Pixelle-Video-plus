@@ -1,17 +1,29 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
-  CalendarClock,
   Download,
   FileText,
+  FolderOpen,
   Images,
   Loader2,
   RefreshCcw,
+  Search,
   Send,
   Trash2,
   Video,
 } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { ArtifactPreview } from "@/components/shared/ArtifactPreview"
+import { AsyncState } from "@/components/shared/AsyncState"
+import { EmptyState } from "@/components/shared/EmptyState"
+import { InlineError } from "@/components/shared/feedback"
+import { PageFrame } from "@/components/shared/PageFrame"
+import {
+  PublishAttemptList,
+  PublishComposer,
+} from "@/components/shared/PublishComposer"
+import { Stat } from "@/components/shared/Stat"
+import { StatusBadge } from "@/components/shared/StatusBadge"
+import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,22 +35,17 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import {
   Sheet,
   SheetContent,
@@ -46,23 +53,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/toast"
-import { InlineError } from "@/components/shared/feedback"
-import { Stat } from "@/components/shared/Stat"
-import { StatusBadge } from "@/components/shared/StatusBadge"
-import { ImageSetView } from "@/components/shared/ImageSetView"
-import { TextArticleView } from "@/components/shared/TextArticleView"
-import { imageSetLabel } from "@/lib/imageSet"
 import { artifactKindLabel, type ArtifactKind } from "@/lib/artifactKind"
+import { useCurrentProject } from "@/lib/currentProject"
 import {
+  formatBytes,
   formatDate,
+  formatDuration,
   paramValueLabel,
   readableError,
   voiceLabel,
 } from "@/lib/format"
-import { useCurrentProject } from "@/lib/currentProject"
-import { navigate } from "@/lib/router"
 import {
   checkPublishConfiguration,
   deleteHistoryTask,
@@ -85,10 +86,35 @@ import {
   type PublishPlatform,
   type PublishRecord,
 } from "@/lib/generationApi"
+import { imageSetLabel } from "@/lib/imageSet"
+import type {
+  ArtifactViewModel,
+  PublishAttemptState,
+  PublishAttemptViewModel,
+  RunState,
+} from "@/lib/productViewModels"
+import { navigate, parsePath, routeHref, usePath } from "@/lib/router"
 import { cn } from "@/lib/utils"
 
-type LoadState = "idle" | "loading" | "ready" | "error"
+type LoadState = "loading" | "ready" | "error" | "stale"
 type ScheduleMode = "queue" | "scheduled"
+
+const STATUS_FILTERS = new Set([
+  "all",
+  "completed",
+  "failed",
+  "running",
+  "pending",
+])
+const ARTIFACT_FILTERS = new Set(["all", "video", "image_set", "text"])
+const SORT_OPTIONS = new Set([
+  "created_at:desc",
+  "created_at:asc",
+  "completed_at:desc",
+  "duration:desc",
+  "status:asc",
+])
+const PAGE_SIZE = 20
 
 function defaultPublishPlatforms(
   available: PublishPlatform[],
@@ -110,21 +136,43 @@ export function HistoryWorkspace({
 }: {
   latestTaskId: string | null
 }) {
-  const [historyState, setHistoryState] = useState<LoadState>("idle")
+  const path = usePath()
+  const routeQuery = useMemo(() => parsePath(path).query, [path])
+  const statusFilter = validQueryValue(
+    routeQuery.get("status"),
+    STATUS_FILTERS,
+    "all"
+  )
+  const artifactFilter = validQueryValue(
+    routeQuery.get("kind"),
+    ARTIFACT_FILTERS,
+    "all"
+  )
+  const sort = validQueryValue(
+    routeQuery.get("sort"),
+    SORT_OPTIONS,
+    "created_at:desc"
+  )
+  const [sortBy, sortOrderValue] = sort.split(":")
+  const sortOrder = sortOrderValue === "asc" ? "asc" : "desc"
+  const page = positiveInteger(routeQuery.get("page"), 1)
+  const searchQuery = routeQuery.get("q")?.trim() ?? ""
+  const selectedTaskId = routeQuery.get("task") || latestTaskId
+  const publishRequested = routeQuery.get("publish") === "1"
+
+  const [historyState, setHistoryState] = useState<LoadState>("loading")
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [history, setHistory] = useState<HistoryTaskListResponse | null>(null)
   const [statistics, setStatistics] = useState<HistoryStatistics | null>(null)
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [sortBy, setSortBy] = useState("created_at")
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
-  const [pageSize] = useState(20)
-  const [page, setPage] = useState(1)
-
-  const [detailState, setDetailState] = useState<LoadState>("idle")
+  const [refreshToken, setRefreshToken] = useState(0)
+  const [loadedRequestKey, setLoadedRequestKey] = useState<string | null>(null)
+  const [detailState, setDetailState] = useState<LoadState>("loading")
   const [detailError, setDetailError] = useState<string | null>(null)
   const [detail, setDetail] = useState<HistoryTaskDetail | null>(null)
-  const [publishPlatforms, setPublishPlatforms] = useState<PublishPlatform[]>([])
+  const [detailRefreshToken, setDetailRefreshToken] = useState(0)
+  const [publishPlatforms, setPublishPlatforms] = useState<PublishPlatform[]>(
+    []
+  )
   const [publishTimezones, setPublishTimezones] = useState<string[]>([
     "Asia/Shanghai",
     "UTC",
@@ -144,9 +192,6 @@ export function HistoryWorkspace({
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("queue")
   const [dueAt, setDueAt] = useState("")
   const [publishTimezone, setPublishTimezone] = useState("Asia/Shanghai")
-  const [isPublishOpen, setIsPublishOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState("")
-  const [artifactFilter, setArtifactFilter] = useState("all")
   const [metricsByTask, setMetricsByTask] = useState<
     Record<string, ContentItemMetrics>
   >({})
@@ -155,140 +200,113 @@ export function HistoryWorkspace({
   )
   const toast = useToast()
 
-  const visibleTasks = useMemo(() => {
-    const tasks = history?.tasks ?? []
-    const query = searchQuery.trim().toLowerCase()
-    return tasks.filter((task) => {
-      if (
-        query &&
-        !(task.title ?? "").toLowerCase().includes(query) &&
-        !task.task_id.toLowerCase().includes(query)
-      ) {
-        return false
-      }
-      if (artifactFilter !== "all") {
-        const kind =
-          readString(readRecord(task.result)?.artifact_type) || "video"
-        if (kind !== artifactFilter) {
-          return false
-        }
-      }
-      return true
-    })
-  }, [history, searchQuery, artifactFilter])
+  const requestKey = `${page}:${statusFilter}:${sort}`
+  const isHistoryRefreshing =
+    history !== null && loadedRequestKey !== `${requestKey}:${refreshToken}`
 
-  async function refreshHistory(preferredTaskId = selectedTaskId, nextPage = page) {
-    setHistoryState("loading")
-    setHistoryError(null)
-    try {
-      const [taskList, stats] = await Promise.all([
-        listHistoryTasks({
-          page: nextPage,
-          pageSize,
-          status: statusFilter,
-          sortBy,
-          sortOrder,
-        }),
-        getHistoryStatistics(),
-      ])
-      setHistory(taskList)
-      setStatistics(stats)
-      setPage(taskList.page)
-      setHistoryState("ready")
-      const fallbackTaskId = taskList.tasks[0]?.task_id ?? null
-      const nextTaskId =
-        (preferredTaskId &&
-          taskList.tasks.some((task) => task.task_id === preferredTaskId) &&
-          preferredTaskId) ||
-        (latestTaskId &&
-          taskList.tasks.some((task) => task.task_id === latestTaskId) &&
-          latestTaskId) ||
-        fallbackTaskId
-      setSelectedTaskId(nextTaskId)
-    } catch (error) {
-      setHistoryState("error")
-      setHistoryError(readableError(error))
-    }
-  }
+  const visibleTasks = useMemo(
+    () => filterHistoryTasks(history?.tasks ?? [], searchQuery, artifactFilter),
+    [artifactFilter, history?.tasks, searchQuery]
+  )
 
   useEffect(() => {
     let cancelled = false
+    const hadHistory = history !== null
+    const activeRequestKey = `${requestKey}:${refreshToken}`
 
-    async function loadInitialState() {
-      setHistoryState("loading")
-      setHistoryError(null)
-      try {
-        const [taskList, stats, platformResponse] = await Promise.all([
-          listHistoryTasks({
-            page,
-            pageSize,
-            status: statusFilter,
-            sortBy,
-            sortOrder,
-          }),
-          getHistoryStatistics(),
-          listPublishPlatforms(),
-        ])
+    void Promise.all([
+      listHistoryTasks({
+        page,
+        pageSize: PAGE_SIZE,
+        status: statusFilter,
+        sortBy,
+        sortOrder,
+      }),
+      getHistoryStatistics(),
+    ])
+      .then(([taskList, stats]) => {
         if (cancelled) {
           return
         }
         setHistory(taskList)
         setStatistics(stats)
-        setPage(taskList.page)
+        setHistoryError(null)
         setHistoryState("ready")
-        const nextTaskId =
-          (latestTaskId &&
-            taskList.tasks.some((task) => task.task_id === latestTaskId) &&
-            latestTaskId) ||
-          taskList.tasks[0]?.task_id ||
-          null
-        setSelectedTaskId(nextTaskId)
-        setPublishPlatforms(platformResponse.platforms)
-        if (platformResponse.platforms.length > 0) {
-          setSelectedPlatforms(
-            defaultPublishPlatforms(
-              platformResponse.platforms,
-              project?.publish_platforms
-            )
-          )
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setHistoryState("error")
-          setHistoryError(readableError(error))
-        }
-      }
-    }
+        setLoadedRequestKey(activeRequestKey)
 
-    void loadInitialState()
+        const filtered = filterHistoryTasks(
+          taskList.tasks,
+          searchQuery,
+          artifactFilter
+        )
+        const nextTaskId =
+          (selectedTaskId &&
+            filtered.some((task) => task.task_id === selectedTaskId) &&
+            selectedTaskId) ||
+          filtered[0]?.task_id ||
+          null
+        if (nextTaskId !== selectedTaskId) {
+          navigate(libraryPath(routeQuery, { task: nextTaskId }))
+        }
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return
+        }
+        setHistoryError(readableError(error))
+        setHistoryState(hadHistory ? "stale" : "error")
+        setLoadedRequestKey(activeRequestKey)
+      })
 
     return () => {
       cancelled = true
     }
-    // 项目预选只作为初始默认，无需随 project 变化重拉历史
+    // routeQuery 只用于保留当前参数；服务端请求由 requestKey 驱动。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latestTaskId, page, pageSize, sortBy, sortOrder, statusFilter])
+  }, [requestKey, refreshToken])
 
   useEffect(() => {
     let cancelled = false
+    void listPublishPlatforms()
+      .then((response) => {
+        if (cancelled) {
+          return
+        }
+        setPublishPlatforms(response.platforms)
+        setSelectedPlatforms(
+          defaultPublishPlatforms(
+            response.platforms,
+            project?.publish_platforms
+          )
+        )
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPublishError(readableError(error))
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+    // 项目平台只作为进入页面时的预选。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-    async function loadTimezones() {
-      try {
-        const response = await listPublishTimezones()
+  useEffect(() => {
+    let cancelled = false
+    void listPublishTimezones()
+      .then((response) => {
         if (cancelled) {
           return
         }
         setPublishTimezones(response.timezones)
         setPublishTimezone(response.default_timezone)
-      } catch (error) {
+      })
+      .catch((error) => {
         if (!cancelled) {
           setPublishError(readableError(error))
         }
-      }
-    }
-
-    void loadTimezones()
-
+      })
     return () => {
       cancelled = true
     }
@@ -296,46 +314,12 @@ export function HistoryWorkspace({
 
   useEffect(() => {
     let cancelled = false
-
-    async function loadPlatformsIfNeeded() {
-      if (publishPlatforms.length > 0) {
-        return
-      }
-      try {
-        const response = await listPublishPlatforms()
-        if (cancelled) {
-          return
-        }
-        setPublishPlatforms(response.platforms)
-        if (response.platforms.length > 0) {
-          setSelectedPlatforms(
-            defaultPublishPlatforms(response.platforms, project?.publish_platforms)
-          )
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setPublishError(readableError(error))
-        }
-      }
-    }
-
-    void loadPlatformsIfNeeded()
-
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [publishPlatforms.length])
-
-  // 数据摘要：拉内容条目建 task_id→metrics 映射（失败静默，纯增强不阻塞）
-  useEffect(() => {
-    let cancelled = false
     void listContentItems({ limit: 500 })
       .then((items) => {
         if (cancelled) {
           return
         }
-        const map: Record<string, ContentItemMetrics> = {}
+        const nextMetrics: Record<string, ContentItemMetrics> = {}
         for (const item of items) {
           const metrics = item.metrics
           const hasData =
@@ -347,28 +331,32 @@ export function HistoryWorkspace({
             continue
           }
           for (const taskId of item.links?.task_ids ?? []) {
-            map[taskId] = metrics
+            nextMetrics[taskId] = metrics
           }
         }
-        setMetricsByTask(map)
+        setMetricsByTask(nextMetrics)
       })
-      .catch(() => {})
+      .catch(() => {
+        // 数据摘要是非阻塞增强；作品与发布仍以 history API 为真源。
+      })
     return () => {
       cancelled = true
     }
   }, [])
 
-  // 配方存在性：详情速览「配方」仅在模板仍存在时链到配方详情页
   useEffect(() => {
     let cancelled = false
     void listTemplates()
       .then((response) => {
-        if (cancelled) {
-          return
+        if (!cancelled) {
+          setTemplateIds(
+            new Set(response.templates.map((template) => template.id))
+          )
         }
-        setTemplateIds(new Set(response.templates.map((template) => template.id)))
       })
-      .catch(() => {})
+      .catch(() => {
+        // 仅影响配方快捷链接，不改变作品详情或生产数据。
+      })
     return () => {
       cancelled = true
     }
@@ -378,64 +366,106 @@ export function HistoryWorkspace({
     if (!selectedTaskId) {
       return
     }
-
     const taskId = selectedTaskId
+    const hadDetail = detail !== null
     let cancelled = false
-    async function loadDetail() {
-      setDetailState("loading")
-      setDetailError(null)
-      setPublishError(null)
-      setPublishChecks([])
-      try {
-        const [taskDetail, recordResponse] = await Promise.all([
-          getHistoryTaskDetail(taskId),
-          getPublishRecord(taskId),
-        ])
-        if (cancelled) {
-          return
-        }
-        setDetail(taskDetail)
-        setPublishRecord(recordResponse.record)
-        setPublishTitle(buildDefaultTitle(taskDetail.metadata))
-        setPublishCaption(buildDefaultCaption(taskDetail.metadata))
-        setHashtags("")
-        setScheduleMode("queue")
-        setDueAt("")
-        setDetailState("ready")
-      } catch (error) {
-        if (!cancelled) {
-          setDetailState("error")
-          setDetailError(readableError(error))
-        }
-      }
-    }
 
-    void loadDetail()
+    void Promise.allSettled([
+      getHistoryTaskDetail(taskId),
+      getPublishRecord(taskId),
+    ]).then(([detailResult, recordResult]) => {
+      if (cancelled) {
+        return
+      }
+      if (detailResult.status === "rejected") {
+        setDetailError(readableError(detailResult.reason))
+        setDetailState(hadDetail ? "stale" : "error")
+        return
+      }
+
+      const taskDetail = detailResult.value
+      setDetail(taskDetail)
+      setDetailError(null)
+      setDetailState("ready")
+      setPublishTitle(buildDefaultTitle(taskDetail.metadata))
+      setPublishCaption(buildDefaultCaption(taskDetail.metadata))
+      setHashtags("")
+      setScheduleMode("queue")
+      setDueAt("")
+      setPublishChecks([])
+
+      if (recordResult.status === "fulfilled") {
+        setPublishRecord(recordResult.value.record)
+      } else {
+        setPublishRecord(null)
+        setPublishError(readableError(recordResult.reason))
+      }
+    })
 
     return () => {
       cancelled = true
     }
-  }, [selectedTaskId])
+    // task 变化会由 App 的 key 重新挂载；token 只用于原位重试。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTaskId, detailRefreshToken])
 
   const selectedTask = useMemo(
-    () => history?.tasks.find((task) => task.task_id === selectedTaskId) ?? null,
+    () =>
+      history?.tasks.find((task) => task.task_id === selectedTaskId) ?? null,
     [history?.tasks, selectedTaskId]
   )
+  const artifact = useMemo(
+    () => adaptHistoryArtifact(detail, selectedTask),
+    [detail, selectedTask]
+  )
+  const publishAttempts = useMemo(
+    () => adaptPublishAttempts(publishRecord, publishPlatforms),
+    [publishPlatforms, publishRecord]
+  )
+  const selectedPublishState = summarizePublishState(publishAttempts)
   const publishCaptionWithHashtags = appendHashtags(publishCaption, hashtags)
   const requiresTitle = selectedPlatforms.includes("youtube")
-  // 只有视频任务能走 Buffer 自动发布；图集/长文是手动路径（下载/复制）
-  const detailArtifactType =
-    readString(readRecord(readRecord(detail?.metadata)?.result)?.artifact_type) ||
-    "video"
-  const detailIsVideo = detailArtifactType === "video"
-  const canPublish =
-    detailStatus(detail) === "completed" &&
-    detailIsVideo &&
-    selectedPlatforms.length > 0 &&
-    publishCaptionWithHashtags.trim().length > 0 &&
-    (!requiresTitle || publishTitle.trim().length > 0) &&
-    (scheduleMode !== "scheduled" || dueAt.trim().length > 0) &&
-    !isPublishing
+  const runState = adaptRunState(detailStatus(detail) || selectedTask?.status)
+  const scheduledDueAt =
+    scheduleMode === "scheduled"
+      ? buildScheduledDueAt(dueAt, publishTimezone)
+      : null
+  const publishDisabledReason = getPublishDisabledReason({
+    artifact,
+    runState,
+    selectedPlatforms,
+    caption: publishCaptionWithHashtags,
+    title: publishTitle,
+    requiresTitle,
+    scheduleMode,
+    dueAt,
+    isPublishing,
+  })
+  const canPublish = publishDisabledReason === null
+
+  function updateLibraryQuery(
+    patch: Record<string, string | number | null | undefined>
+  ) {
+    navigate(libraryPath(routeQuery, patch))
+  }
+
+  function selectTask(taskId: string) {
+    updateLibraryQuery({ task: taskId })
+  }
+
+  function submitSearch(value: string) {
+    const nextQuery = value.trim()
+    const nextTasks = filterHistoryTasks(
+      history?.tasks ?? [],
+      nextQuery,
+      artifactFilter
+    )
+    updateLibraryQuery({
+      q: nextQuery || null,
+      page: 1,
+      task: nextTasks[0]?.task_id ?? null,
+    })
+  }
 
   async function checkConfig() {
     setIsChecking(true)
@@ -455,14 +485,9 @@ export function HistoryWorkspace({
     if (!selectedTaskId || !canPublish) {
       return
     }
-
     setIsPublishing(true)
     setPublishError(null)
     try {
-      const scheduledDueAt =
-        scheduleMode === "scheduled"
-          ? buildScheduledDueAt(dueAt, publishTimezone)
-          : null
       const response = await publishTask(selectedTaskId, {
         platforms: selectedPlatforms,
         title: publishTitle.trim(),
@@ -482,16 +507,12 @@ export function HistoryWorkspace({
     if (!selectedTaskId) {
       return
     }
-
     setIsDeleting(true)
     setDetailError(null)
     try {
       await deleteHistoryTask(selectedTaskId)
-      setSelectedTaskId(null)
-      setDetail(null)
-      setPublishRecord(null)
       toast({ title: "记录已删除", variant: "success" })
-      await refreshHistory(null, 1)
+      updateLibraryQuery({ page: 1, task: null })
     } catch (error) {
       setDetailError(readableError(error))
     } finally {
@@ -499,359 +520,480 @@ export function HistoryWorkspace({
     }
   }
 
-  // 左栏行键盘上下导航：焦点在某行时上下键换选中（预览随之切换）
-  function handleListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
-      return
-    }
-    const index = visibleTasks.findIndex(
-      (task) => task.task_id === selectedTaskId
-    )
-    if (index === -1) {
-      return
-    }
-    const nextIndex =
-      event.key === "ArrowDown"
-        ? Math.min(visibleTasks.length - 1, index + 1)
-        : Math.max(0, index - 1)
-    const next = visibleTasks[nextIndex]
-    if (next) {
-      event.preventDefault()
-      setSelectedTaskId(next.task_id)
-    }
-  }
-
   return (
-    <main className="grid max-w-[1240px] gap-5 p-4 lg:grid-cols-[360px_minmax(0,1fr)] lg:p-6">
-      <section className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-medium">作品库</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              点选一条查看详情与发布。
-            </p>
-          </div>
+    <PageFrame>
+      <WorkspaceHeader
+        actions={
           <Button
             aria-label="刷新作品库"
-            disabled={historyState === "loading"}
-            onClick={() => void refreshHistory()}
+            disabled={isHistoryRefreshing}
+            onClick={() => setRefreshToken((token) => token + 1)}
             size="icon-sm"
             variant="outline"
           >
-            <RefreshCcw
-              className={cn(historyState === "loading" && "animate-spin")}
-            />
+            <RefreshCcw className={cn(isHistoryRefreshing && "animate-spin")} />
           </Button>
-        </div>
+        }
+        description="筛选产物，预览内容并查看发布状态。"
+        title="作品与发布"
+      />
 
-        <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2 border-b pb-3">
-          <Stat label="全部" value={statistics?.total_tasks} />
-          <Stat label="完成" value={statistics?.completed} />
-          <Stat
-            destructive={(statistics?.failed ?? 0) > 0}
-            label="失败"
-            value={statistics?.failed}
-          />
-        </div>
+      <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2 border-b pb-4">
+        <Stat label="全部" value={statistics?.total_tasks} />
+        <Stat label="已完成" value={statistics?.completed} />
+        <Stat
+          destructive={(statistics?.failed ?? 0) > 0}
+          label="失败"
+          value={statistics?.failed}
+        />
+      </div>
 
+      <div className="flex flex-col gap-3 border-b pb-4">
+        <LibrarySearchForm
+          initialQuery={searchQuery}
+          key={searchQuery}
+          onSubmit={submitSearch}
+        />
         <div className="flex flex-wrap items-center gap-2">
-          <Input
-            className="h-8 max-w-[240px]"
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="搜索标题…"
-            value={searchQuery}
-          />
-          <Select onValueChange={setArtifactFilter} value={artifactFilter}>
-            <SelectTrigger
-              aria-label="筛选作品形态"
-              className="h-8 w-auto text-sm"
-            >
+          <Select
+            onValueChange={(value) => {
+              const nextTasks = filterHistoryTasks(
+                history?.tasks ?? [],
+                searchQuery,
+                value
+              )
+              updateLibraryQuery({
+                kind: value === "all" ? null : value,
+                page: 1,
+                task: nextTasks[0]?.task_id ?? null,
+              })
+            }}
+            value={artifactFilter}
+          >
+            <SelectTrigger aria-label="筛选作品形态" className="w-auto">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部形态</SelectItem>
-              <SelectItem value="video">视频</SelectItem>
-              <SelectItem value="image_set">图集</SelectItem>
-              <SelectItem value="text">长文</SelectItem>
+              <SelectGroup>
+                <SelectItem value="all">全部形态</SelectItem>
+                <SelectItem value="video">视频</SelectItem>
+                <SelectItem value="image_set">图集</SelectItem>
+                <SelectItem value="text">长文</SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
           <Select
-            onValueChange={(value) => {
-              setStatusFilter(value)
-              setPage(1)
-            }}
+            onValueChange={(value) =>
+              updateLibraryQuery({
+                status: value === "all" ? null : value,
+                page: 1,
+                task: null,
+              })
+            }
             value={statusFilter}
           >
-            <SelectTrigger
-              aria-label="筛选作品状态"
-              className="h-8 w-auto text-sm"
-            >
+            <SelectTrigger aria-label="筛选作品状态" className="w-auto">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部状态</SelectItem>
-              <SelectItem value="completed">已完成</SelectItem>
-              <SelectItem value="failed">失败</SelectItem>
-              <SelectItem value="running">生成中</SelectItem>
-              <SelectItem value="pending">排队中</SelectItem>
+              <SelectGroup>
+                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="completed">已完成</SelectItem>
+                <SelectItem value="failed">失败</SelectItem>
+                <SelectItem value="running">生成中</SelectItem>
+                <SelectItem value="pending">排队中</SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
           <Select
-            onValueChange={(value) => {
-              const [nextSortBy, nextOrder] = value.split(":")
-              setSortBy(nextSortBy)
-              setSortOrder(nextOrder as "asc" | "desc")
-              setPage(1)
-            }}
-            value={`${sortBy}:${sortOrder}`}
+            onValueChange={(value) =>
+              updateLibraryQuery({
+                sort: value === "created_at:desc" ? null : value,
+                page: 1,
+                task: null,
+              })
+            }
+            value={sort}
           >
-            <SelectTrigger
-              aria-label="排序作品"
-              className="h-8 w-auto text-sm"
-            >
+            <SelectTrigger aria-label="排序作品" className="w-auto">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="created_at:desc">最新创建</SelectItem>
-              <SelectItem value="created_at:asc">最早创建</SelectItem>
-              <SelectItem value="completed_at:desc">最近完成</SelectItem>
-              <SelectItem value="duration:desc">时长最长</SelectItem>
-              <SelectItem value="status:asc">按状态</SelectItem>
+              <SelectGroup>
+                <SelectItem value="created_at:desc">最新创建</SelectItem>
+                <SelectItem value="created_at:asc">最早创建</SelectItem>
+                <SelectItem value="completed_at:desc">最近完成</SelectItem>
+                <SelectItem value="duration:desc">时长最长</SelectItem>
+                <SelectItem value="status:asc">按状态</SelectItem>
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
+      </div>
 
-        {historyError && (
-          <InlineError title="作品库读取失败" message={historyError} />
-        )}
-
-        {historyState === "loading" && (
-          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            正在读取作品库
-          </div>
-        )}
-
-        {historyState === "ready" && history?.tasks.length === 0 && (
-          <div className="flex flex-col items-start gap-3 py-6">
-            <div className="text-sm text-muted-foreground">还没有生成记录。</div>
-            <Button onClick={() => navigate("/create")} size="sm">
-              去快速生产
-            </Button>
-          </div>
-        )}
-
-        {visibleTasks.length === 0 &&
-          historyState === "ready" &&
-          (history?.tasks.length ?? 0) > 0 && (
-            <div className="py-6 text-sm text-muted-foreground">
-              没有匹配的记录。
-            </div>
-          )}
-
-        <div className="flex flex-col gap-0.5" onKeyDown={handleListKeyDown}>
-          {visibleTasks.map((task) => (
-            <LibraryRow
-              key={task.task_id}
-              metrics={metricsByTask[task.task_id] ?? null}
-              onOpenPublish={() => {
-                setSelectedTaskId(task.task_id)
-                setIsPublishOpen(true)
-              }}
-              onSelect={() => setSelectedTaskId(task.task_id)}
-              selected={selectedTaskId === task.task_id}
-              task={task}
-            />
-          ))}
-        </div>
-
-        {history && history.total > 0 && (
-          <div className="flex items-center justify-between gap-3 border-t pt-3">
+      {historyState === "stale" ? (
+        <AsyncState
+          action={
             <Button
-              disabled={page <= 1 || historyState === "loading"}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              onClick={() => setRefreshToken((token) => token + 1)}
               size="sm"
               variant="outline"
             >
-              上一页
+              重新读取
             </Button>
-            <div className="text-xs text-muted-foreground">
-              第 {history.page} / {history.total_pages ?? 1} 页
-            </div>
-            <Button
-              disabled={
-                historyState === "loading" ||
-                page >= (history.total_pages ?? 1)
-              }
-              onClick={() =>
-                setPage((current) =>
-                  Math.min(history.total_pages ?? current, current + 1)
-                )
-              }
-              size="sm"
-              variant="outline"
-            >
-              下一页
-            </Button>
-          </div>
-        )}
-      </section>
-
-      <section className="flex min-w-0 flex-col gap-5">
-        <DetailCard
-          canPublish={detailStatus(detail) === "completed" && detailIsVideo}
-          detail={detail}
-          detailError={detailError}
-          detailState={detailState}
-          isDeleting={isDeleting}
-          onDelete={() => void deleteSelectedTask()}
-          onOpenPublish={() => setIsPublishOpen(true)}
-          publishRecord={publishRecord}
-          selectedTask={selectedTask}
-          templateIds={templateIds}
+          }
+          description={historyError}
+          state="stale"
+          title="作品列表可能不是最新状态"
         />
-      </section>
+      ) : null}
 
-      <Sheet onOpenChange={setIsPublishOpen} open={isPublishOpen}>
+      {historyState === "loading" && !history ? (
+        <AsyncState
+          description="正在同步作品与数据摘要。"
+          state="loading"
+          title="正在读取作品库"
+        />
+      ) : null}
+
+      {historyState === "error" && !history ? (
+        <AsyncState
+          action={
+            <Button
+              onClick={() => setRefreshToken((token) => token + 1)}
+              size="sm"
+              variant="outline"
+            >
+              重试
+            </Button>
+          }
+          description={historyError}
+          state="error"
+          title="无法读取作品库"
+        />
+      ) : null}
+
+      {historyState === "ready" && history?.tasks.length === 0 ? (
+        <EmptyState
+          actions={
+            <Button asChild size="sm">
+              <a href={routeHref("/create")}>去快速生产</a>
+            </Button>
+          }
+          description="完成第一条生产任务后，产物会出现在这里。"
+          icon={FolderOpen}
+          title="还没有作品"
+        />
+      ) : null}
+
+      {history && history.tasks.length > 0 ? (
+        <div className="grid min-w-0 gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+          <section aria-labelledby="library-list-heading" className="min-w-0">
+            <div className="flex items-baseline justify-between gap-3 border-b pb-2">
+              <h3 className="text-sm font-medium" id="library-list-heading">
+                作品
+              </h3>
+              <span className="text-xs text-muted-foreground">
+                {history.total} 条
+              </span>
+            </div>
+
+            {isHistoryRefreshing ? (
+              <div
+                aria-live="polite"
+                className="flex items-center gap-2 border-b py-2 text-xs text-muted-foreground"
+              >
+                <Loader2 className="size-3.5 animate-spin" />
+                正在更新列表
+              </div>
+            ) : null}
+
+            {visibleTasks.length === 0 ? (
+              <EmptyState
+                actions={
+                  <Button
+                    onClick={() =>
+                      updateLibraryQuery({ kind: null, q: null, task: null })
+                    }
+                    size="sm"
+                    variant="outline"
+                  >
+                    清除筛选
+                  </Button>
+                }
+                className="mt-3 min-h-40"
+                description="调整关键词或作品形态后再试。"
+                title="没有匹配的作品"
+              />
+            ) : (
+              <div
+                className="-mx-4 flex snap-x snap-mandatory gap-2 overflow-x-auto px-4 pb-2 xl:mx-0 xl:block xl:overflow-visible xl:px-0 xl:pb-0"
+                role="list"
+              >
+                {visibleTasks.map((task) => (
+                  <LibraryRow
+                    key={task.task_id}
+                    metrics={metricsByTask[task.task_id] ?? null}
+                    onOpenPublish={() => {
+                      updateLibraryQuery({ publish: "1", task: task.task_id })
+                    }}
+                    onSelect={() => selectTask(task.task_id)}
+                    publishState={
+                      selectedTaskId === task.task_id
+                        ? selectedPublishState
+                        : null
+                    }
+                    selected={selectedTaskId === task.task_id}
+                    task={task}
+                  />
+                ))}
+              </div>
+            )}
+
+            {history.total > 0 ? (
+              <div className="flex items-center justify-between gap-3 border-t pt-3">
+                <Button
+                  disabled={page <= 1 || isHistoryRefreshing}
+                  onClick={() =>
+                    updateLibraryQuery({
+                      page: Math.max(1, page - 1),
+                      task: null,
+                    })
+                  }
+                  size="sm"
+                  variant="outline"
+                >
+                  上一页
+                </Button>
+                <div className="text-xs text-muted-foreground">
+                  第 {history.page} / {history.total_pages ?? 1} 页
+                </div>
+                <Button
+                  disabled={
+                    isHistoryRefreshing || page >= (history.total_pages ?? 1)
+                  }
+                  onClick={() =>
+                    updateLibraryQuery({
+                      page: Math.min(history.total_pages ?? page, page + 1),
+                      task: null,
+                    })
+                  }
+                  size="sm"
+                  variant="outline"
+                >
+                  下一页
+                </Button>
+              </div>
+            ) : null}
+          </section>
+
+          <DetailPanel
+            artifact={artifact}
+            canPublish={runState === "completed" && artifact?.kind === "video"}
+            detail={detail}
+            detailError={detailError}
+            detailState={detailState}
+            isDeleting={isDeleting}
+            onDelete={() => void deleteSelectedTask()}
+            onOpenPublish={() => updateLibraryQuery({ publish: "1" })}
+            onRetry={() => {
+              setDetailState("loading")
+              setDetailRefreshToken((token) => token + 1)
+            }}
+            publishAttempts={publishAttempts}
+            selectedTask={selectedTask}
+            templateIds={templateIds}
+          />
+        </div>
+      ) : null}
+
+      <Sheet
+        onOpenChange={(open) => {
+          if (open !== publishRequested) {
+            updateLibraryQuery({ publish: open ? "1" : null })
+          }
+        }}
+        open={publishRequested}
+      >
         <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
           <SheetHeader>
-            <SheetTitle>发布到社媒</SheetTitle>
+            <SheetTitle>发布作品</SheetTitle>
             <SheetDescription>
-              确认标题、文案与平台后提交；可加入队列或定时发布。
+              确认平台、文案与发布时间后提交到发布队列。
             </SheetDescription>
           </SheetHeader>
-          <div className="px-4 pb-4">
-        <PublishCard
-          caption={publishCaption}
-          checks={publishChecks}
-          detail={detail}
-          dueAt={dueAt}
-          error={publishError}
-          hashtags={hashtags}
-          isChecking={isChecking}
-          isPublishing={isPublishing}
-          onCaptionChange={setPublishCaption}
-          onCheck={() => void checkConfig()}
-          onDueAtChange={setDueAt}
-          onHashtagsChange={setHashtags}
-          onPlatformsChange={setSelectedPlatforms}
-          onScheduleModeChange={setScheduleMode}
-          onSubmit={() => void submitPublish()}
-          onTimezoneChange={setPublishTimezone}
-          onTitleChange={setPublishTitle}
-          platforms={publishPlatforms}
-          record={publishRecord}
-          scheduleMode={scheduleMode}
-          selectedPlatforms={selectedPlatforms}
-          scheduledDueAt={
-            scheduleMode === "scheduled"
-              ? buildScheduledDueAt(dueAt, publishTimezone)
-              : null
-          }
-          submitDisabled={!canPublish}
-          timezone={publishTimezone}
-          timezones={publishTimezones}
-          title={publishTitle}
-        />
+          <div className="px-4 pb-[max(1rem,var(--safe-area-bottom))]">
+            <PublishComposer
+              attempts={publishAttempts}
+              caption={publishCaption}
+              checks={publishChecks}
+              disabledReason={publishDisabledReason}
+              dueAt={dueAt}
+              error={publishError}
+              hashtags={hashtags}
+              isChecking={isChecking}
+              isPublishing={isPublishing}
+              onCaptionChange={setPublishCaption}
+              onCheck={() => void checkConfig()}
+              onDueAtChange={setDueAt}
+              onHashtagsChange={setHashtags}
+              onPlatformsChange={setSelectedPlatforms}
+              onScheduleModeChange={setScheduleMode}
+              onSubmit={() => void submitPublish()}
+              onTimezoneChange={setPublishTimezone}
+              onTitleChange={setPublishTitle}
+              platforms={publishPlatforms}
+              scheduleMode={scheduleMode}
+              scheduledDueAt={scheduledDueAt}
+              selectedPlatforms={selectedPlatforms}
+              submitDisabled={!canPublish}
+              timezone={publishTimezone}
+              timezones={publishTimezones}
+              title={publishTitle}
+            />
           </div>
         </SheetContent>
       </Sheet>
-    </main>
+    </PageFrame>
   )
 }
-function DetailCard({
+
+function LibrarySearchForm({
+  initialQuery,
+  onSubmit,
+}: {
+  initialQuery: string
+  onSubmit: (value: string) => void
+}) {
+  const [value, setValue] = useState(initialQuery)
+  return (
+    <form
+      className="flex min-w-0 flex-1 items-center gap-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSubmit(value)
+      }}
+      role="search"
+    >
+      <Input
+        aria-label="搜索作品标题"
+        className="max-w-sm"
+        onChange={(event) => setValue(event.target.value)}
+        placeholder="搜索标题…"
+        value={value}
+      />
+      <Button aria-label="搜索" size="icon-sm" type="submit" variant="outline">
+        <Search />
+      </Button>
+    </form>
+  )
+}
+
+function DetailPanel({
   selectedTask,
   detail,
+  artifact,
   detailState,
   detailError,
   isDeleting,
   canPublish,
-  publishRecord,
+  publishAttempts,
   onDelete,
   onOpenPublish,
+  onRetry,
   templateIds,
 }: {
   selectedTask: HistoryTaskSummary | null
   detail: HistoryTaskDetail | null
+  artifact: ArtifactViewModel | null
   detailState: LoadState
   detailError: string | null
   isDeleting: boolean
   canPublish: boolean
-  publishRecord: PublishRecord | null
+  publishAttempts: PublishAttemptViewModel[]
   onDelete: () => void
   onOpenPublish: () => void
+  onRetry: () => void
   templateIds: ReadonlySet<string>
 }) {
+  if (!selectedTask) {
+    return (
+      <EmptyState
+        className="min-h-72"
+        description="从列表选择一条作品，查看预览与发布进度。"
+        title="选择一条作品"
+      />
+    )
+  }
+
+  if (detailState === "loading" && !detail) {
+    return (
+      <AsyncState
+        description="正在准备预览与发布状态。"
+        state="loading"
+        title="正在读取作品详情"
+      />
+    )
+  }
+
+  if (detailState === "error" && !detail) {
+    return (
+      <AsyncState
+        action={
+          <Button onClick={onRetry} size="sm" variant="outline">
+            重试
+          </Button>
+        }
+        description={detailError}
+        state="error"
+        title="无法读取作品详情"
+      />
+    )
+  }
+
   const metadata = detail?.metadata ?? null
   const input = readRecord(metadata?.input)
   const result = readRecord(metadata?.result)
   const templateInfo = readRecord(metadata?.production_template)
-  const videoUrl = fileUrlFromPath(readString(result?.video_path))
-  const artifactType = (readString(result?.artifact_type) ||
-    "video") as ArtifactKind
-  const isImageSet = artifactType === "image_set"
-  const isText = artifactType === "text"
-  const isVideo = artifactType === "video"
-  const imageSetItems = isImageSet
-    ? readArray(result?.image_paths)
-        .map((path, index) => {
-          const url = fileUrlFromPath(readString(path))
-          return url ? { url, label: imageSetLabel(index) } : null
-        })
-        .filter((item): item is { url: string; label: string } => item !== null)
-    : []
-  const imageSetCaption = readString(result?.caption)
-  const articleText = readString(result?.article)
-  const articleTitle = readString(result?.title)
-  const storyboardFrames = readArray(readRecord(detail?.storyboard)?.frames)
+  const artifactKind = artifact?.kind ?? historyArtifactKind(result)
   const inputText = readString(input?.text) || readString(input?.script)
-  const title = selectedTask
-    ? selectedTask.title || buildDefaultTitle(metadata)
-    : ""
-
-  // 速览定义行：缺值不渲染（不显示「未返回」占位），全部中文化
-  const specValue = isVideo
-    ? (() => {
-        const duration = readNumber(result?.duration)
-        return duration === null ? "" : formatDuration(duration)
-      })()
-    : isImageSet
-      ? (() => {
-          const pages = readString(result?.page_count)
-          return pages ? `${pages} 页` : ""
-        })()
-      : (() => {
-          const words = readString(result?.word_count)
-          return words ? `${words} 字` : ""
-        })()
-  const specLabel = isVideo ? "时长" : isImageSet ? "页数" : "字数"
-  const fileSizeValue = (() => {
-    const size = readNumber(result?.file_size)
-    return size === null ? "" : formatFileSize(size)
-  })()
-  const voice = readString(input?.tts_voice)
-  const ttsMode = readString(input?.tts_inference_mode)
-  const voiceValue = voice
-    ? voiceLabel(voice)
-    : ttsMode
-      ? paramValueLabel(ttsMode)
-      : ""
+  const title = selectedTask.title || buildDefaultTitle(metadata)
+  const runState = adaptRunState(detailStatus(detail) || selectedTask.status)
+  const storyboardFrames = readArray(readRecord(detail?.storyboard)?.frames)
   const templateId = readString(templateInfo?.id)
   const templateName = readString(templateInfo?.name)
+  const spec = artifactSpecification(artifactKind, result)
+  const fileSize = readNumber(result?.file_size)
+  const voice = readString(input?.tts_voice)
+  const voiceMode = readString(input?.tts_inference_mode)
+  const voiceValue = voice
+    ? voiceLabel(voice)
+    : voiceMode
+      ? paramValueLabel(voiceMode)
+      : ""
   const overviewItems: Array<{ label: string; value: string; to?: string }> = [
     {
       label: "创建时间",
-      value: selectedTask?.created_at ? formatDate(selectedTask.created_at) : "",
+      value: selectedTask.created_at ? formatDate(selectedTask.created_at) : "",
     },
     {
       label: "完成时间",
-      value: selectedTask?.completed_at
+      value: selectedTask.completed_at
         ? formatDate(selectedTask.completed_at)
         : "",
     },
-    { label: specLabel, value: specValue },
-    { label: "文件大小", value: isVideo ? fileSizeValue : "" },
-    { label: "声音", value: isVideo ? voiceValue : "" },
+    spec,
+    {
+      label: "文件大小",
+      value:
+        artifactKind === "video" && fileSize !== null
+          ? formatBytes(fileSize)
+          : "",
+    },
+    {
+      label: "声音",
+      value: artifactKind === "video" ? voiceValue : "",
+    },
     {
       label: "配方",
       value: templateName,
@@ -863,499 +1005,156 @@ function DetailCard({
   ].filter((item) => item.value)
 
   return (
-    <div className="flex min-w-0 flex-col gap-5">
-      {!selectedTask && (
-        <div className="py-6 text-sm text-muted-foreground">
-          选择左侧一条记录查看详情。
+    <section aria-labelledby="library-detail-heading" className="min-w-0">
+      {detailState === "stale" ? (
+        <AsyncState
+          action={
+            <Button onClick={onRetry} size="sm" variant="outline">
+              重新读取
+            </Button>
+          }
+          className="mb-4"
+          description={detailError}
+          state="stale"
+          title="详情可能不是最新状态"
+        />
+      ) : null}
+
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3
+              className="truncate text-lg font-medium"
+              id="library-detail-heading"
+            >
+              {title}
+            </h3>
+            <StatusBadge status={runState} />
+            <Badge variant="outline">{artifactKindLabel(artifactKind)}</Badge>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {selectedTask.created_at
+              ? `创建于 ${formatDate(selectedTask.created_at)}`
+              : "创建时间未知"}
+          </p>
         </div>
-      )}
-
-      {detailState === "loading" && (
-        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          正在读取详情
+        <div className="flex shrink-0 items-center gap-2">
+          {canPublish ? (
+            <Button onClick={onOpenPublish} size="sm">
+              <Send data-icon="inline-start" />
+              {publishAttempts.length > 0 ? "再次发布" : "发布"}
+            </Button>
+          ) : null}
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                aria-label="删除记录"
+                disabled={isDeleting}
+                size="icon-sm"
+                variant="ghost"
+              >
+                {isDeleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>删除这条记录？</AlertDialogTitle>
+                <AlertDialogDescription>
+                  删除后会移除这条生成记录和相关文件，无法恢复。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>取消</AlertDialogCancel>
+                <AlertDialogAction onClick={onDelete}>删除</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
-      )}
+      </div>
 
-      {detailError && <InlineError title="详情读取失败" message={detailError} />}
-
-      {selectedTask && detail && (
-        <>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <h2 className="truncate text-lg font-medium">{title}</h2>
-              <StatusBadge status={detailStatus(detail)} />
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {canPublish && (
-                <Button onClick={onOpenPublish} size="sm">
-                  <Send data-icon="inline-start" />
-                  {publishRecord ? "再次发布" : "发布"}
-                </Button>
-              )}
-              {isVideo && videoUrl && (
-                <Button asChild size="sm" variant="outline">
-                  <a download href={videoUrl}>
-                    <Download data-icon="inline-start" />
-                    下载
-                  </a>
-                </Button>
-              )}
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    aria-label="删除记录"
-                    disabled={isDeleting}
-                    size="icon-sm"
-                    variant="ghost"
+      {overviewItems.length > 0 ? (
+        <dl className="flex flex-wrap gap-x-8 gap-y-3 border-b py-4">
+          {overviewItems.map((item) => (
+            <div key={item.label}>
+              <dt className="text-xs text-muted-foreground">{item.label}</dt>
+              <dd className="mt-0.5 text-sm">
+                {item.to ? (
+                  <a
+                    className="text-primary hover:underline"
+                    href={routeHref(item.to)}
                   >
-                    {isDeleting ? (
-                      <Loader2 className="animate-spin" />
-                    ) : (
-                      <Trash2 />
-                    )}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>删除这条记录？</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      删除后会移除这条生成记录和相关文件，无法恢复。
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>取消</AlertDialogCancel>
-                    <AlertDialogAction onClick={onDelete}>删除</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+                    {item.value}
+                  </a>
+                ) : (
+                  item.value
+                )}
+              </dd>
             </div>
-          </div>
+          ))}
+        </dl>
+      ) : null}
 
-          {overviewItems.length > 0 && (
-            <div className="flex flex-wrap gap-x-6 gap-y-2 border-b pb-3">
-              {overviewItems.map((item) => (
-                <div key={item.label}>
-                  <div className="text-[11px] text-muted-foreground">
-                    {item.label}
-                  </div>
-                  <div className="mt-0.5 text-[13px]">
-                    {item.to ? (
-                      <button
-                        className="text-primary transition-colors hover:underline"
-                        onClick={() => navigate(item.to as string)}
-                        type="button"
-                      >
-                        {item.value}
-                      </button>
-                    ) : (
-                      item.value
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+      {runState === "failed" ? (
+        <InlineError
+          message={historyFailureMessage(result)}
+          title="这次生成没有完成"
+        />
+      ) : null}
 
-          <div className="grid gap-5 sm:grid-cols-[220px_minmax(0,1fr)]">
-            <div className="flex flex-col gap-3">
-              {isText ? (
-                <TextArticleView article={articleText} title={articleTitle || null} />
-              ) : isImageSet ? (
-                <ImageSetView items={imageSetItems} caption={imageSetCaption || null} />
-              ) : videoUrl ? (
-                <video
-                  className="aspect-[9/16] w-full rounded-lg border bg-black"
-                  controls
-                  src={videoUrl}
-                />
-              ) : (
-                <div className="flex aspect-[9/16] items-center justify-center rounded-lg border bg-muted/30 p-4 text-center text-sm text-muted-foreground">
-                  没有可预览的成片
-                </div>
-              )}
-            </div>
-
-            {inputText && (
-              <div className="min-w-0">
-                <div className="text-sm font-medium">输入文案</div>
-                <CollapsibleText text={inputText} />
-              </div>
-            )}
-          </div>
-
-          {isVideo && storyboardFrames.length > 0 && (
-            <div>
-              <div className="text-sm font-medium">
-                分镜{" "}
-                <span className="font-normal text-muted-foreground">
-                  {storyboardFrames.length}
-                </span>
-              </div>
-              <div className="mt-2">
-                {storyboardFrames.map((frame, index) => (
-                  <StoryboardRow frame={frame} index={index} key={index} />
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-/** 输入文案：默认 6 行截断，长文案给「展开全文」inline 切换。 */
-function CollapsibleText({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const expandable = text.length > 200 || text.split(/\r?\n/).length > 6
-  return (
-    <>
       <div
         className={cn(
-          "mt-2 whitespace-pre-wrap text-[13px] leading-6 text-muted-foreground",
-          !expanded && "line-clamp-6"
+          "grid gap-5 py-5",
+          artifactKind === "video" && "md:grid-cols-[260px_minmax(0,1fr)]"
         )}
       >
-        {text}
+        <ArtifactPreview artifact={artifact} />
+        {inputText ? (
+          <div className="min-w-0">
+            <h4 className="text-sm font-medium">输入文案</h4>
+            <CollapsibleText text={inputText} />
+          </div>
+        ) : null}
       </div>
-      {expandable && (
-        <button
-          className="mt-1 text-xs text-primary transition-colors hover:underline"
-          onClick={() => setExpanded((value) => !value)}
-          type="button"
+
+      {publishAttempts.length > 0 ? (
+        <section
+          aria-labelledby="detail-publish-heading"
+          className="border-t pt-4"
         >
-          {expanded ? "收起" : "展开全文"}
-        </button>
-      )}
-    </>
-  )
-}
-
-/** 分镜紧凑行：帧缩略 + 文案首行截断 +「配图提示词」inline 展开（不进弹层）。 */
-function StoryboardRow({ frame, index }: { frame: unknown; index: number }) {
-  const [showPrompt, setShowPrompt] = useState(false)
-  const item = readRecord(frame)
-  const frameIndex = readNumber(item?.index)
-  const frameNumber = frameIndex === null ? index + 1 : frameIndex + 1
-  const imageUrl = fileUrlFromPath(
-    readString(item?.composed_image_path) || readString(item?.image_path)
-  )
-  const narration = readString(item?.narration)
-  const prompt = readString(item?.image_prompt)
-  return (
-    <div className="flex gap-2.5 border-b py-2 last:border-0">
-      <div className="h-9 w-6 shrink-0 overflow-hidden rounded-sm bg-muted">
-        {imageUrl && (
-          <img alt="" className="h-full w-full object-cover" src={imageUrl} />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="shrink-0 text-[11px] text-muted-foreground">
-            #{frameNumber}
-          </span>
-          <span className="truncate text-[13px]">{narration || "（无旁白）"}</span>
-        </div>
-        {prompt && (
-          <>
-            <button
-              className="mt-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => setShowPrompt((value) => !value)}
-              type="button"
-            >
-              {showPrompt ? "收起配图提示词" : "配图提示词"}
-            </button>
-            {showPrompt && (
-              <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                {prompt}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function PublishCard({
-  detail,
-  platforms,
-  selectedPlatforms,
-  title,
-  caption,
-  hashtags,
-  scheduleMode,
-  dueAt,
-  timezone,
-  timezones,
-  scheduledDueAt,
-  record,
-  checks,
-  error,
-  isChecking,
-  isPublishing,
-  submitDisabled,
-  onPlatformsChange,
-  onTitleChange,
-  onCaptionChange,
-  onHashtagsChange,
-  onScheduleModeChange,
-  onDueAtChange,
-  onTimezoneChange,
-  onCheck,
-  onSubmit,
-}: {
-  detail: HistoryTaskDetail | null
-  platforms: PublishPlatform[]
-  selectedPlatforms: string[]
-  title: string
-  caption: string
-  hashtags: string
-  scheduleMode: ScheduleMode
-  dueAt: string
-  timezone: string
-  timezones: string[]
-  scheduledDueAt: string | null
-  record: PublishRecord | null
-  checks: PublishCheck[]
-  error: string | null
-  isChecking: boolean
-  isPublishing: boolean
-  submitDisabled: boolean
-  onPlatformsChange: (value: string[]) => void
-  onTitleChange: (value: string) => void
-  onCaptionChange: (value: string) => void
-  onHashtagsChange: (value: string) => void
-  onScheduleModeChange: (value: ScheduleMode) => void
-  onDueAtChange: (value: string) => void
-  onTimezoneChange: (value: string) => void
-  onCheck: () => void
-  onSubmit: () => void
-}) {
-  const completed = detailStatus(detail) === "completed"
-
-  return (
-    <Card className="rounded-lg">
-      <CardHeader className="border-b">
-        <CardTitle>发布准备</CardTitle>
-        <CardDescription>
-          只对已完成任务开放；提交后走真实 Buffer 发布链路。
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {!detail && (
-          <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-            选择一条已完成的视频后，可以检查发布配置并提交。
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h4 className="text-sm font-medium" id="detail-publish-heading">
+              发布状态
+            </h4>
+            {canPublish ? (
+              <Button onClick={onOpenPublish} size="sm" variant="ghost">
+                查看与调整
+              </Button>
+            ) : null}
           </div>
-        )}
+          <PublishAttemptList
+            attempts={publishAttempts}
+            className="mt-2"
+            compact
+          />
+        </section>
+      ) : null}
 
-        {detail && !completed && (
-          <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-            这条记录尚未完成，完成后才能提交发布。
+      {artifactKind === "video" && storyboardFrames.length > 0 ? (
+        <section aria-labelledby="storyboard-heading" className="border-t pt-4">
+          <h4 className="text-sm font-medium" id="storyboard-heading">
+            分镜
+            <span className="ml-1 font-normal text-muted-foreground">
+              {storyboardFrames.length}
+            </span>
+          </h4>
+          <div className="mt-2 divide-y border-y">
+            {storyboardFrames.map((frame, index) => (
+              <StoryboardRow frame={frame} index={index} key={index} />
+            ))}
           </div>
-        )}
-
-        {detail && completed && (
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <div className="flex min-w-0 flex-col gap-4">
-              <div>
-                <div className="text-sm font-medium">平台</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {platforms.map((platform) => {
-                    const checked = selectedPlatforms.includes(platform.id)
-                    return (
-                      <label
-                        className={cn(
-                          "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm",
-                          checked && "border-primary bg-primary/5"
-                        )}
-                        key={platform.id}
-                      >
-                        <input
-                          checked={checked}
-                          className="size-4"
-                          onChange={(event) => {
-                            const next = event.target.checked
-                              ? [...selectedPlatforms, platform.id]
-                              : selectedPlatforms.filter((id) => id !== platform.id)
-                            onPlatformsChange(next)
-                          }}
-                          type="checkbox"
-                        />
-                        {platform.label}
-                      </label>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="text-sm font-medium" htmlFor="publish-title">
-                    标题
-                  </label>
-                  <Input
-                    id="publish-title"
-                    onChange={(event) => onTitleChange(event.target.value)}
-                    value={title}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium" htmlFor="publish-hashtags">
-                    话题标签
-                  </label>
-                  <Input
-                    id="publish-hashtags"
-                    onChange={(event) => onHashtagsChange(event.target.value)}
-                    placeholder="#petcare #shorts"
-                    value={hashtags}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium" htmlFor="publish-caption">
-                  发布文案
-                </label>
-                <Textarea
-                  className="mt-2 min-h-36 resize-y"
-                  id="publish-caption"
-                  onChange={(event) => onCaptionChange(event.target.value)}
-                  value={caption}
-                />
-              </div>
-
-              <div>
-                <div className="text-sm font-medium">发布时间</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button
-                    onClick={() => onScheduleModeChange("queue")}
-                    type="button"
-                    variant={scheduleMode === "queue" ? "default" : "outline"}
-                  >
-                    加入 Buffer 队列
-                  </Button>
-                  <Button
-                    onClick={() => onScheduleModeChange("scheduled")}
-                    type="button"
-                    variant={scheduleMode === "scheduled" ? "default" : "outline"}
-                  >
-                    <CalendarClock data-icon="inline-start" />
-                    指定时间
-                  </Button>
-                </div>
-                {scheduleMode === "scheduled" && (
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <Input
-                      onChange={(event) => onDueAtChange(event.target.value)}
-                      type="datetime-local"
-                      value={dueAt}
-                    />
-                    <select
-                      className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-                      onChange={(event) => onTimezoneChange(event.target.value)}
-                      value={timezone}
-                    >
-                      {timezones.map((timezoneOption) => (
-                        <option key={timezoneOption} value={timezoneOption}>
-                          {timezoneOption}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="sm:col-span-2 text-sm text-muted-foreground">
-                      发送给 Buffer：{scheduledDueAt || "请选择发布时间"}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {error && <InlineError title="发布操作失败" message={error} />}
-            </div>
-
-            <div className="flex flex-col gap-4">
-              <div>
-                <div className="text-sm font-medium">当前发布记录</div>
-                {record ? (
-                  <div className="mt-2 flex flex-col">
-                    {(record.jobs ?? []).map((job, index) => (
-                      <div
-                        className="flex flex-col gap-1 border-b py-2 last:border-0"
-                        key={index}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-medium">{job.platform}</span>
-                          <StatusBadge status={job.status} />
-                        </div>
-                        {job.buffer_post_id && (
-                          <div className="font-mono text-xs text-muted-foreground">
-                            {job.buffer_post_id}
-                          </div>
-                        )}
-                        {job.error && (
-                          <div className="text-xs text-destructive">
-                            {job.error}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="mt-2 text-sm text-muted-foreground">
-                    还没有提交过发布。
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <Button
-                  disabled={isChecking || selectedPlatforms.length === 0}
-                  onClick={onCheck}
-                  variant="outline"
-                >
-                  {isChecking ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
-                  ) : (
-                    <RefreshCcw data-icon="inline-start" />
-                  )}
-                  检查发布配置
-                </Button>
-                <Button disabled={submitDisabled} onClick={onSubmit}>
-                  {isPublishing ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
-                  ) : (
-                    <Send data-icon="inline-start" />
-                  )}
-                  提交到 Buffer
-                </Button>
-              </div>
-
-              {checks.length > 0 && (
-                <>
-                  <Separator />
-                  <div className="flex flex-col gap-2">
-                    {checks.map((check, index) => (
-                      <div
-                        className={cn(
-                          "rounded-lg p-3 text-sm",
-                          check.ok
-                            ? "bg-primary/5 text-foreground"
-                            : "bg-destructive/10 text-destructive"
-                        )}
-                        key={`${check.name}-${index}`}
-                      >
-                        <div className="font-medium">{check.name}</div>
-                        <div className="mt-1 text-xs">{check.message}</div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        </section>
+      ) : null}
+    </section>
   )
 }
 
@@ -1365,160 +1164,497 @@ function LibraryRow({
   onSelect,
   onOpenPublish,
   metrics,
+  publishState,
 }: {
   task: HistoryTaskSummary
   selected: boolean
   onSelect: () => void
   onOpenPublish: () => void
   metrics: ContentItemMetrics | null
+  publishState: PublishAttemptState | null
 }) {
-  const resultRecord = readRecord(task.result)
-  const artifactType = (readString(resultRecord?.artifact_type) ||
-    "video") as ArtifactKind
+  const result = readRecord(task.result)
+  const artifactType = historyArtifactKind(result)
   const isImageSet = artifactType === "image_set"
   const isText = artifactType === "text"
   const isVideo = artifactType === "video"
-  const coverUrl = fileUrlFromPath(readString(resultRecord?.cover_path))
-  const videoUrl = fileUrlFromPath(readString(resultRecord?.video_path))
-  const status = String(task.status)
-  const isFailed = status === "failed" || status === "partial_failed"
+  const coverUrl = resolveFileUrl(readString(result?.cover_path))
+  const videoUrl = resolveFileUrl(readString(result?.video_path))
+  const runState = adaptRunState(task.status)
+  const isFailed = runState === "failed"
   const title =
     task.title ||
-    (isText ? "未命名长文" : isImageSet ? "未命名图文帖" : "未命名视频")
-
-  const metaParts: string[] = [artifactKindLabel(artifactType)]
-  if (isFailed) {
-    metaParts.push(readString(resultRecord?.error) || "生成失败")
-  } else if (isVideo) {
-    const duration = readNumber(resultRecord?.duration)
-    if (duration !== null) {
-      metaParts.push(formatDuration(duration))
-    }
-  } else if (isImageSet) {
-    const pages = readString(resultRecord?.page_count)
-    if (pages) {
-      metaParts.push(`${pages} 页`)
-    }
-  } else if (isText) {
-    const words = readString(resultRecord?.word_count)
-    if (words) {
-      metaParts.push(`${words} 字`)
-    }
-  }
-  if (!isFailed && metrics) {
-    const bits: string[] = []
-    if (metrics.likes != null) {
-      bits.push(`赞 ${metrics.likes}`)
-    }
-    if (metrics.favorites != null) {
-      bits.push(`藏 ${metrics.favorites}`)
-    }
-    if (metrics.comments != null) {
-      bits.push(`评 ${metrics.comments}`)
-    }
-    if (bits.length > 0) {
-      metaParts.push(bits.join(" "))
-    }
-  }
-  if (task.created_at) {
-    metaParts.push(formatDate(task.created_at))
-  }
+    (isText ? "未命名长文" : isImageSet ? "未命名图集" : "未命名视频")
+  const metaParts = buildLibraryMeta(artifactType, result, metrics, isFailed)
 
   return (
     <div
       className={cn(
-        "group flex cursor-pointer gap-2.5 rounded-md px-2 py-2",
-        selected ? "bg-muted" : "hover:bg-muted/50"
+        "group flex w-[min(88vw,340px)] shrink-0 snap-start items-center gap-1 rounded-lg border p-1 xl:w-auto xl:rounded-none xl:border-x-0 xl:border-t-0 xl:p-0 xl:py-2 xl:last:border-b-0",
+        selected && "bg-muted"
       )}
-      onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault()
-          onSelect()
-        }
-      }}
-      role="button"
-      tabIndex={0}
+      role="listitem"
     >
-      <div className="relative h-11 w-8 shrink-0 overflow-hidden rounded bg-muted">
-        {isImageSet && coverUrl ? (
-          <img alt="" className="h-full w-full object-cover" src={coverUrl} />
-        ) : isVideo && videoUrl ? (
-          <video
-            className="h-full w-full object-cover"
-            muted
-            playsInline
-            preload="metadata"
-            src={`${videoUrl}#t=0.1`}
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-            {isText ? (
-              <FileText className="size-4" />
-            ) : isImageSet ? (
-              <Images className="size-4" />
-            ) : (
-              <Video className="size-4" />
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium">{title}</div>
-        <div
-          className={cn(
-            "truncate text-xs",
-            isFailed ? "text-destructive" : "text-muted-foreground"
+      <button
+        aria-pressed={selected}
+        className="flex min-h-16 min-w-0 flex-1 items-center gap-3 rounded-md px-2 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50"
+        onClick={onSelect}
+        type="button"
+      >
+        <div className="relative flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-muted-foreground">
+          {isImageSet && coverUrl ? (
+            <img alt="" className="size-full object-cover" src={coverUrl} />
+          ) : isVideo && videoUrl ? (
+            <video
+              aria-hidden="true"
+              className="size-full object-cover"
+              muted
+              playsInline
+              preload="metadata"
+              src={`${videoUrl}#t=0.1`}
+            />
+          ) : isText ? (
+            <FileText className="size-4" />
+          ) : isImageSet ? (
+            <Images className="size-4" />
+          ) : (
+            <Video className="size-4" />
           )}
-        >
-          {metaParts.join(" · ")}
         </div>
-      </div>
-
-      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-        {isVideo && videoUrl ? (
-          <Button
-            aria-label="下载"
-            asChild
-            className="size-7"
-            size="icon-sm"
-            variant="ghost"
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{title}</div>
+          <div
+            className={cn(
+              "mt-0.5 truncate text-xs",
+              isFailed ? "text-destructive" : "text-muted-foreground"
+            )}
           >
-            <a download href={videoUrl} onClick={(event) => event.stopPropagation()}>
+            {metaParts.join(" · ")}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <StatusBadge status={runState} />
+            {publishState ? <StatusBadge status={publishState} /> : null}
+          </div>
+        </div>
+      </button>
+
+      <div className="flex shrink-0 items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
+        {isVideo && videoUrl ? (
+          <Button asChild size="icon-sm" variant="ghost">
+            <a aria-label="下载视频" download href={videoUrl}>
               <Download />
             </a>
           </Button>
-        ) : !isVideo ? (
-          <Button
-            aria-label="下载"
-            className="size-7"
-            onClick={(event) => {
-              event.stopPropagation()
-              onSelect()
-            }}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <Download />
-          </Button>
         ) : null}
-        {isVideo && status === "completed" && (
+        {isVideo && runState === "completed" ? (
           <Button
-            aria-label="发布"
-            className="size-7"
-            onClick={(event) => {
-              event.stopPropagation()
-              onOpenPublish()
-            }}
+            aria-label="发布视频"
+            onClick={onOpenPublish}
             size="icon-sm"
             variant="ghost"
           >
             <Send />
           </Button>
-        )}
+        ) : null}
       </div>
     </div>
+  )
+}
+
+function CollapsibleText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const expandable = text.length > 200 || text.split(/\r?\n/).length > 6
+  return (
+    <>
+      <div
+        className={cn(
+          "mt-2 text-sm leading-6 whitespace-pre-wrap text-muted-foreground",
+          !expanded && "line-clamp-6"
+        )}
+      >
+        {text}
+      </div>
+      {expandable ? (
+        <Button
+          className="mt-1 px-0"
+          onClick={() => setExpanded((value) => !value)}
+          size="sm"
+          variant="link"
+        >
+          {expanded ? "收起" : "展开全文"}
+        </Button>
+      ) : null}
+    </>
+  )
+}
+
+function StoryboardRow({ frame, index }: { frame: unknown; index: number }) {
+  const [showPrompt, setShowPrompt] = useState(false)
+  const item = readRecord(frame)
+  const frameIndex = readNumber(item?.index)
+  const frameNumber = frameIndex === null ? index + 1 : frameIndex + 1
+  const imageUrl = resolveFileUrl(
+    readString(item?.composed_image_path) || readString(item?.image_path)
+  )
+  const narration = readString(item?.narration)
+  const prompt = readString(item?.image_prompt)
+  return (
+    <div className="flex gap-3 py-3">
+      <div className="h-12 w-8 shrink-0 overflow-hidden rounded-md bg-muted">
+        {imageUrl ? (
+          <img alt="" className="size-full object-cover" src={imageUrl} />
+        ) : null}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="shrink-0 text-xs text-muted-foreground">
+            #{frameNumber}
+          </span>
+          <span className="truncate text-sm">{narration || "（无旁白）"}</span>
+        </div>
+        {prompt ? (
+          <>
+            <Button
+              className="mt-1 h-auto px-0 py-0"
+              onClick={() => setShowPrompt((value) => !value)}
+              size="sm"
+              variant="link"
+            >
+              {showPrompt ? "收起配图提示词" : "配图提示词"}
+            </Button>
+            {showPrompt ? (
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {prompt}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function adaptHistoryArtifact(
+  detail: HistoryTaskDetail | null,
+  task: HistoryTaskSummary | null
+): ArtifactViewModel | null {
+  if (!detail || !task) {
+    return null
+  }
+  const result = readRecord(detail.metadata?.result)
+  if (!result) {
+    return null
+  }
+  const kind = historyArtifactKind(result)
+  const title = task.title || buildDefaultTitle(detail.metadata)
+  const base = {
+    id: task.task_id,
+    title,
+    createdAt: task.created_at,
+  }
+
+  if (kind === "image_set") {
+    const pathItems = readArray(result.image_paths)
+      .map((path, index) => {
+        const url = resolveFileUrl(readString(path))
+        return url
+          ? { id: `${task.task_id}:${index}`, url, label: imageSetLabel(index) }
+          : null
+      })
+      .filter(
+        (item): item is { id: string; url: string; label: string } =>
+          item !== null
+      )
+    const artifactItems = readArray(result.artifacts)
+      .map(readRecord)
+      .filter(
+        (item): item is Record<string, unknown> =>
+          item !== null && readString(item.kind) === "image"
+      )
+      .map((item, index) => {
+        const url = resolveArtifactUrl(item)
+        return url
+          ? {
+              id: `${task.task_id}:artifact:${index}`,
+              url,
+              label: imageSetLabel(index, readString(item.role)),
+            }
+          : null
+      })
+      .filter(
+        (item): item is { id: string; url: string; label: string } =>
+          item !== null
+      )
+    return {
+      ...base,
+      kind: "image_set",
+      images: pathItems.length > 0 ? pathItems : artifactItems,
+      caption: readString(result.caption) || null,
+    }
+  }
+
+  if (kind === "text") {
+    const resultMetadata = readRecord(result.metadata)
+    const article =
+      readString(result.article) || readString(resultMetadata?.article)
+    if (!article) {
+      return null
+    }
+    return {
+      ...base,
+      kind: "text",
+      article,
+    }
+  }
+
+  const videoArtifact = readArray(result.artifacts)
+    .map(readRecord)
+    .find((item) => item && readString(item.kind) === "video")
+  const videoUrl =
+    resolveFileUrl(readString(result.video_path)) ||
+    resolveArtifactUrl(videoArtifact ?? null)
+  if (!videoUrl) {
+    return null
+  }
+  return {
+    ...base,
+    kind: "video",
+    src: videoUrl,
+    downloadUrl: videoUrl,
+    poster: resolveFileUrl(readString(result.cover_path)),
+    duration: readNumber(result.duration),
+    fileSize: readNumber(result.file_size),
+  }
+}
+
+function adaptPublishAttempts(
+  record: PublishRecord | null,
+  platforms: PublishPlatform[]
+): PublishAttemptViewModel[] {
+  if (!record?.jobs) {
+    return []
+  }
+  const platformLabels = new Map(
+    platforms.map((platform) => [platform.id, platform.label])
+  )
+  return record.jobs.map((job, index) => {
+    const state = adaptPublishState(job.status)
+    return {
+      id: job.buffer_post_id || `${job.platform}:${index}`,
+      platformId: job.platform,
+      platformLabel: platformLabels.get(job.platform) || job.platform,
+      state,
+      scheduledAt: job.due_at || null,
+      publishedAt: state === "published" ? job.updated_at || null : null,
+      publicUrl: job.public_video_url || null,
+      error: job.error || null,
+      canRetry: false,
+    }
+  })
+}
+
+function adaptPublishState(status: string): PublishAttemptState {
+  switch (status) {
+    case "scheduled":
+    case "queued":
+    case "pending":
+      return "scheduled"
+    case "publishing":
+    case "processing":
+    case "running":
+      return "publishing"
+    case "published":
+    case "completed":
+    case "success":
+      return "published"
+    case "failed":
+    case "error":
+      return "failed"
+    default:
+      return "idle"
+  }
+}
+
+function adaptRunState(status: unknown): RunState {
+  switch (String(status || "")) {
+    case "idle":
+    case "uploading":
+    case "submitting":
+    case "queued":
+    case "running":
+    case "completed":
+    case "failed":
+    case "cancelling":
+    case "cancelled":
+    case "interrupted":
+      return String(status) as RunState
+    case "pending":
+    case "submitted":
+      return "queued"
+    case "processing":
+      return "running"
+    case "partial_failed":
+    case "error":
+      return "failed"
+    default:
+      return "interrupted"
+  }
+}
+
+function summarizePublishState(
+  attempts: PublishAttemptViewModel[]
+): PublishAttemptState | null {
+  if (attempts.some((attempt) => attempt.state === "failed")) {
+    return "failed"
+  }
+  if (attempts.some((attempt) => attempt.state === "publishing")) {
+    return "publishing"
+  }
+  if (attempts.some((attempt) => attempt.state === "scheduled")) {
+    return "scheduled"
+  }
+  if (
+    attempts.length > 0 &&
+    attempts.every((attempt) => attempt.state === "published")
+  ) {
+    return "published"
+  }
+  return attempts.length > 0 ? "idle" : null
+}
+
+function getPublishDisabledReason({
+  artifact,
+  runState,
+  selectedPlatforms,
+  caption,
+  title,
+  requiresTitle,
+  scheduleMode,
+  dueAt,
+  isPublishing,
+}: {
+  artifact: ArtifactViewModel | null
+  runState: RunState
+  selectedPlatforms: string[]
+  caption: string
+  title: string
+  requiresTitle: boolean
+  scheduleMode: ScheduleMode
+  dueAt: string
+  isPublishing: boolean
+}) {
+  if (isPublishing) {
+    return "正在提交，请稍候。"
+  }
+  if (runState !== "completed") {
+    return "作品完成后才能发布。"
+  }
+  if (artifact?.kind !== "video") {
+    return "当前自动发布仅支持视频；图集和长文请先下载。"
+  }
+  if (selectedPlatforms.length === 0) {
+    return "请至少选择一个发布平台。"
+  }
+  if (!caption.trim()) {
+    return "请填写发布文案。"
+  }
+  if (requiresTitle && !title.trim()) {
+    return "所选平台需要标题。"
+  }
+  if (scheduleMode === "scheduled" && !dueAt.trim()) {
+    return "请选择发布时间。"
+  }
+  return null
+}
+
+function filterHistoryTasks(
+  tasks: HistoryTaskSummary[],
+  query: string,
+  artifactFilter: string
+) {
+  const normalizedQuery = query.trim().toLowerCase()
+  return tasks.filter((task) => {
+    if (
+      normalizedQuery &&
+      !(task.title ?? "").toLowerCase().includes(normalizedQuery) &&
+      !task.task_id.toLowerCase().includes(normalizedQuery)
+    ) {
+      return false
+    }
+    return (
+      artifactFilter === "all" ||
+      historyArtifactKind(readRecord(task.result)) === artifactFilter
+    )
+  })
+}
+
+function buildLibraryMeta(
+  artifactType: ArtifactKind,
+  result: Record<string, unknown> | null,
+  metrics: ContentItemMetrics | null,
+  isFailed: boolean
+) {
+  const parts = [artifactKindLabel(artifactType)]
+  if (isFailed) {
+    parts.push(readString(result?.error) || "生成失败")
+  } else if (artifactType === "video") {
+    const duration = readNumber(result?.duration)
+    if (duration !== null) {
+      parts.push(formatDuration(duration))
+    }
+  } else if (artifactType === "image_set") {
+    const pages = readNumber(result?.page_count)
+    if (pages !== null) {
+      parts.push(`${pages} 页`)
+    }
+  } else {
+    const words = readNumber(result?.word_count)
+    if (words !== null) {
+      parts.push(`${words} 字`)
+    }
+  }
+  if (!isFailed && metrics) {
+    const metricsParts: string[] = []
+    if (metrics.likes != null) metricsParts.push(`赞 ${metrics.likes}`)
+    if (metrics.favorites != null) metricsParts.push(`藏 ${metrics.favorites}`)
+    if (metrics.comments != null) metricsParts.push(`评 ${metrics.comments}`)
+    if (metricsParts.length > 0) parts.push(metricsParts.join(" "))
+  }
+  return parts
+}
+
+function artifactSpecification(
+  kind: ArtifactKind,
+  result: Record<string, unknown> | null
+) {
+  if (kind === "video") {
+    const duration = readNumber(result?.duration)
+    return {
+      label: "时长",
+      value: duration === null ? "" : formatDuration(duration),
+    }
+  }
+  if (kind === "image_set") {
+    const pages = readNumber(result?.page_count)
+    return { label: "页数", value: pages === null ? "" : `${pages} 页` }
+  }
+  const words = readNumber(result?.word_count)
+  return { label: "字数", value: words === null ? "" : `${words} 字` }
+}
+
+function historyArtifactKind(
+  result: Record<string, unknown> | null
+): ArtifactKind {
+  const kind = readString(result?.artifact_type)
+  return kind === "image_set" || kind === "text" ? kind : "video"
+}
+
+function historyFailureMessage(result: Record<string, unknown> | null) {
+  const error = readRecord(result?.error)
+  return (
+    readString(error?.message) ||
+    readString(result?.error) ||
+    "生成服务返回失败，请回到任务页查看可恢复的子任务。"
   )
 }
 
@@ -1528,13 +1664,12 @@ function buildDefaultTitle(metadata: Record<string, unknown> | null) {
   if (title) {
     return truncate(title, 100)
   }
-
   const text = readString(input?.text) || readString(input?.script)
   const firstLine = text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean)
-  return truncate(firstLine || "未命名视频", 100)
+  return truncate(firstLine || "未命名作品", 100)
 }
 
 function buildDefaultCaption(metadata: Record<string, unknown> | null) {
@@ -1553,25 +1688,60 @@ function appendHashtags(caption: string, hashtags: string) {
     .filter(Boolean)
     .map((tag) => (tag.startsWith("#") ? tag : `#${tag}`))
     .join(" ")
+  return [cleanCaption, cleanTags].filter(Boolean).join("\n\n")
+}
 
-  if (!cleanTags) {
-    return cleanCaption
+function libraryPath(
+  source: URLSearchParams,
+  patch: Record<string, string | number | null | undefined>
+) {
+  const next = new URLSearchParams(source)
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null || value === undefined || value === "") {
+      next.delete(key)
+    } else {
+      next.set(key, String(value))
+    }
   }
-  if (!cleanCaption) {
-    return cleanTags
-  }
-  return `${cleanCaption}\n\n${cleanTags}`
+  const query = next.toString()
+  return `/library${query ? `?${query}` : ""}`
+}
+
+function validQueryValue(
+  value: string | null,
+  allowed: ReadonlySet<string>,
+  fallback: string
+) {
+  return value && allowed.has(value) ? value : fallback
+}
+
+function positiveInteger(value: string | null, fallback: number) {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
 }
 
 function detailStatus(detail: HistoryTaskDetail | null) {
-  return readString(detail?.metadata?.status) || "unknown"
+  return readString(detail?.metadata?.status)
+}
+
+function resolveArtifactUrl(artifact: Record<string, unknown> | null) {
+  if (!artifact) return null
+  return (
+    resolveFileUrl(readString(artifact.url)) ||
+    resolveFileUrl(readString(artifact.path))
+  )
+}
+
+function resolveFileUrl(value: string) {
+  if (!value) return null
+  if (/^https?:\/\//.test(value)) return value
+  return fileUrlFromPath(value)
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>
-  }
-  return null
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 function readArray(value: unknown): unknown[] {
@@ -1579,51 +1749,33 @@ function readArray(value: unknown): unknown[] {
 }
 
 function readString(value: unknown) {
-  if (typeof value === "string") {
-    return value
-  }
-  if (typeof value === "number") {
-    return String(value)
-  }
+  if (typeof value === "string") return value
+  if (typeof value === "number") return String(value)
   return ""
 }
 
 function readNumber(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value
-  }
+  if (typeof value === "number" && Number.isFinite(value)) return value
   if (typeof value === "string") {
     const parsed = Number(value)
-    if (Number.isFinite(parsed)) {
-      return parsed
-    }
+    if (Number.isFinite(parsed)) return parsed
   }
   return null
 }
 
 function truncate(value: string, maxLength: number) {
-  if (value.length <= maxLength) {
-    return value
-  }
-  return `${value.slice(0, maxLength).trim()}...`
+  return value.length <= maxLength
+    ? value
+    : `${value.slice(0, maxLength).trim()}...`
 }
 
 function buildScheduledDueAt(datetimeLocal: string, timezone: string) {
-  if (!datetimeLocal.trim()) {
-    return null
-  }
-
+  if (!datetimeLocal.trim()) return null
   const [datePart, timePart] = datetimeLocal.split("T")
-  if (!datePart || !timePart) {
-    return null
-  }
-
+  if (!datePart || !timePart) return null
   const [year, month, day] = datePart.split("-").map(Number)
   const [hour, minute] = timePart.split(":").map(Number)
-  if (![year, month, day, hour, minute].every(Number.isFinite)) {
-    return null
-  }
-
+  if (![year, month, day, hour, minute].every(Number.isFinite)) return null
   const offsetMinutes = getTimezoneOffsetMinutes(
     timezone,
     new Date(Date.UTC(year, month - 1, day, hour, minute))
@@ -1649,60 +1801,19 @@ function getTimezoneOffsetMinutes(timezone: string, date: Date) {
 }
 
 function parseGmtOffset(value: string) {
-  if (value === "GMT" || value === "UTC") {
-    return 0
-  }
+  if (value === "GMT" || value === "UTC") return 0
   const match = value.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/)
-  if (!match) {
-    return 0
-  }
+  if (!match) return 0
   const sign = match[1] === "-" ? -1 : 1
-  const hours = Number(match[2] || 0)
-  const minutes = Number(match[3] || 0)
-  return sign * (hours * 60 + minutes)
+  return sign * (Number(match[2] || 0) * 60 + Number(match[3] || 0))
 }
 
 function formatOffset(offsetMinutes: number) {
   const sign = offsetMinutes < 0 ? "-" : "+"
   const absolute = Math.abs(offsetMinutes)
-  const hours = Math.floor(absolute / 60)
-  const minutes = absolute % 60
-  return `${sign}${pad2(hours)}:${pad2(minutes)}`
+  return `${sign}${pad2(Math.floor(absolute / 60))}:${pad2(absolute % 60)}`
 }
 
 function pad2(value: number) {
   return String(value).padStart(2, "0")
-}
-
-function formatDuration(seconds: number | null) {
-  if (seconds === null) {
-    return "未返回"
-  }
-  if (seconds < 60) {
-    return `${seconds.toFixed(1)}s`
-  }
-  if (seconds < 3600) {
-    const minutes = Math.floor(seconds / 60)
-    const remainingSeconds = Math.floor(seconds % 60)
-    return `${minutes}m ${remainingSeconds}s`
-  }
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  return `${hours}h ${minutes}m`
-}
-
-function formatFileSize(bytes: number | null) {
-  if (bytes === null) {
-    return "未返回"
-  }
-  if (bytes < 1024) {
-    return `${bytes}B`
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)}KB`
-  }
-  if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / 1024 / 1024).toFixed(1)}MB`
-  }
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)}GB`
 }
