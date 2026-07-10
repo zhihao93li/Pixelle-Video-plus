@@ -617,11 +617,18 @@ const pageErrors = [];
 const errors = [];
 const forbiddenTexts = [
   "模板读取失败",
-  "历史读取失败",
+  "作品库读取失败",
   "设置读取失败",
-  "帮助内容读取失败",
-  "批量操作失败",
+  "批次读取失败",
+  "项目读取失败",
   "发布操作失败",
+];
+const primaryEntries = [
+  { name: "工作台", path: "/board" },
+  { name: "快速生产", path: "/create" },
+  { name: "任务", path: "/tasks" },
+  { name: "作品库", path: "/library" },
+  { name: "设置", path: "/settings" },
 ];
 
 function recordError(message) {
@@ -640,27 +647,6 @@ async function expectVisible(page, text) {
   }
 }
 
-async function expectControl(page, name) {
-  const candidates = [
-    page.getByLabel(name, { exact: false }).first(),
-    page.getByRole("button", { name }).first(),
-    page.getByText(name, { exact: false }).first(),
-    page.getByPlaceholder(name, { exact: false }).first(),
-  ];
-
-  for (const candidate of candidates) {
-    try {
-      await candidate.waitFor({ state: "visible", timeout: 1000 });
-      checked.push(`control:${name}`);
-      return;
-    } catch (error) {
-      // Try the next locator strategy.
-    }
-  }
-
-  recordError(`missing control: ${name}`);
-}
-
 async function verifyNoInlineFailure(page, context) {
   const bodyText = await page.locator("body").innerText({ timeout: 5000 });
   for (const forbiddenText of forbiddenTexts) {
@@ -670,15 +656,43 @@ async function verifyNoInlineFailure(page, context) {
   }
 }
 
-async function clickEntry(page, name, expectedText) {
+async function expectCurrentRoute(page, name, expectedPath) {
+  const link = page.getByRole("link", { name, exact: true }).first();
   try {
-    await page.getByRole("button", { name }).click({ timeout: 8000 });
+    await link.waitFor({ state: "visible", timeout: 8000 });
+  } catch (error) {
+    recordError(`missing nav link: ${name}`);
+    return false;
+  }
+
+  const expectedHash = `#${expectedPath}`;
+  const currentUrl = new URL(page.url());
+  if (currentUrl.hash !== expectedHash) {
+    recordError(`wrong route for ${name}: ${currentUrl.hash || "(empty)"}`);
+  }
+  const ariaCurrent = await link.getAttribute("aria-current");
+  if (ariaCurrent !== "page") {
+    recordError(`nav entry is not current: ${name}`);
+  }
+  checked.push(`route:${expectedPath}`);
+  return true;
+}
+
+async function clickEntry(page, name, expectedPath) {
+  const link = page.getByRole("link", { name, exact: true }).first();
+  try {
+    await link.click({ timeout: 8000 });
+    await page.waitForURL(
+      (url) => url.hash === `#${expectedPath}`,
+      { timeout: 8000 },
+    );
     checked.push(`nav:${name}`);
   } catch (error) {
     recordError(`could not click nav entry: ${name}`);
     return;
   }
-  await expectVisible(page, expectedText);
+  await expectVisible(page, name);
+  await expectCurrentRoute(page, name, expectedPath);
   await verifyNoInlineFailure(page, name);
 }
 
@@ -695,49 +709,18 @@ page.on("pageerror", (error) => {
 });
 
 try {
-  await page.goto(frontendUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+  const entryUrl = new URL(frontendUrl);
+  entryUrl.hash = "/create";
+  await page.goto(entryUrl.toString(), { waitUntil: "domcontentloaded", timeout: 15000 });
   await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-  await expectVisible(page, "Pixelle 生产模板");
-  await expectVisible(page, "生成视频");
-  await expectVisible(page, "当前真实生成方式");
-  await verifyNoInlineFailure(page, "生成视频");
-  await expectControl(page, "视频文案");
-  await expectControl(page, "高级生成设置");
-  await expectControl(page, "创建真实生成任务");
-  await expectControl(page, "真实任务状态");
+  await expectVisible(page, "Pixelle");
+  await expectVisible(page, "快速生产");
+  await expectCurrentRoute(page, "快速生产", "/create");
+  await verifyNoInlineFailure(page, "快速生产");
 
-  await clickEntry(page, "历史与发布", "历史记录");
-  await expectVisible(page, "发布准备");
-  await expectControl(page, "刷新历史记录");
-  await expectControl(page, "视频详情");
-  await expectControl(page, "真实 Buffer 发布链路");
-  await clickEntry(page, "文案审核", "文案审核后生成");
-  await expectControl(page, "选题");
-  await expectControl(page, "语言");
-  await expectControl(page, "脚本 Prompt");
-  await expectControl(page, "提交生成视频");
-  await clickEntry(page, "特殊生成", "特殊生成");
-  await expectControl(page, "图片生成视频");
-  await expectControl(page, "动作迁移视频");
-  await expectControl(page, "数字人视频");
-  await expectControl(page, "提交后会显示任务");
-  await clickEntry(page, "批量生产", "批量生产");
-  await expectControl(page, "批量选题");
-  await expectControl(page, "批量文案");
-  await expectControl(page, "创建批量任务");
-  await expectControl(page, "批次状态");
-  await clickEntry(page, "模板状态", "模板与迁移状态");
-  await expectControl(page, "React 可提交");
-  await expectControl(page, "Legacy only");
-  await clickEntry(page, "设置", "系统设置");
-  await expectControl(page, "AiHubMix API Key");
-  await expectControl(page, "ComfyUI URL");
-  await expectControl(page, "RunningHub API Key");
-  await expectControl(page, "Fish Audio");
-  await expectControl(page, "Buffer API Key");
-  await expectControl(page, "COS Region");
-  await clickEntry(page, "帮助", "帮助");
-  await expectControl(page, "旧 Streamlit Help 页 FAQ");
+  for (const entry of primaryEntries) {
+    await clickEntry(page, entry.name, entry.path);
+  }
 } catch (error) {
   recordError(error instanceof Error ? error.message : String(error));
 } finally {

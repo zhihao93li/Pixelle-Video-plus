@@ -2,8 +2,34 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pixelle · 视频制作</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta
+      name="description"
+      content="Pixelle 内容生产工作台：组织内容、生成作品并管理发布。"
+    />
+    <title>Pixelle · 内容生产</title>
+    <script>
+      ;(() => {
+        try {
+          const stored = localStorage.getItem("pixelle-production-demo-theme")
+          const resolved =
+            stored === "dark" ||
+            (stored === "system" &&
+              matchMedia("(prefers-color-scheme: dark)").matches)
+              ? "dark"
+              : "light"
+          document.documentElement.classList.add(resolved)
+          document.documentElement.dataset.theme = resolved
+          document.documentElement.style.colorScheme = resolved
+        } catch {
+          document.documentElement.classList.add("light")
+          document.documentElement.style.colorScheme = "light"
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

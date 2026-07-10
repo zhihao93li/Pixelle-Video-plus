@@ -56,8 +56,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {toasts.map((toast) => (
           <ToastPrimitive.Root
             className={cn(
-              "data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-80 flex items-start gap-3 rounded-xl border bg-background p-4 shadow-lg",
-              toast.variant === "error" && "border-destructive/30"
+              "flex items-start gap-3 rounded-lg border bg-background p-4 shadow-lg duration-[var(--motion-duration-default)] data-[state=closed]:animate-out data-[state=closed]:fade-out-80 data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom-2",
+              toast.variant === "success" && "border-success/30",
+              toast.variant === "error" && "border-danger/30"
             )}
             key={toast.id}
             onOpenChange={(open) => {
@@ -67,10 +68,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             }}
           >
             {toast.variant === "success" && (
-              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
             )}
             {toast.variant === "error" && (
-              <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+              <XCircle className="mt-0.5 size-4 shrink-0 text-danger" />
             )}
             <div className="min-w-0 flex-1">
               <ToastPrimitive.Title className="text-sm font-medium">
@@ -84,13 +85,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             </div>
             <ToastPrimitive.Close
               aria-label="关闭通知"
-              className="rounded-md p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+              className="rounded-md p-0.5 text-muted-foreground transition-colors duration-[var(--motion-duration-fast)] hover:text-foreground"
             >
               <X className="size-3.5" />
             </ToastPrimitive.Close>
           </ToastPrimitive.Root>
         ))}
-        <ToastPrimitive.Viewport className="fixed right-4 bottom-4 z-[100] flex w-full max-w-sm flex-col gap-2 outline-none" />
+        <ToastPrimitive.Viewport className="fixed right-[max(1rem,var(--safe-area-right))] bottom-[max(1rem,var(--safe-area-bottom))] z-[100] flex w-full max-w-sm flex-col gap-2 outline-none max-sm:left-[max(1rem,var(--safe-area-left))] max-sm:w-auto" />
       </ToastPrimitive.Provider>
     </ToastContext.Provider>
   )

@@ -562,7 +562,10 @@ export function HistoryWorkspace({
             value={searchQuery}
           />
           <Select onValueChange={setArtifactFilter} value={artifactFilter}>
-            <SelectTrigger className="h-8 w-auto text-sm">
+            <SelectTrigger
+              aria-label="筛选作品形态"
+              className="h-8 w-auto text-sm"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -579,7 +582,10 @@ export function HistoryWorkspace({
             }}
             value={statusFilter}
           >
-            <SelectTrigger className="h-8 w-auto text-sm">
+            <SelectTrigger
+              aria-label="筛选作品状态"
+              className="h-8 w-auto text-sm"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -599,7 +605,10 @@ export function HistoryWorkspace({
             }}
             value={`${sortBy}:${sortOrder}`}
           >
-            <SelectTrigger className="h-8 w-auto text-sm">
+            <SelectTrigger
+              aria-label="排序作品"
+              className="h-8 w-auto text-sm"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

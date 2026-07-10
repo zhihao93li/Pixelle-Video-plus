@@ -1,9 +1,14 @@
-import { useEffect } from "react"
+import { useEffect, type ReactNode } from "react"
+import { ArrowLeft } from "lucide-react"
 
 import { AppShell } from "@/components/AppShell"
+import { ContentItemDetailPage } from "@/components/ContentItemDetailPage"
 import { CreateGallery } from "@/components/CreateGallery"
-import { GenerateWorkspace } from "@/components/ProductionStudio"
+import { HighFidelityGenerationDemo } from "@/components/HighFidelityGenerationDemo"
 import { HistoryWorkspace } from "@/components/HistoryWorkspace"
+import { GenerateWorkspace } from "@/components/ProductionStudio"
+import { ProjectDetailPage } from "@/components/ProjectDetailPage"
+import { RecipeDetailPage } from "@/components/RecipeDetailPage"
 import { ScriptReviewWorkspace } from "@/components/ScriptReviewWorkspace"
 import { SettingsWorkspace } from "@/components/SettingsWorkspace"
 import {
@@ -11,104 +16,139 @@ import {
   type SpecialPipelineMode,
 } from "@/components/SpecialPipelinesWorkspace"
 import { TaskCenterWorkspace } from "@/components/TaskCenterWorkspace"
+import { Button } from "@/components/ui/button"
 import { WorkbenchBoard } from "@/components/WorkbenchBoard"
-import { ContentItemDetailPage } from "@/components/ContentItemDetailPage"
-import { ProjectDetailPage } from "@/components/ProjectDetailPage"
-import { RecipeDetailPage } from "@/components/RecipeDetailPage"
-import { HighFidelityGenerationDemo } from "@/components/HighFidelityGenerationDemo"
-import { navigate, parsePath, usePath } from "@/lib/router"
-
-const SPECIAL_MODES: SpecialPipelineMode[] = [
-  "image_to_video",
-  "action_transfer",
-  "digital_human",
-]
-
-function isSpecialMode(value: string): value is SpecialPipelineMode {
-  return (SPECIAL_MODES as string[]).includes(value)
-}
+import {
+  navigate,
+  resolveRoute,
+  routeHref,
+  usePath,
+  type ResolvedRoute,
+} from "@/lib/router"
 
 export function App() {
   const path = usePath()
-  const { segments, query } = parsePath(path)
+  const route = resolveRoute(path)
 
-  if (segments[0] === "demo" && segments[1] === "studio") {
+  useEffect(() => {
+    document.title = `${route.title} · Pixelle`
+  }, [route.title])
+
+  // 改版验收期保留独立 Demo；正式产品页面全部只经过下方单一 AppShell。
+  if (route.id === "demo-studio") {
     return <HighFidelityGenerationDemo />
   }
 
-  let title = "快速生产"
-  let content = <CreateGallery />
-
-  if (segments[0] === "batch") {
-    // 旧顶层 /batch 书签重定向到快速生产
-    title = "快速生产"
-    content = <RedirectTo path="/create" />
-  } else if (segments[0] === "board") {
-    if (segments[1] === "item" && segments[2]) {
-      title = "内容详情"
-      content = <ContentItemDetailPage itemId={segments[2]} key={segments[2]} />
-    } else {
-      title = "工作台"
-      content = <WorkbenchBoard />
-    }
-  } else if (segments[0] === "create") {
-    if (segments[1] === "generate" && segments[2]) {
-      // 产物已非仅视频（图文/长文直跑也走这条路由），标题用中性「生成」
-      title = "生成"
-      content = (
-        <GenerateWorkspace key={segments[2]} templateId={segments[2]} />
-      )
-    } else if (segments[1] === "recipes" && segments[2]) {
-      title = "配方详情"
-      content = (
-        <RecipeDetailPage key={segments[2]} templateId={segments[2]} />
-      )
-    } else if (segments[1] === "special" && isSpecialMode(segments[2] ?? "")) {
-      const mode = segments[2] as SpecialPipelineMode
-      title = "特殊视频生成"
-      content = <SpecialPipelinesWorkspace initialMode={mode} key={mode} />
-    } else if (segments[1] === "script-review") {
-      title = "多语言审核出片"
-      content = <ScriptReviewWorkspace />
-    } else if (segments[1] === "batch") {
-      // 批量已改为生成页的提交模式；旧入口重定向到快速生产（防书签断链）
-      title = "快速生产"
-      content = <RedirectTo path="/create" />
-    }
-  } else if (segments[0] === "tasks") {
-    title = "任务"
-    content = <TaskCenterWorkspace />
-  } else if (segments[0] === "library") {
-    title = "作品库"
-    content = (
-      <HistoryWorkspace
-        key={query.get("task") ?? "library"}
-        latestTaskId={query.get("task")}
-      />
-    )
-  } else if (segments[0] === "settings") {
-    if (segments[1] === "projects" && segments[2]) {
-      title = "项目详情"
-      content = <ProjectDetailPage key={segments[2]} projectId={segments[2]} />
-    } else {
-      title = "设置"
-      content = <SettingsWorkspace />
-    }
-  }
-
   return (
-    <AppShell path={path} title={title}>
-      {content}
+    <AppShell
+      layout={route.layout}
+      path={path}
+      projectScoped={route.projectScoped}
+      title={route.title}
+    >
+      {renderRoute(route)}
     </AppShell>
   )
 }
 
-/** 极简重定向：hash 路由下挂载即跳转到目标路径。 */
+function renderRoute(route: ResolvedRoute): ReactNode {
+  switch (route.id) {
+    case "legacy-batch":
+    case "create-legacy-batch":
+      return <RedirectTo path="/create" />
+    case "board":
+      return <WorkbenchBoard />
+    case "board-item":
+      return (
+        <ContentItemDetailPage
+          itemId={route.params.itemId}
+          key={route.params.itemId}
+        />
+      )
+    case "create":
+      return <CreateGallery />
+    case "create-generate":
+      return (
+        <GenerateWorkspace
+          key={route.params.templateId}
+          templateId={route.params.templateId}
+        />
+      )
+    case "create-recipe":
+      return (
+        <RecipeDetailPage
+          key={route.params.templateId}
+          templateId={route.params.templateId}
+        />
+      )
+    case "create-special":
+      return (
+        <SpecialPipelinesWorkspace
+          initialMode={route.params.mode as SpecialPipelineMode}
+          key={`${route.params.mode}:${route.params.templateId ?? "default"}`}
+        />
+      )
+    case "create-script-review":
+      return <ScriptReviewWorkspace />
+    case "tasks":
+      return <TaskCenterWorkspace />
+    case "library":
+      return (
+        <HistoryWorkspace
+          key={route.query.get("task") ?? "library"}
+          latestTaskId={route.query.get("task")}
+        />
+      )
+    case "settings":
+      return <SettingsWorkspace />
+    case "settings-project":
+      return (
+        <ProjectDetailPage
+          key={route.params.projectId}
+          projectId={route.params.projectId}
+        />
+      )
+    case "not-found":
+      return <NotFoundPage pathname={route.pathname} />
+    case "demo-studio":
+      return null
+  }
+}
+
+function NotFoundPage({ pathname }: { pathname: string }) {
+  return (
+    <main className="flex min-h-[55vh] max-w-[1240px] items-center p-6">
+      <div className="max-w-lg">
+        <div className="text-sm font-medium text-primary">404</div>
+        <h2 className="mt-2 text-lg font-medium">页面不存在</h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          没有找到「{pathname}」。链接可能已失效，或页面已经移动。
+        </p>
+        <Button asChild className="mt-5">
+          <a href={routeHref("/create")}>
+            <ArrowLeft data-icon="inline-start" />
+            返回快速生产
+          </a>
+        </Button>
+      </div>
+    </main>
+  )
+}
+
+/** hash 路由下挂载即跳转，保留旧书签。 */
 function RedirectTo({ path }: { path: string }) {
   useEffect(() => {
     navigate(path)
   }, [path])
-  return null
+
+  return (
+    <main
+      aria-live="polite"
+      className="max-w-[1240px] p-4 text-sm text-muted-foreground lg:p-6"
+    >
+      正在前往快速生产…
+    </main>
+  )
 }
 
 export default App

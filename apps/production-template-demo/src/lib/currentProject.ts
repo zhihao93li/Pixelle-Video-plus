@@ -1,29 +1,32 @@
-import { useEffect } from "react"
-import { useSyncExternalStore } from "react"
+import { useEffect, useSyncExternalStore } from "react"
 
+import { readableError } from "@/lib/format"
 import { listProjects, type Project } from "@/lib/generationApi"
 
 /**
- * 当前项目（全局作用域）：localStorage 记住选择 + CustomEvent 广播 + hook。
- * 仿 lib/expertMode.ts。"当前项目"是纯前端状态；所有 API 调用显式带 project id。
- * localStorage 值失效（归档/不存在）时回落 default_project_id 并写回。
+ * 当前项目（全局作用域）：localStorage 记住选择，CustomEvent 同步当前页，
+ * storage 事件同步其他标签页。所有 API 调用仍由业务页面显式携带 project id。
  */
 
-const STORAGE_KEY = "pixlle.currentProjectId"
-const EVENT_NAME = "pixlle-current-project-change"
+const STORAGE_KEY = "pixelle.currentProjectId"
+const EVENT_NAME = "pixelle-current-project-change"
+
+export type ProjectLoadStatus = "idle" | "loading" | "ready" | "error"
 
 type Snapshot = {
   projectId: string | null
   defaultProjectId: string | null
   projects: Project[]
-  loaded: boolean
+  status: ProjectLoadStatus
+  error: string | null
 }
 
 let snapshot: Snapshot = {
   projectId: null,
   defaultProjectId: null,
   projects: [],
-  loaded: false,
+  status: "idle",
+  error: null,
 }
 
 let loadPromise: Promise<void> | null = null
@@ -44,7 +47,7 @@ function writeStoredId(projectId: string | null) {
       window.localStorage.removeItem(STORAGE_KEY)
     }
   } catch {
-    // 存储不可用时静默失败
+    // 存储不可用不影响当前会话中的项目状态。
   }
 }
 
@@ -53,11 +56,26 @@ function emit() {
 }
 
 function subscribe(callback: () => void) {
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key !== STORAGE_KEY) {
+      return
+    }
+    const projectId = resolveProjectId(
+      event.newValue,
+      snapshot.projects,
+      snapshot.defaultProjectId
+    )
+    if (projectId !== snapshot.projectId) {
+      snapshot = { ...snapshot, projectId }
+    }
+    callback()
+  }
+
   window.addEventListener(EVENT_NAME, callback)
-  window.addEventListener("storage", callback)
+  window.addEventListener("storage", handleStorage)
   return () => {
     window.removeEventListener(EVENT_NAME, callback)
-    window.removeEventListener("storage", callback)
+    window.removeEventListener("storage", handleStorage)
   }
 }
 
@@ -80,49 +98,70 @@ function resolveProjectId(
   return active[0]?.project_id ?? null
 }
 
-export async function refreshProjects(): Promise<void> {
-  const response = await listProjects()
-  const stored = readStoredId()
-  const projectId = resolveProjectId(
-    stored,
-    response.projects,
-    response.default_project_id
-  )
-  if (projectId !== stored) {
-    writeStoredId(projectId)
+export function refreshProjects(): Promise<void> {
+  if (loadPromise) {
+    return loadPromise
   }
-  snapshot = {
-    projectId,
-    defaultProjectId: response.default_project_id,
-    projects: response.projects,
-    loaded: true,
-  }
-  emit()
-}
 
-function ensureLoaded() {
-  if (snapshot.loaded || loadPromise) {
-    return
-  }
-  loadPromise = refreshProjects()
-    .catch(() => {
-      // 拉取失败：标记已加载避免死循环，保持空列表
-      snapshot = { ...snapshot, loaded: true }
+  snapshot = { ...snapshot, status: "loading", error: null }
+  emit()
+
+  loadPromise = listProjects()
+    .then((response) => {
+      const stored = readStoredId()
+      const projectId = resolveProjectId(
+        stored,
+        response.projects,
+        response.default_project_id
+      )
+      if (projectId !== stored) {
+        writeStoredId(projectId)
+      }
+      snapshot = {
+        projectId,
+        defaultProjectId: response.default_project_id,
+        projects: response.projects,
+        status: "ready",
+        error: null,
+      }
+      emit()
+    })
+    .catch((error: unknown) => {
+      snapshot = {
+        ...snapshot,
+        status: "error",
+        error: readableError(error),
+      }
       emit()
     })
     .finally(() => {
       loadPromise = null
     })
+
+  return loadPromise
+}
+
+function ensureLoaded() {
+  if (snapshot.status !== "idle") {
+    return
+  }
+  void refreshProjects()
 }
 
 export function setCurrentProjectId(projectId: string) {
+  const isActive = snapshot.projects.some(
+    (project) => project.project_id === projectId && project.status === "active"
+  )
+  if (!isActive || projectId === snapshot.projectId) {
+    return
+  }
   writeStoredId(projectId)
   snapshot = { ...snapshot, projectId }
   emit()
 }
 
 export function useCurrentProject() {
-  const current = useSyncExternalStore(subscribe, getSnapshot)
+  const current = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 
   useEffect(() => {
     ensureLoaded()
@@ -136,7 +175,10 @@ export function useCurrentProject() {
     projectId: current.projectId,
     project,
     projects: current.projects,
-    loaded: current.loaded,
+    defaultProjectId: current.defaultProjectId,
+    status: current.status,
+    error: current.error,
+    loaded: current.status === "ready" || current.status === "error",
     setProjectId: setCurrentProjectId,
     refresh: refreshProjects,
   }

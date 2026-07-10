@@ -1,15 +1,228 @@
 import { useSyncExternalStore } from "react"
 
 /**
- * 极简 hash 路由：`#/create/generate/xxx?task=yyy`。
- * 不引入外部依赖；刷新可恢复、可前进后退、可分享。
+ * 轻量 hash 路由：`#/create/generate/xxx?task=yyy`。
+ *
+ * 路由清单是页面标题、布局和项目作用域的唯一来源。页面组件仍由 App
+ * 负责装配，避免把组件依赖带进路由基础层。
  */
 
 const DEFAULT_PATH = "/create"
 
+export type RouteLayout =
+  "standard" | "wide" | "narrow" | "workspace" | "standalone"
+
+export type RouteId =
+  | "demo-studio"
+  | "legacy-batch"
+  | "board"
+  | "board-item"
+  | "create"
+  | "create-generate"
+  | "create-recipe"
+  | "create-special"
+  | "create-script-review"
+  | "create-legacy-batch"
+  | "tasks"
+  | "library"
+  | "settings"
+  | "settings-project"
+
+export type RouteParams = Record<string, string>
+
+export type RouteManifestEntry = {
+  id: RouteId
+  title: string
+  layout: RouteLayout
+  projectScoped: boolean
+  navigation?: {
+    label: string
+    path: string
+    order: number
+  }
+  match: (segments: string[]) => RouteParams | null
+}
+
+export type ParsedRoute = {
+  pathname: string
+  segments: string[]
+  query: URLSearchParams
+}
+
+export type ResolvedRoute = {
+  id: RouteId | "not-found"
+  title: string
+  layout: RouteLayout
+  projectScoped: boolean
+  params: RouteParams
+  pathname: string
+  query: URLSearchParams
+}
+
+const SPECIAL_MODES = new Set([
+  "image_to_video",
+  "action_transfer",
+  "digital_human",
+])
+
+function exact(...expected: string[]) {
+  return (segments: string[]) =>
+    segments.length === expected.length &&
+    expected.every((segment, index) => segments[index] === segment)
+      ? {}
+      : null
+}
+
+export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
+  {
+    id: "demo-studio",
+    title: "生成工作台 Demo",
+    layout: "standalone",
+    projectScoped: true,
+    match: exact("demo", "studio"),
+  },
+  {
+    id: "legacy-batch",
+    title: "快速生产",
+    layout: "standard",
+    projectScoped: true,
+    match: exact("batch"),
+  },
+  {
+    id: "board-item",
+    title: "内容详情",
+    layout: "standard",
+    projectScoped: true,
+    match: (segments) =>
+      segments.length === 3 && segments[0] === "board" && segments[1] === "item"
+        ? { itemId: segments[2] }
+        : null,
+  },
+  {
+    id: "board",
+    title: "工作台",
+    layout: "wide",
+    projectScoped: true,
+    navigation: { label: "工作台", path: "/board", order: 1 },
+    match: exact("board"),
+  },
+  {
+    id: "create-generate",
+    title: "生成",
+    layout: "workspace",
+    projectScoped: true,
+    match: (segments) =>
+      segments.length === 3 &&
+      segments[0] === "create" &&
+      segments[1] === "generate"
+        ? { templateId: segments[2] }
+        : null,
+  },
+  {
+    id: "create-recipe",
+    title: "配方详情",
+    layout: "standard",
+    projectScoped: true,
+    match: (segments) =>
+      segments.length === 3 &&
+      segments[0] === "create" &&
+      segments[1] === "recipes"
+        ? { templateId: segments[2] }
+        : null,
+  },
+  {
+    id: "create-special",
+    title: "特殊视频生成",
+    layout: "workspace",
+    projectScoped: true,
+    match: (segments) => {
+      const mode = segments[2]
+      if (
+        (segments.length !== 3 && segments.length !== 4) ||
+        segments[0] !== "create" ||
+        segments[1] !== "special" ||
+        !SPECIAL_MODES.has(mode)
+      ) {
+        return null
+      }
+      const params: RouteParams = { mode }
+      if (segments[3]) {
+        params.templateId = segments[3]
+      }
+      return params
+    },
+  },
+  {
+    id: "create-script-review",
+    title: "多语言审核出片",
+    layout: "narrow",
+    projectScoped: true,
+    match: exact("create", "script-review"),
+  },
+  {
+    id: "create-legacy-batch",
+    title: "快速生产",
+    layout: "standard",
+    projectScoped: true,
+    match: exact("create", "batch"),
+  },
+  {
+    id: "create",
+    title: "快速生产",
+    layout: "standard",
+    projectScoped: true,
+    navigation: { label: "快速生产", path: "/create", order: 2 },
+    match: exact("create"),
+  },
+  {
+    id: "tasks",
+    title: "任务",
+    layout: "standard",
+    projectScoped: true,
+    navigation: { label: "任务", path: "/tasks", order: 3 },
+    match: exact("tasks"),
+  },
+  {
+    id: "library",
+    title: "作品库",
+    layout: "standard",
+    projectScoped: true,
+    navigation: { label: "作品库", path: "/library", order: 4 },
+    match: exact("library"),
+  },
+  {
+    id: "settings-project",
+    title: "项目详情",
+    layout: "standard",
+    projectScoped: true,
+    match: (segments) =>
+      segments.length === 3 &&
+      segments[0] === "settings" &&
+      segments[1] === "projects"
+        ? { projectId: segments[2] }
+        : null,
+  },
+  {
+    id: "settings",
+    title: "设置",
+    layout: "standard",
+    projectScoped: false,
+    navigation: { label: "设置", path: "/settings", order: 5 },
+    match: exact("settings"),
+  },
+] as const
+
+export const PRIMARY_NAV_ROUTES = ROUTE_MANIFEST.filter(
+  (
+    route
+  ): route is RouteManifestEntry & {
+    navigation: NonNullable<RouteManifestEntry["navigation"]>
+  } => route.navigation != null
+).sort((left, right) => left.navigation.order - right.navigation.order)
+
 function readPath() {
   const hash = window.location.hash.replace(/^#/, "")
-  return hash || DEFAULT_PATH
+  return normalizePath(hash || DEFAULT_PATH)
 }
 
 function subscribe(callback: () => void) {
@@ -19,22 +232,76 @@ function subscribe(callback: () => void) {
 
 /** 当前完整路径（含 query），随 hash 变化自动更新。 */
 export function usePath() {
-  return useSyncExternalStore(subscribe, readPath)
+  return useSyncExternalStore(subscribe, readPath, () => DEFAULT_PATH)
 }
 
 export function navigate(path: string) {
-  window.location.hash = path
+  window.location.hash = normalizePath(path)
 }
 
-export type ParsedRoute = {
-  segments: string[]
-  query: URLSearchParams
+/** 可用于真实链接的 hash href；保留浏览器前进、后退和新窗口语义。 */
+export function routeHref(path: string) {
+  return `#${normalizePath(path)}`
 }
 
 export function parsePath(path: string): ParsedRoute {
-  const [pathname, search] = path.split("?")
+  const questionMark = path.indexOf("?")
+  const rawPathname = questionMark >= 0 ? path.slice(0, questionMark) : path
+  const search = questionMark >= 0 ? path.slice(questionMark + 1) : ""
+  const pathname = normalizePath(rawPathname)
   return {
-    segments: pathname.split("/").filter(Boolean),
-    query: new URLSearchParams(search ?? ""),
+    pathname,
+    segments: pathname.split("/").filter(Boolean).map(decodeSegment),
+    query: new URLSearchParams(search),
+  }
+}
+
+export function resolveRoute(path: string): ResolvedRoute {
+  const parsed = parsePath(path)
+  for (const route of ROUTE_MANIFEST) {
+    const params = route.match(parsed.segments)
+    if (params) {
+      return {
+        id: route.id,
+        title: route.title,
+        layout: route.layout,
+        projectScoped: route.projectScoped,
+        params,
+        pathname: parsed.pathname,
+        query: parsed.query,
+      }
+    }
+  }
+  return {
+    id: "not-found",
+    title: "页面不存在",
+    layout: "standard",
+    projectScoped: false,
+    params: {},
+    pathname: parsed.pathname,
+    query: parsed.query,
+  }
+}
+
+export function isNavigationActive(path: string, navigationPath: string) {
+  const { pathname } = parsePath(path)
+  return (
+    pathname === navigationPath || pathname.startsWith(`${navigationPath}/`)
+  )
+}
+
+function normalizePath(path: string) {
+  const trimmed = path.trim()
+  if (!trimmed || trimmed === "/") {
+    return DEFAULT_PATH
+  }
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`
+}
+
+function decodeSegment(segment: string) {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
   }
 }

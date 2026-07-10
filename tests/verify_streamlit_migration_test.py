@@ -1350,7 +1350,7 @@ def test_run_browser_smoke_check_executes_playwright_script(monkeypatch):
                 {
                     "ok": True,
                     "url": env["PIXELLE_FRONTEND_URL"],
-                    "checked": ["Pixelle 生产模板", "历史记录"],
+                    "checked": ["快速生产", "route:/library"],
                     "errors": [],
                     "consoleErrors": [],
                     "pageErrors": [],
@@ -1411,35 +1411,26 @@ def test_run_browser_smoke_check_reports_playwright_failures(monkeypatch):
     assert check.data["errors"] == ["missing visible text: 历史记录"]
 
 
-def test_browser_smoke_script_checks_streamlit_replacement_controls():
+def test_browser_smoke_script_checks_formal_route_links_and_current_route():
     required_texts = [
-        "视频文案",
-        "创建真实生成任务",
-        "真实任务状态",
-        "刷新历史记录",
-        "视频详情",
-        "真实 Buffer 发布链路",
-        "选题",
-        "脚本 Prompt",
-        "提交生成视频",
-        "图片生成视频",
-        "动作迁移视频",
-        "数字人视频",
-        "批量选题",
-        "批量文案",
-        "创建批量任务",
-        "批次状态",
-        "React 可提交",
-        "Legacy only",
-        "AiHubMix API Key",
-        "RunningHub API Key",
-        "Buffer API Key",
-        "COS Region",
-        "旧 Streamlit Help 页 FAQ",
+        "工作台",
+        "快速生产",
+        "任务",
+        "作品库",
+        "设置",
+        "/board",
+        "/create",
+        "/tasks",
+        "/library",
+        "/settings",
     ]
 
     for text in required_texts:
         assert text in BROWSER_SMOKE_SCRIPT
+
+    assert 'getByRole("link"' in BROWSER_SMOKE_SCRIPT
+    assert 'getAttribute("aria-current")' in BROWSER_SMOKE_SCRIPT
+    assert 'getByRole("button", { name }).click' not in BROWSER_SMOKE_SCRIPT
 
 
 def test_external_e2e_plan_lists_ordered_confirmation_steps():
