@@ -9,7 +9,6 @@ import {
   Play,
   RefreshCcw,
   Send,
-  SlidersHorizontal,
   UploadCloud,
   Video,
   Volume2,
@@ -97,6 +96,7 @@ import { useBatchPolling } from "@/lib/useBatchPolling"
 import { BatchStatusCard } from "@/components/shared/BatchStatusCard"
 import { ImageSetView } from "@/components/shared/ImageSetView"
 import { RecipeSelect } from "@/components/shared/RecipeSelect"
+import { SettingsSummaryRow } from "@/components/shared/SettingsSummaryRow"
 import { TextArticleView } from "@/components/shared/TextArticleView"
 import { imageSetLabel } from "@/lib/imageSet"
 import {
@@ -108,6 +108,12 @@ import { navigate } from "@/lib/router"
 import { useTaskCenter } from "@/lib/taskCenter"
 import { useCurrentProject } from "@/lib/currentProject"
 import { useLocalStorageState } from "@/lib/useLocalStorageState"
+import {
+  createGenerationDraft,
+  resolveGenerationDraft,
+  updateGenerationDraft,
+  type GenerationDraft,
+} from "@/lib/productViewModels"
 import {
   apiResourceUrl,
   artifactFileUrl,
@@ -199,6 +205,12 @@ type AssetAdvancedSettings = {
   ttsSpeed: number
 }
 
+type LongFormAdvancedSettings = {
+  wordCount: number
+  longFormPrompt: string
+  llmModel: string
+}
+
 const defaultResources: GenerationResources = {
   bgm: [],
   frameTemplates: [],
@@ -237,6 +249,31 @@ const defaultAssetAdvancedSettings: AssetAdvancedSettings = {
   bgmMode: "loop",
   voiceId: "zh-CN-YunjianNeural",
   ttsSpeed: 1.2,
+}
+
+const defaultLongFormSettings: LongFormAdvancedSettings = {
+  wordCount: 1800,
+  longFormPrompt: "",
+  llmModel: "",
+}
+
+function longFormDraftForTemplate(
+  template: ProductionTemplate
+): GenerationDraft<LongFormAdvancedSettings> {
+  if (templateArtifactType(template.pipeline_id) !== "text") {
+    return createGenerationDraft(defaultLongFormSettings)
+  }
+  const fixed = template.fixed_params
+  const parsedWordCount = Number(fixed.word_count)
+  return createGenerationDraft({
+    wordCount:
+      Number.isFinite(parsedWordCount) && parsedWordCount > 0
+        ? parsedWordCount
+        : defaultLongFormSettings.wordCount,
+    longFormPrompt:
+      typeof fixed.long_form_prompt === "string" ? fixed.long_form_prompt : "",
+    llmModel: typeof fixed.llm_model === "string" ? fixed.llm_model : "",
+  })
 }
 
 /**
@@ -366,6 +403,9 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   const [assetDuration, setAssetDuration] = useState(30)
   const [assetAdvancedSettings, setAssetAdvancedSettings] =
     useState<AssetAdvancedSettings>(defaultAssetAdvancedSettings)
+  const [longFormDraft, setLongFormDraft] = useState<
+    GenerationDraft<LongFormAdvancedSettings>
+  >(() => createGenerationDraft(defaultLongFormSettings))
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
   const [result, setResult] = useState<GenerationResult | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -414,7 +454,18 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
     [batchText]
   )
   // 提交前总结：本次覆盖了哪些配方默认（来源标注 v1，脏值比较）
-  const overriddenLabels = overriddenAdvancedLabels(advancedSettings)
+  const standardOverriddenLabels = overriddenAdvancedLabels(advancedSettings)
+  const longFormOverriddenLabels = longFormDraft.dirtyKeys.map((key) =>
+    key === "wordCount"
+      ? "目标字数"
+      : key === "longFormPrompt"
+        ? "长文提示词"
+        : "写作模型"
+  )
+  const overriddenLabels =
+    nonVideoArtifact === "text"
+      ? longFormOverriddenLabels
+      : standardOverriddenLabels
   const overrideSummary =
     overriddenLabels.length > 0
       ? `本次覆盖 ${overriddenLabels.length} 项（${overriddenLabels
@@ -427,7 +478,11 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   const selectedFramePreviewUrl = apiResourceUrl(
     selectedFrameTemplate?.preview_url
   )
-  const previewSourceText = templateNeedsTopic ? topic : script
+  const previewSourceText = templateNeedsAssets
+    ? trimmedAssetIntent || trimmedAssetTitle
+    : templateNeedsTopic
+      ? topic
+      : script
   const batchMeasureWord = nonVideoArtifact === "text" ? "篇" : "条"
   const batchOutputNoun =
     nonVideoArtifact === "text"
@@ -497,6 +552,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
 
         setTemplates(response.templates)
         setTemplate(selected)
+        setLongFormDraft(longFormDraftForTemplate(selected))
         setLoadState("ready")
       } catch (error) {
         if (cancelled) {
@@ -625,7 +681,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
             tts_speed: assetAdvancedSettings.ttsSpeed,
           },
           {
-            source: "react_p8_demo",
+            source: "react_production_studio",
             uploaded_assets: uploaded,
             template_use_case: template.use_case,
           },
@@ -636,12 +692,13 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
           template.id,
           buildStandardTemplateInput({
             advancedSettings,
+            longFormOverrides: longFormDraft.overrides,
             script: trimmedScript,
             template,
             topic: trimmedTopic,
           }),
           {
-            source: "react_streamlit_migration",
+            source: "react_production_studio",
             template_use_case: template.use_case,
           },
           projectId ?? undefined
@@ -670,12 +727,13 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
           script: item.input.script,
           topic: "",
           advancedSettings: { ...advancedSettings, title: item.input.title },
+          longFormOverrides: longFormDraft.overrides,
         }),
       }))
       const response = await createGenerationBatch({
         templateId: template.id,
         items,
-        metadata: { source: "react_generate_batch", mode: "fixed" },
+        metadata: { source: "react_production_studio_batch", mode: "fixed" },
         projectId: projectId ?? undefined,
       })
       setSubmittedBatch(response)
@@ -731,6 +789,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
       setBatchMode(false)
     }
     setTemplate(nextTemplate)
+    setLongFormDraft(longFormDraftForTemplate(nextTemplate))
     navigate(`/create/generate/${nextTemplate.id}`)
   }
 
@@ -840,8 +899,10 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                     <StandardInput
                       advancedSettings={advancedSettings}
                       inputKind="topic"
+                      longFormDraft={longFormDraft}
                       onBgmUploaded={addBgmResource}
                       onAdvancedSettingsChange={setAdvancedSettings}
+                      onLongFormDraftChange={setLongFormDraft}
                       onTextChange={setTopic}
                       pipelineId={template?.pipeline_id}
                       recipeId={template?.id}
@@ -859,11 +920,13 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                       batchText={batchText}
                       inputKind="script"
                       isNonVideo={isNonVideo}
+                      longFormDraft={longFormDraft}
                       pipelineId={template?.pipeline_id}
                       recipeId={template?.id}
                       onBatchTextChange={setBatchText}
                       onBgmUploaded={addBgmResource}
                       onAdvancedSettingsChange={setAdvancedSettings}
+                      onLongFormDraftChange={setLongFormDraft}
                       onRemoveBatchItem={(index) =>
                         setBatchText((current) =>
                           removeScriptItem(current, index)
@@ -1144,11 +1207,13 @@ function StandardInput({
   batchItems = [],
   pipelineId = "standard",
   recipeId = "",
+  longFormDraft,
   onBatchTextChange,
   onRemoveBatchItem,
   onTextChange,
   onAdvancedSettingsChange,
   onBgmUploaded,
+  onLongFormDraftChange,
 }: {
   inputKind: "script" | "topic"
   text: string
@@ -1165,11 +1230,15 @@ function StandardInput({
   pipelineId?: string
   /** 「改默认去配方」深链目标。 */
   recipeId?: string
+  longFormDraft: GenerationDraft<LongFormAdvancedSettings>
   onBatchTextChange?: (value: string) => void
   onRemoveBatchItem?: (index: number) => void
   onTextChange: (value: string) => void
   onAdvancedSettingsChange: (value: StandardAdvancedSettings) => void
   onBgmUploaded: (bgm: ResourceBgm) => void
+  onLongFormDraftChange: (
+    draft: GenerationDraft<LongFormAdvancedSettings>
+  ) => void
 }) {
   const trimmedText = text.trim()
   const inputId = inputKind === "topic" ? "topic" : "script"
@@ -1238,6 +1307,7 @@ function StandardInput({
   )
   const [isLoadingTemplateParams, setIsLoadingTemplateParams] = useState(true)
   const [quickStyleOpen, setQuickStyleOpen] = useState(false)
+  const [longFormSettingsOpen, setLongFormSettingsOpen] = useState(false)
   const previewText =
     previewCopy(inputKind, text, advancedSettings.title) ||
     "这是一段用于预览画面与声音的示例文案。"
@@ -1492,7 +1562,11 @@ function StandardInput({
             placeholder={
               inputKind === "topic"
                 ? "例如：猫咪夏天饮水少，主人应该怎么判断和处理"
-                : "粘贴或输入完整视频文案…"
+                : artifactKind === "text"
+                  ? "粘贴或输入需要扩写的长文素材…"
+                  : artifactKind === "image_set"
+                    ? "粘贴或输入图文文案；换行可作为分页依据…"
+                    : "粘贴或输入完整视频文案…"
             }
             value={text}
           />
@@ -1529,21 +1603,27 @@ function StandardInput({
         </Field>
       )}
 
-      {artifactKind !== "text" && (
+      {artifactKind === "text" ? (
         <>
-          <button
-            className="flex min-h-14 w-full items-center gap-3 rounded-lg border bg-background px-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          <SettingsSummaryRow
+            actionLabel="调整本次长文设置"
+            onClick={() => setLongFormSettingsOpen(true)}
+            summary={`${resolveGenerationDraft(longFormDraft).wordCount} 字 · ${resolveGenerationDraft(longFormDraft).llmModel || "系统默认模型"}`}
+          />
+          <LongFormSettingsSheet
+            draft={longFormDraft}
+            onChange={onLongFormDraftChange}
+            onOpenChange={setLongFormSettingsOpen}
+            open={longFormSettingsOpen}
+          />
+        </>
+      ) : (
+        <>
+          <SettingsSummaryRow
+            actionLabel="调整本次风格"
             onClick={() => setQuickStyleOpen(true)}
-            type="button"
-          >
-            <SlidersHorizontal className="size-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate text-sm">
-              {styleSummary}
-            </span>
-            <span className="shrink-0 text-sm font-medium text-primary">
-              调整本次风格
-            </span>
-          </button>
+            summary={styleSummary}
+          />
           <QuickStyleSheet
             artifactKind={artifactKind}
             onChange={patchAdvanced}
@@ -2461,6 +2541,92 @@ function QuickStyleSheet({
   )
 }
 
+function LongFormSettingsSheet({
+  draft,
+  open,
+  onChange,
+  onOpenChange,
+}: {
+  draft: GenerationDraft<LongFormAdvancedSettings>
+  open: boolean
+  onChange: (draft: GenerationDraft<LongFormAdvancedSettings>) => void
+  onOpenChange: (open: boolean) => void
+}) {
+  const settings = resolveGenerationDraft(draft)
+
+  function patch(patchValue: Partial<LongFormAdvancedSettings>) {
+    onChange(updateGenerationDraft(draft, patchValue))
+  }
+
+  return (
+    <Sheet onOpenChange={onOpenChange} open={open}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+        <SheetHeader>
+          <SheetTitle>调整本次长文设置</SheetTitle>
+          <SheetDescription>
+            目标字数、写作模型与提示词只覆盖本次生成；未修改项继续沿用当前配方。
+          </SheetDescription>
+        </SheetHeader>
+
+        <FieldGroup className="px-4">
+          <Field>
+            <FieldLabel htmlFor="long-form-word-count">目标字数</FieldLabel>
+            <Input
+              id="long-form-word-count"
+              max={10000}
+              min={300}
+              onChange={(event) =>
+                patch({ wordCount: Number(event.target.value || 300) })
+              }
+              step={100}
+              type="number"
+              value={settings.wordCount}
+            />
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="long-form-model">写作模型</FieldLabel>
+            <Input
+              id="long-form-model"
+              onChange={(event) => patch({ llmModel: event.target.value })}
+              placeholder="留空使用系统默认模型"
+              value={settings.llmModel}
+            />
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="long-form-prompt">长文提示词</FieldLabel>
+            <Textarea
+              className="min-h-64 resize-y font-mono text-xs leading-5"
+              id="long-form-prompt"
+              onChange={(event) =>
+                patch({ longFormPrompt: event.target.value })
+              }
+              placeholder="留空使用配方提示词"
+              value={settings.longFormPrompt}
+            />
+            <FieldDescription>
+              保留 {"{script}"} 占位符；可使用 {"{title}"}、{"{language}"} 和
+              {" {word_count}"}。
+            </FieldDescription>
+          </Field>
+        </FieldGroup>
+
+        <SheetFooter className="sm:justify-between">
+          <Button
+            disabled={draft.dirtyKeys.length === 0}
+            onClick={() => onChange(createGenerationDraft(draft.defaults))}
+            variant="outline"
+          >
+            恢复配方默认
+          </Button>
+          <Button onClick={() => onOpenChange(false)}>应用本次设置</Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 function AssetInput({
   assetFiles,
   uploadedAssets,
@@ -2500,7 +2666,7 @@ function AssetInput({
 
   return (
     <FieldGroup>
-      <Field data-invalid={assetFiles.length === 0}>
+      <Field>
         <FieldLabel htmlFor="assets">图片或视频素材</FieldLabel>
         <FileDropzone
           accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm"
@@ -2523,8 +2689,7 @@ function AssetInput({
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
         <Field>
           <FieldLabel htmlFor="asset-title">视频标题</FieldLabel>
-          <input
-            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
+          <Input
             id="asset-title"
             onChange={(event) => onAssetTitleChange(event.target.value)}
             placeholder="可选，例如：猫咪玩具日常"
@@ -2533,8 +2698,7 @@ function AssetInput({
         </Field>
         <Field>
           <FieldLabel htmlFor="asset-duration">目标时长</FieldLabel>
-          <input
-            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
+          <Input
             id="asset-duration"
             max={120}
             min={15}
@@ -2561,49 +2725,61 @@ function AssetInput({
         </FieldDescription>
       </Field>
 
-      <details className="rounded-lg border bg-background">
-        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
-          素材生成高级设置
-        </summary>
-        <div className="border-t p-4">
+      <AdvancedGroup
+        description="声音、背景音乐与合成参数"
+        id="asset-production-settings"
+        title="素材合成设置"
+      >
           {resourcesError && (
             <InlineError title="资源读取失败" message={resourcesError} />
           )}
           <div className="grid gap-4 lg:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="asset-bgm">背景音乐</FieldLabel>
-              <select
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                id="asset-bgm"
-                onChange={(event) =>
-                  patchAssetAdvanced({ bgmPath: event.target.value })
+              <Select
+                onValueChange={(value) =>
+                  patchAssetAdvanced({
+                    bgmPath: value === "__none__" ? "" : value,
+                  })
                 }
-                value={assetAdvancedSettings.bgmPath}
+                value={assetAdvancedSettings.bgmPath || "__none__"}
               >
-                <option value="">不指定 BGM</option>
-                {resources.bgm.map((item) => (
-                  <option key={item.path} value={item.path}>
-                    {item.name} · {item.source}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger aria-label="素材背景音乐" className="w-full" id="asset-bgm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="__none__">不指定 BGM</SelectItem>
+                    {resources.bgm.map((item) => (
+                      <SelectItem key={item.path} value={item.path}>
+                        {item.name} · {item.source}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </Field>
 
             <Field>
               <FieldLabel htmlFor="asset-bgm-mode">BGM 模式</FieldLabel>
-              <select
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                id="asset-bgm-mode"
-                onChange={(event) =>
+              <Select
+                onValueChange={(value) =>
                   patchAssetAdvanced({
-                    bgmMode: event.target.value as AssetAdvancedSettings["bgmMode"],
+                    bgmMode: value as AssetAdvancedSettings["bgmMode"],
                   })
                 }
                 value={assetAdvancedSettings.bgmMode}
               >
-                <option value="loop">循环</option>
-                <option value="once">播放一次</option>
-              </select>
+                <SelectTrigger aria-label="素材背景音乐播放方式" className="w-full" id="asset-bgm-mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="loop">循环</SelectItem>
+                    <SelectItem value="once">播放一次</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </Field>
 
             <BgmUploadControl
@@ -2615,8 +2791,7 @@ function AssetInput({
 
             <Field>
               <FieldLabel htmlFor="asset-bgm-volume">BGM 音量</FieldLabel>
-              <input
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
+              <Input
                 id="asset-bgm-volume"
                 max={1}
                 min={0}
@@ -2633,8 +2808,7 @@ function AssetInput({
 
             <Field>
               <FieldLabel htmlFor="asset-voice">声音</FieldLabel>
-              <input
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
+              <Input
                 id="asset-voice"
                 onChange={(event) =>
                   patchAssetAdvanced({ voiceId: event.target.value })
@@ -2648,8 +2822,7 @@ function AssetInput({
 
             <Field>
               <FieldLabel htmlFor="asset-tts-speed">语速</FieldLabel>
-              <input
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
+              <Input
                 id="asset-tts-speed"
                 max={2}
                 min={0.5}
@@ -2670,8 +2843,7 @@ function AssetInput({
               <audio className="mt-3 w-full" controls src={bgmPreviewUrl} />
             </div>
           )}
-        </div>
-      </details>
+      </AdvancedGroup>
     </FieldGroup>
   )
 }
@@ -3316,11 +3488,13 @@ function buildStandardTemplateInput({
   script,
   topic,
   advancedSettings,
+  longFormOverrides,
 }: {
   template: ProductionTemplate
   script: string
   topic: string
   advancedSettings: StandardAdvancedSettings
+  longFormOverrides: Partial<LongFormAdvancedSettings>
 }) {
   const baseInput = template.input_requirements.includes("topic")
     ? { topic }
@@ -3355,6 +3529,9 @@ function buildStandardTemplateInput({
     tts_voice: advancedSettings.ttsVoice.trim(),
     tts_workflow: advancedSettings.ttsWorkflow,
     tts_speed: advancedSettings.ttsSpeed,
+    word_count: longFormOverrides.wordCount,
+    long_form_prompt: longFormOverrides.longFormPrompt?.trim(),
+    llm_model: longFormOverrides.llmModel?.trim(),
     ref_audio:
       advancedSettings.ttsInferenceMode === "comfyui"
         ? advancedSettings.ttsRefAudioPath

@@ -7,12 +7,13 @@ import { cn } from "@/lib/utils"
  * StatusBadge = 生成任务/批次状态；ContentStatusBadge = 内容条目生命周期状态。
  */
 
-type Tone = "success" | "destructive" | "progress" | "neutral"
+type Tone = "success" | "destructive" | "progress" | "info" | "neutral"
 
 const TONE_CLASS: Record<Tone, string> = {
-  success: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  success: "bg-success/10 text-success",
   destructive: "bg-destructive/10 text-destructive",
-  progress: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  progress: "bg-warning/10 text-warning",
+  info: "bg-info/10 text-info",
   neutral: "bg-muted text-muted-foreground",
 }
 
@@ -46,7 +47,15 @@ const STATUS_CONFIG: Record<string, { label: string; tone: Tone }> = {
   running: { label: "生成中", tone: "progress" },
   pending: { label: "排队中", tone: "neutral" },
   queued: { label: "排队中", tone: "neutral" },
+  idle: { label: "未开始", tone: "neutral" },
+  uploading: { label: "上传中", tone: "progress" },
+  submitting: { label: "提交中", tone: "progress" },
+  cancelling: { label: "取消中", tone: "progress" },
   cancelled: { label: "已取消", tone: "neutral" },
+  interrupted: { label: "已中断", tone: "destructive" },
+  scheduled: { label: "已排期", tone: "info" },
+  publishing: { label: "发布中", tone: "progress" },
+  published: { label: "已发布", tone: "success" },
 }
 
 export function StatusBadge({

@@ -30,12 +30,13 @@ export type RouteId =
 
 export type RouteParams = Record<string, string>
 
-export type RouteManifestEntry = {
+export type RouteDefinition = {
   id: RouteId
+  path: string
   title: string
   layout: RouteLayout
   projectScoped: boolean
-  navigation?: {
+  nav?: {
     label: string
     path: string
     order: number
@@ -73,9 +74,10 @@ function exact(...expected: string[]) {
       : null
 }
 
-export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
+export const ROUTE_MANIFEST: readonly RouteDefinition[] = [
   {
     id: "demo-studio",
+    path: "/demo/studio",
     title: "生成工作台 Demo",
     layout: "standalone",
     projectScoped: true,
@@ -83,6 +85,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   },
   {
     id: "legacy-batch",
+    path: "/batch",
     title: "快速生产",
     layout: "standard",
     projectScoped: true,
@@ -90,6 +93,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   },
   {
     id: "board-item",
+    path: "/board/item/:itemId",
     title: "内容详情",
     layout: "standard",
     projectScoped: true,
@@ -100,14 +104,16 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   },
   {
     id: "board",
+    path: "/board",
     title: "工作台",
     layout: "wide",
     projectScoped: true,
-    navigation: { label: "工作台", path: "/board", order: 1 },
+    nav: { label: "工作台", path: "/board", order: 1 },
     match: exact("board"),
   },
   {
     id: "create-generate",
+    path: "/create/generate/:templateId",
     title: "生成",
     layout: "workspace",
     projectScoped: true,
@@ -120,6 +126,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   },
   {
     id: "create-recipe",
+    path: "/create/recipes/:templateId",
     title: "配方详情",
     layout: "standard",
     projectScoped: true,
@@ -132,6 +139,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   },
   {
     id: "create-special",
+    path: "/create/special/:mode/:templateId?",
     title: "特殊视频生成",
     layout: "workspace",
     projectScoped: true,
@@ -154,6 +162,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   },
   {
     id: "create-script-review",
+    path: "/create/script-review",
     title: "多语言审核出片",
     layout: "narrow",
     projectScoped: true,
@@ -161,6 +170,7 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   },
   {
     id: "create-legacy-batch",
+    path: "/create/batch",
     title: "快速生产",
     layout: "standard",
     projectScoped: true,
@@ -168,30 +178,34 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   },
   {
     id: "create",
+    path: "/create",
     title: "快速生产",
     layout: "standard",
     projectScoped: true,
-    navigation: { label: "快速生产", path: "/create", order: 2 },
+    nav: { label: "快速生产", path: "/create", order: 2 },
     match: exact("create"),
   },
   {
     id: "tasks",
+    path: "/tasks",
     title: "任务",
     layout: "standard",
     projectScoped: true,
-    navigation: { label: "任务", path: "/tasks", order: 3 },
+    nav: { label: "任务", path: "/tasks", order: 3 },
     match: exact("tasks"),
   },
   {
     id: "library",
+    path: "/library",
     title: "作品库",
     layout: "standard",
     projectScoped: true,
-    navigation: { label: "作品库", path: "/library", order: 4 },
+    nav: { label: "作品库", path: "/library", order: 4 },
     match: exact("library"),
   },
   {
     id: "settings-project",
+    path: "/settings/projects/:projectId",
     title: "项目详情",
     layout: "standard",
     projectScoped: true,
@@ -204,10 +218,11 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
   },
   {
     id: "settings",
+    path: "/settings",
     title: "设置",
     layout: "standard",
     projectScoped: false,
-    navigation: { label: "设置", path: "/settings", order: 5 },
+    nav: { label: "设置", path: "/settings", order: 5 },
     match: exact("settings"),
   },
 ] as const
@@ -215,10 +230,10 @@ export const ROUTE_MANIFEST: readonly RouteManifestEntry[] = [
 export const PRIMARY_NAV_ROUTES = ROUTE_MANIFEST.filter(
   (
     route
-  ): route is RouteManifestEntry & {
-    navigation: NonNullable<RouteManifestEntry["navigation"]>
-  } => route.navigation != null
-).sort((left, right) => left.navigation.order - right.navigation.order)
+  ): route is RouteDefinition & {
+    nav: NonNullable<RouteDefinition["nav"]>
+  } => route.nav != null
+).sort((left, right) => left.nav.order - right.nav.order)
 
 function readPath() {
   const hash = window.location.hash.replace(/^#/, "")

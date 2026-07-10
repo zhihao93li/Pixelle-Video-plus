@@ -6,17 +6,20 @@ export function WorkspaceHeader({
   actions,
   className,
   description,
+  headingLevel = 2,
   title,
   titleId,
   ...props
 }: Omit<React.ComponentProps<"header">, "title"> & {
   actions?: React.ReactNode
   description?: React.ReactNode
+  headingLevel?: 1 | 2
   title: React.ReactNode
   titleId?: string
 }) {
   const generatedTitleId = React.useId()
   const resolvedTitleId = titleId ?? generatedTitleId
+  const Heading = headingLevel === 1 ? "h1" : "h2"
 
   return (
     <header
@@ -28,12 +31,12 @@ export function WorkspaceHeader({
       {...props}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <h1
+        <Heading
           className="text-lg leading-7 font-medium tracking-tight text-balance"
           id={resolvedTitleId}
         >
           {title}
-        </h1>
+        </Heading>
         {description ? (
           <div className="max-w-3xl text-sm leading-6 text-pretty text-muted-foreground">
             {description}

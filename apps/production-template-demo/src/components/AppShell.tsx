@@ -289,7 +289,7 @@ export function AppShell({
 
         <nav aria-label="主导航" className="flex flex-col gap-1 px-2">
           {PRIMARY_NAV_ROUTES.map((route) => {
-            const active = isNavigationActive(path, route.navigation.path)
+            const active = isNavigationActive(path, route.nav.path)
             const Icon = NAV_ICONS[route.id]
             if (!Icon) {
               return null
@@ -303,11 +303,11 @@ export function AppShell({
                     ? "bg-sidebar-primary text-sidebar-primary-foreground"
                     : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 )}
-                href={routeHref(route.navigation.path)}
+                href={routeHref(route.nav.path)}
                 key={route.id}
               >
                 <Icon className="size-4" />
-                <span className="flex-1">{route.navigation.label}</span>
+                <span className="flex-1">{route.nav.label}</span>
                 {route.id === "tasks" && runningCount > 0 ? (
                   <Badge
                     className={cn(active && "bg-background text-foreground")}
@@ -363,7 +363,7 @@ export function AppShell({
       >
         <div className="grid grid-cols-5">
           {PRIMARY_NAV_ROUTES.map((route) => {
-            const active = isNavigationActive(path, route.navigation.path)
+            const active = isNavigationActive(path, route.nav.path)
             const Icon = NAV_ICONS[route.id]
             if (!Icon) {
               return null
@@ -377,7 +377,7 @@ export function AppShell({
                     ? "text-primary"
                     : "text-muted-foreground hover:text-foreground"
                 )}
-                href={routeHref(route.navigation.path)}
+                href={routeHref(route.nav.path)}
                 key={route.id}
               >
                 <span className="relative">
@@ -388,7 +388,7 @@ export function AppShell({
                     </span>
                   ) : null}
                 </span>
-                <span>{route.navigation.label}</span>
+                <span>{route.nav.label}</span>
               </a>
             )
           })}
