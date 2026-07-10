@@ -1,34 +1,62 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import {
-  AlertCircle,
+  Bot,
   CheckCircle2,
+  CircleHelp,
+  FolderKanban,
+  Gauge,
   Loader2,
+  PanelsTopLeft,
   Plus,
   RefreshCw,
   Save,
-  Settings,
+  Send,
+  WandSparkles,
 } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
-import { Switch } from "@/components/ui/switch"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { HelpWorkspace } from "@/components/HelpWorkspace"
 import { ProjectsPanel } from "@/components/ProjectsPanel"
+import { UnsavedChangesGuard } from "@/components/settings/UnsavedChangesGuard"
+import { AsyncState } from "@/components/shared/AsyncState"
+import { InlineError } from "@/components/shared/feedback"
+import { PageFrame } from "@/components/shared/PageFrame"
+import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
 import { TemplateStatusPanel } from "@/components/TemplateStatusPanel"
-import { setExpertMode, useExpertMode } from "@/lib/expertMode"
-import { parsePath, usePath } from "@/lib/router"
 import {
-  ApiError,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
+import { useToast } from "@/components/ui/toast"
+import { setExpertMode, useExpertMode } from "@/lib/expertMode"
+import { readableError } from "@/lib/format"
+import { parsePath, routeHref, usePath } from "@/lib/router"
+import {
+  resolveSettingsLocation,
+  settingsLink,
+  type SettingsView,
+} from "@/lib/settingsLinks"
+import { cn } from "@/lib/utils"
+import {
   addRunninghubWorkflow,
   fetchBufferChannels,
   getSettingsDiagnostics,
@@ -49,10 +77,11 @@ import {
   type ResourceTemplate,
   type ResourceWorkflow,
   type RunninghubWorkflow,
+  type SettingsConfigUpdate,
   type SettingsDiagnosticCheck,
 } from "@/lib/generationApi"
 
-type LoadState = "loading" | "ready" | "error"
+type LoadState = "loading" | "ready" | "error" | "stale"
 
 const platformLabels = {
   youtube: "YouTube",
@@ -64,17 +93,79 @@ const platformLabels = {
 
 type ActionState = "idle" | "loading" | "testing" | "saving"
 type WorkflowKind = "video" | "image" | "tts"
+type SaveSection = "ai-voice" | "generation" | "publish-storage"
+
+const SETTINGS_NAV: Array<{
+  view: SettingsView
+  label: string
+  description: string
+  icon: typeof Gauge
+}> = [
+  {
+    view: "overview",
+    label: "概览",
+    description: "状态与专家模式",
+    icon: Gauge,
+  },
+  {
+    view: "projects",
+    label: "项目",
+    description: "品牌与内容线",
+    icon: FolderKanban,
+  },
+  {
+    view: "ai-voice",
+    label: "AI 与语音",
+    description: "模型、密钥与音色",
+    icon: Bot,
+  },
+  {
+    view: "generation",
+    label: "生成引擎",
+    description: "算力与资源清单",
+    icon: WandSparkles,
+  },
+  {
+    view: "publish-storage",
+    label: "发布与存储",
+    description: "平台渠道与云存储",
+    icon: Send,
+  },
+  {
+    view: "recipes",
+    label: "配方",
+    description: "启停与克隆",
+    icon: PanelsTopLeft,
+  },
+  {
+    view: "help",
+    label: "帮助",
+    description: "说明与故障恢复",
+    icon: CircleHelp,
+  },
+]
 
 export function SettingsWorkspace() {
+  const toast = useToast()
+  const expertMode = useExpertMode()
+  const path = usePath()
+  const { query } = parsePath(path)
+  const location = resolveSettingsLocation(query)
+  const activeView = location.view
   const [loadState, setLoadState] = useState<LoadState>("loading")
   const [settings, setSettings] = useState<AppSettingsConfig | null>(null)
+  const [savedSettings, setSavedSettings] = useState<AppSettingsConfig | null>(
+    null
+  )
   const [configured, setConfigured] = useState(false)
   const [diagnostics, setDiagnostics] = useState<SettingsDiagnosticCheck[]>([])
   const [diagnosticsOk, setDiagnosticsOk] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [isSaving, setIsSaving] = useState(false)
+  const [savingSection, setSavingSection] = useState<SaveSection | null>(null)
   const [isResetting, setIsResetting] = useState(false)
+  const [reloadToken, setReloadToken] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(true)
   const [resourceState, setResourceState] = useState<{
     bgm: ResourceBgm[]
     frameTemplates: ResourceTemplate[]
@@ -93,8 +184,7 @@ export function SettingsWorkspace() {
     ok: boolean
     message: string
   } | null>(null)
-  const [comfyActionState, setComfyActionState] =
-    useState<ActionState>("idle")
+  const [comfyActionState, setComfyActionState] = useState<ActionState>("idle")
   const [comfyStatus, setComfyStatus] = useState<{
     ok: boolean
     message: string
@@ -127,24 +217,15 @@ export function SettingsWorkspace() {
   } | null>(null)
   const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>([])
 
-  // Deep-link：?tab= 控制受控 Tabs；?section= / ?template= 滚动到目标区块并一次性高亮。
-  const { query } = parsePath(usePath())
-  const tabParam = query.get("tab")
-  const sectionParam = query.get("section")
-  const templateParam = query.get("template")
-
-  const [activeTab, setActiveTab] = useState(tabParam ?? "general")
-  const [lastTabParam, setLastTabParam] = useState(tabParam)
-  if (tabParam !== lastTabParam) {
-    // URL 的 tab 变了（deep-link 导航）→ 采用它；用户手动点 tab 不改 URL，不冲突。
-    setLastTabParam(tabParam)
-    if (tabParam) {
-      setActiveTab(tabParam)
+  useEffect(() => {
+    if (location.needsNormalization && path !== location.canonicalPath) {
+      replaceHashPath(location.canonicalPath)
     }
-  }
+  }, [location.canonicalPath, location.needsNormalization, path])
 
   useEffect(() => {
-    const targetId = activeTab === "templates" ? templateParam : sectionParam
+    const targetId =
+      activeView === "recipes" ? location.template : location.focus
     if (!targetId) {
       return
     }
@@ -179,7 +260,7 @@ export function SettingsWorkspace() {
         window.clearTimeout(timer)
       }
     }
-  }, [activeTab, sectionParam, templateParam])
+  }, [activeView, location.focus, location.template])
 
   async function refreshDiagnostics() {
     try {
@@ -202,37 +283,39 @@ export function SettingsWorkspace() {
 
   useEffect(() => {
     let cancelled = false
-
-    async function loadSettings() {
-      setLoadState("loading")
-      setError(null)
-      try {
-        const [response, diagnosticsResponse] = await Promise.all([
-          getSettingsConfig(),
-          getSettingsDiagnostics(),
-        ])
+    const hasSettings = settings !== null
+    void Promise.all([getSettingsConfig(), getSettingsDiagnostics()])
+      .then(([response, diagnosticsResponse]) => {
         if (cancelled) {
           return
         }
         setSettings(response.config)
+        setSavedSettings(response.config)
         setConfigured(response.configured)
         setDiagnostics(diagnosticsResponse.checks)
         setDiagnosticsOk(diagnosticsResponse.ok)
+        setError(null)
         setLoadState("ready")
-      } catch (loadError) {
-        if (!cancelled) {
-          setLoadState("error")
-          setError(readableError(loadError))
+      })
+      .catch((loadError) => {
+        if (cancelled) {
+          return
         }
-      }
-    }
-
-    void loadSettings()
+        setLoadState(hasSettings ? "stale" : "error")
+        setError(readableError(loadError))
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsRefreshing(false)
+        }
+      })
 
     return () => {
       cancelled = true
     }
-  }, [])
+    // reloadToken 是显式刷新信号；settings 只用于区分 error 与 stale。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadToken])
 
   useEffect(() => {
     let cancelled = false
@@ -260,6 +343,20 @@ export function SettingsWorkspace() {
     }
   }, [])
 
+  const dirtySections = useMemo(
+    () => ({
+      "ai-voice": isSettingsSectionDirty("ai-voice", settings, savedSettings),
+      generation: isSettingsSectionDirty("generation", settings, savedSettings),
+      "publish-storage": isSettingsSectionDirty(
+        "publish-storage",
+        settings,
+        savedSettings
+      ),
+    }),
+    [savedSettings, settings]
+  )
+  const hasDirtySettings = Object.values(dirtySections).some(Boolean)
+
   useEffect(() => {
     let cancelled = false
 
@@ -279,7 +376,9 @@ export function SettingsWorkspace() {
       setResourceState({
         bgm: bgmResult.status === "fulfilled" ? bgmResult.value.bgm_files : [],
         frameTemplates:
-          templateResult.status === "fulfilled" ? templateResult.value.templates : [],
+          templateResult.status === "fulfilled"
+            ? templateResult.value.templates
+            : [],
         mediaWorkflows:
           mediaResult.status === "fulfilled" ? mediaResult.value.workflows : [],
         ttsWorkflows:
@@ -288,7 +387,9 @@ export function SettingsWorkspace() {
 
       const failures = [bgmResult, templateResult, mediaResult, ttsResult]
         .filter((result) => result.status === "rejected")
-        .map((result) => readableError((result as PromiseRejectedResult).reason))
+        .map((result) =>
+          readableError((result as PromiseRejectedResult).reason)
+        )
       if (failures.length > 0) {
         setResourceError(failures.join("；"))
       }
@@ -302,53 +403,56 @@ export function SettingsWorkspace() {
   }, [])
 
   function patchSettings(patch: Partial<AppSettingsConfig>) {
-    setSettings((current) => (current ? mergeSettings(current, patch) : current))
+    setSettings((current) =>
+      current ? mergeSettings(current, patch) : current
+    )
     setNotice(null)
   }
 
-  async function saveSettings() {
+  async function saveSettings(section: SaveSection) {
     if (!settings) {
       return
     }
-    setIsSaving(true)
+    setSavingSection(section)
     setError(null)
     setNotice(null)
     try {
-      const response = await updateSettingsConfig({
-        llm: settings.llm,
-        comfyui: settings.comfyui,
-        publish: settings.publish,
-      })
-      setSettings(response.config)
+      const response = await updateSettingsConfig(
+        settingsUpdateForSection(section, settings)
+      )
+      setSettings((current) =>
+        current
+          ? reconcileSavedSection(section, response.config, current)
+          : response.config
+      )
+      setSavedSettings(response.config)
       setConfigured(response.configured)
       void refreshDiagnostics()
-      setNotice("设置已保存。")
+      setNotice(`${settingsSectionLabel(section)}已保存。`)
+      toast({
+        title: `${settingsSectionLabel(section)}已保存`,
+        variant: "success",
+      })
     } catch (saveError) {
       setError(readableError(saveError))
     } finally {
-      setIsSaving(false)
+      setSavingSection(null)
     }
   }
 
   async function resetSettings() {
-    if (
-      !window.confirm(
-        "确定要重置系统设置吗？这会恢复默认配置，并影响后续生成、发布和连接测试。"
-      )
-    ) {
-      return
-    }
-
     setIsResetting(true)
     setError(null)
     setNotice(null)
     try {
       const response = await resetSettingsConfig()
       setSettings(response.config)
+      setSavedSettings(response.config)
       setConfigured(response.configured)
       setLlmModels([])
       void refreshDiagnostics()
       setNotice("设置已重置为默认值。")
+      toast({ title: "系统设置已重置", variant: "success" })
     } catch (resetError) {
       setError(readableError(resetError))
     } finally {
@@ -410,9 +514,7 @@ export function SettingsWorkspace() {
     setComfyActionState("testing")
     setComfyStatus(null)
     try {
-      const response = await testComfyuiConnection(
-        settings.comfyui.comfyui_url
-      )
+      const response = await testComfyuiConnection(settings.comfyui.comfyui_url)
       setComfyStatus({ ok: response.ok, message: response.message })
     } catch (testError) {
       setComfyStatus({ ok: false, message: readableError(testError) })
@@ -451,7 +553,9 @@ export function SettingsWorkspace() {
     setBufferActionState("loading")
     setBufferStatus(null)
     try {
-      const response = await fetchBufferChannels(settings.publish.buffer.api_key)
+      const response = await fetchBufferChannels(
+        settings.publish.buffer.api_key
+      )
       setBufferChannels(response.channels)
       const detectedChannels = response.detected_channels
       const detectedPlatforms = Object.keys(detectedChannels)
@@ -484,138 +588,370 @@ export function SettingsWorkspace() {
   }
 
   return (
-    <main className="flex max-w-[1240px] flex-col gap-5 p-4 lg:p-6">
-      <Tabs onValueChange={setActiveTab} value={activeTab}>
-        <TabsList>
-          <TabsTrigger value="general">系统设置</TabsTrigger>
-          <TabsTrigger value="templates">模板状态</TabsTrigger>
-          <TabsTrigger value="help">帮助</TabsTrigger>
-        </TabsList>
-
-        <TabsContent className="mt-4" value="templates">
-          <TemplateStatusPanel />
-        </TabsContent>
-
-        <TabsContent className="mt-4" value="help">
-          <HelpWorkspace />
-        </TabsContent>
-
-        <TabsContent className="mt-4" value="general">
-      <Card className="rounded-lg">
-        <CardHeader className="border-b">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <CardTitle>系统设置</CardTitle>
-              <CardDescription>
-                LLM、生成服务、语音、发布服务使用同一份配置。
-              </CardDescription>
-            </div>
+    <PageFrame>
+      <WorkspaceHeader
+        actions={
+          <>
             <Badge variant={configured ? "secondary" : "destructive"}>
-              {configured ? "配置可用" : "LLM 未完成"}
+              {configured ? "关键配置可用" : "AI 配置未完成"}
             </Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {loadState === "loading" && (
-            <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              正在读取设置
-            </div>
-          )}
+            <Button
+              aria-label="刷新系统设置"
+              disabled={isRefreshing}
+              onClick={() => {
+                setIsRefreshing(true)
+                setReloadToken((token) => token + 1)
+              }}
+              size="icon-sm"
+              variant="outline"
+            >
+              <RefreshCw className={cn(isRefreshing && "animate-spin")} />
+            </Button>
+          </>
+        }
+        description="管理项目、模型、生成引擎、发布与配方。每个分区独立保存。"
+        title="设置中心"
+      />
 
-          {loadState === "error" && error && (
-            <InlineError title="设置读取失败" message={error} />
-          )}
+      {loadState === "stale" ? (
+        <AsyncState
+          action={
+            <Button
+              onClick={() => {
+                setIsRefreshing(true)
+                setReloadToken((token) => token + 1)
+              }}
+              size="sm"
+              variant="outline"
+            >
+              重新读取
+            </Button>
+          }
+          description={error}
+          state="stale"
+          title="系统设置可能不是最新状态"
+        />
+      ) : null}
 
-          {loadState === "ready" && settings && (
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <nav
+          aria-label="设置分区"
+          className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-2 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0"
+        >
+          {SETTINGS_NAV.map((item) => {
+            const Icon = item.icon
+            const active = item.view === activeView
+            const dirty =
+              item.view === "ai-voice" ||
+              item.view === "generation" ||
+              item.view === "publish-storage"
+                ? dirtySections[item.view]
+                : false
+            return (
+              <a
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex min-h-14 w-48 shrink-0 snap-start items-center gap-3 rounded-lg px-3 outline-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 lg:w-full",
+                  active && "bg-muted"
+                )}
+                href={routeHref(
+                  settingsLink({ kind: "view", view: item.view })
+                )}
+                key={item.view}
+              >
+                <Icon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">
+                    {item.label}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {item.description}
+                  </span>
+                </span>
+                {dirty ? (
+                  <span
+                    aria-label="有未保存更改"
+                    className="size-2 rounded-full bg-warning"
+                  />
+                ) : null}
+              </a>
+            )
+          })}
+        </nav>
+
+        <div className="min-w-0">
+          {loadState === "loading" && requiresSettings(activeView) ? (
+            <AsyncState
+              description="正在同步配置与运行检查。"
+              state="loading"
+              title="正在读取系统设置"
+            />
+          ) : null}
+          {loadState === "error" && requiresSettings(activeView) ? (
+            <AsyncState
+              action={
+                <Button
+                  onClick={() => {
+                    setIsRefreshing(true)
+                    setReloadToken((token) => token + 1)
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  重试
+                </Button>
+              }
+              description={error}
+              state="error"
+              title="系统设置读取失败"
+            />
+          ) : null}
+
+          {activeView === "overview" && settings ? (
             <div className="flex flex-col gap-5">
+              <SettingsViewHeader
+                description="检查关键连接，控制专家选项并进入各配置分区。"
+                title="系统概览"
+              />
               <DiagnosticsPanel checks={diagnostics} ok={diagnosticsOk} />
-
-              <div className="scroll-mt-20 rounded-lg" id="projects">
-                <ProjectsPanel />
-              </div>
-
               <ExpertModeSection />
+              <div className="divide-y border-y">
+                <OverviewLink
+                  description="模型、密钥、语音服务与默认音色"
+                  label="AI 与语音"
+                  view="ai-voice"
+                />
+                <OverviewLink
+                  description="生成节点、并发限制与资源清单"
+                  label="生成引擎"
+                  view="generation"
+                />
+                <OverviewLink
+                  description="社媒渠道映射与云存储"
+                  label="发布与存储"
+                  view="publish-storage"
+                />
+              </div>
+              <ResetSettingsDialog
+                isResetting={isResetting}
+                onReset={() => void resetSettings()}
+              />
+            </div>
+          ) : null}
 
-              <div className="grid gap-5 lg:grid-cols-2">
-                <Section id="llm" title="LLM">
-                  <Field label="AiHubMix API Key">
+          {activeView === "projects" ? <ProjectsPanel /> : null}
+
+          {activeView === "ai-voice" && settings ? (
+            <div className="flex flex-col gap-5">
+              <SettingsViewHeader
+                description="配置内容起草模型与 Fish Audio 语音服务。"
+                dirty={dirtySections["ai-voice"]}
+                onSave={() => void saveSettings("ai-voice")}
+                saving={savingSection === "ai-voice"}
+                title="AI 与语音"
+              />
+              <Section id="llm" title="内容起草模型">
+                <Field label="AiHubMix API Key">
+                  <Input
+                    onChange={(event) =>
+                      patchSettings({
+                        llm: { ...settings.llm, api_key: event.target.value },
+                      })
+                    }
+                    type="password"
+                    value={settings.llm.api_key}
+                  />
+                </Field>
+                <Field label="服务地址">
+                  <Input
+                    onChange={(event) =>
+                      patchSettings({
+                        llm: { ...settings.llm, base_url: event.target.value },
+                      })
+                    }
+                    value={settings.llm.base_url}
+                  />
+                </Field>
+                <Field label="默认模型">
+                  {llmModels.length > 0 ? (
+                    <Select
+                      onValueChange={(value) =>
+                        patchSettings({
+                          llm: { ...settings.llm, model: value },
+                        })
+                      }
+                      value={settings.llm.model}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {llmModels.map((model) => (
+                            <SelectItem key={model} value={model}>
+                              {model}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  ) : (
                     <Input
                       onChange={(event) =>
                         patchSettings({
-                          llm: { ...settings.llm, api_key: event.target.value },
+                          llm: { ...settings.llm, model: event.target.value },
                         })
                       }
-                      type="password"
-                      value={settings.llm.api_key}
+                      value={settings.llm.model}
+                    />
+                  )}
+                </Field>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={llmActionState !== "idle"}
+                    onClick={() => void loadModels()}
+                    variant="outline"
+                  >
+                    {llmActionState === "loading" ? (
+                      <Loader2
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
+                    ) : (
+                      <RefreshCw data-icon="inline-start" />
+                    )}
+                    加载模型
+                  </Button>
+                  <Button
+                    disabled={llmActionState !== "idle"}
+                    onClick={() => void testLlm()}
+                    variant="outline"
+                  >
+                    {llmActionState === "testing" ? (
+                      <Loader2
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
+                    ) : (
+                      <CheckCircle2 data-icon="inline-start" />
+                    )}
+                    测试连接
+                  </Button>
+                </div>
+                {llmStatus ? (
+                  <StatusMessage
+                    message={llmStatus.message}
+                    ok={llmStatus.ok}
+                  />
+                ) : null}
+              </Section>
+
+              <Section id="tts" title="Fish Audio">
+                <Field label="API Key">
+                  <Input
+                    onChange={(event) =>
+                      patchSettings({
+                        comfyui: {
+                          ...settings.comfyui,
+                          tts: {
+                            ...settings.comfyui.tts,
+                            fish_audio: {
+                              ...settings.comfyui.tts.fish_audio,
+                              api_key: event.target.value,
+                            },
+                          },
+                        },
+                      })
+                    }
+                    type="password"
+                    value={settings.comfyui.tts.fish_audio.api_key}
+                  />
+                </Field>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="模型">
+                    <Select
+                      onValueChange={(value) =>
+                        patchSettings({
+                          comfyui: {
+                            ...settings.comfyui,
+                            tts: {
+                              ...settings.comfyui.tts,
+                              fish_audio: {
+                                ...settings.comfyui.tts.fish_audio,
+                                model: value as "s1" | "s2-pro",
+                              },
+                            },
+                          },
+                        })
+                      }
+                      value={settings.comfyui.tts.fish_audio.model}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="s2-pro">S2 Pro</SelectItem>
+                          <SelectItem value="s1">S1</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="默认音色 ID">
+                    <Input
+                      onChange={(event) =>
+                        patchSettings({
+                          comfyui: {
+                            ...settings.comfyui,
+                            tts: {
+                              ...settings.comfyui.tts,
+                              fish_audio: {
+                                ...settings.comfyui.tts.fish_audio,
+                                reference_id: event.target.value,
+                              },
+                            },
+                          },
+                        })
+                      }
+                      value={settings.comfyui.tts.fish_audio.reference_id ?? ""}
                     />
                   </Field>
-                  <Field label="Base URL">
-                    <Input disabled value={settings.llm.base_url} />
-                  </Field>
-                  <Field label="默认模型">
-                    {llmModels.length > 0 ? (
-                      <select
-                        className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
-                        onChange={(event) =>
-                          patchSettings({
-                            llm: { ...settings.llm, model: event.target.value },
-                          })
-                        }
-                        value={settings.llm.model}
-                      >
-                        {llmModels.map((model) => (
-                          <option key={model} value={model}>
-                            {model}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <Input
-                        onChange={(event) =>
-                          patchSettings({
-                            llm: { ...settings.llm, model: event.target.value },
-                          })
-                        }
-                        value={settings.llm.model}
-                      />
-                    )}
-                  </Field>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Button
-                      disabled={llmActionState !== "idle"}
-                      onClick={() => void loadModels()}
-                      type="button"
-                      variant="outline"
-                    >
-                      {llmActionState === "loading" ? (
-                        <Loader2 className="animate-spin" data-icon="inline-start" />
-                      ) : (
-                        <RefreshCw data-icon="inline-start" />
-                      )}
-                      加载模型
-                    </Button>
-                    <Button
-                      disabled={llmActionState !== "idle"}
-                      onClick={() => void testLlm()}
-                      type="button"
-                      variant="outline"
-                    >
-                      {llmActionState === "testing" ? (
-                        <Loader2 className="animate-spin" data-icon="inline-start" />
-                      ) : (
-                        <CheckCircle2 data-icon="inline-start" />
-                      )}
-                      测试连接
-                    </Button>
-                  </div>
-                  {llmStatus && (
-                    <StatusMessage ok={llmStatus.ok} message={llmStatus.message} />
-                  )}
-                </Section>
+                </div>
+                <Field label="服务地址">
+                  <Input
+                    onChange={(event) =>
+                      patchSettings({
+                        comfyui: {
+                          ...settings.comfyui,
+                          tts: {
+                            ...settings.comfyui.tts,
+                            fish_audio: {
+                              ...settings.comfyui.tts.fish_audio,
+                              base_url: event.target.value,
+                            },
+                          },
+                        },
+                      })
+                    }
+                    value={settings.comfyui.tts.fish_audio.base_url}
+                  />
+                </Field>
+              </Section>
+            </div>
+          ) : null}
 
-                <Section title="ComfyUI / RunningHub">
-                  <Field label="ComfyUI URL">
+          {activeView === "generation" && settings ? (
+            <div className="flex flex-col gap-5">
+              <SettingsViewHeader
+                description="配置生成节点、算力限制与可用资源。"
+                dirty={dirtySections.generation}
+                onSave={() => void saveSettings("generation")}
+                saving={savingSection === "generation"}
+                title="生成引擎"
+              />
+              <Section id="comfyui" title="生成节点">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="ComfyUI 地址">
                     <Input
                       onChange={(event) =>
                         patchSettings({
@@ -642,25 +978,30 @@ export function SettingsWorkspace() {
                       value={settings.comfyui.comfyui_api_key ?? ""}
                     />
                   </Field>
-                  <Button
-                    disabled={comfyActionState !== "idle"}
-                    onClick={() => void testComfyui()}
-                    type="button"
-                    variant="outline"
-                  >
-                    {comfyActionState === "testing" ? (
-                      <Loader2 className="animate-spin" data-icon="inline-start" />
-                    ) : (
-                      <CheckCircle2 data-icon="inline-start" />
-                    )}
-                    测试 ComfyUI
-                  </Button>
-                  {comfyStatus && (
-                    <StatusMessage
-                      ok={comfyStatus.ok}
-                      message={comfyStatus.message}
+                </div>
+                <Button
+                  disabled={comfyActionState !== "idle"}
+                  onClick={() => void testComfyui()}
+                  variant="outline"
+                >
+                  {comfyActionState === "testing" ? (
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
                     />
+                  ) : (
+                    <CheckCircle2 data-icon="inline-start" />
                   )}
+                  测试连接
+                </Button>
+                {comfyStatus ? (
+                  <StatusMessage
+                    message={comfyStatus.message}
+                    ok={comfyStatus.ok}
+                  />
+                ) : null}
+                <Separator />
+                <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="RunningHub API Key">
                     <Input
                       onChange={(event) =>
@@ -675,501 +1016,521 @@ export function SettingsWorkspace() {
                       value={settings.comfyui.runninghub_api_key ?? ""}
                     />
                   </Field>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <Field label="并发数">
-                      <Input
-                        min={1}
-                        max={10}
-                        onChange={(event) =>
-                          patchSettings({
-                            comfyui: {
-                              ...settings.comfyui,
-                              runninghub_concurrent_limit: Number(
-                                event.target.value || 1
-                              ),
-                            },
-                          })
-                        }
-                        type="number"
-                        value={settings.comfyui.runninghub_concurrent_limit}
-                      />
-                    </Field>
-                    <Field label="超时秒数">
-                      <Input
-                        min={30}
-                        onChange={(event) =>
-                          patchSettings({
-                            comfyui: {
-                              ...settings.comfyui,
-                              runninghub_timeout: Number(event.target.value || 600),
-                            },
-                          })
-                        }
-                        type="number"
-                        value={settings.comfyui.runninghub_timeout ?? 600}
-                      />
-                    </Field>
-                    <Field label="实例类型">
-                      <select
-                        className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
-                        onChange={(event) =>
-                          patchSettings({
-                            comfyui: {
-                              ...settings.comfyui,
-                              runninghub_instance_type:
-                                event.target.value || null,
-                            },
-                          })
-                        }
-                        value={settings.comfyui.runninghub_instance_type ?? ""}
-                      >
-                        <option value="">24G</option>
-                        <option value="plus">48G</option>
-                      </select>
-                    </Field>
-                  </div>
-                  <Separator />
-                  <div className="flex flex-col gap-3">
-                    <div>
-                      <div className="text-sm font-medium">
-                        RunningHub Workflow
-                      </div>
-                      <div className="text-sm leading-6 text-muted-foreground">
-                        注册已有 RunningHub workflow，让生成页和模板配置可以选择它。
-                      </div>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-[120px_1fr]">
-                      <Field label="类型">
-                        <select
-                          className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
-                          onChange={(event) =>
-                            setRunninghubDraft((current) => ({
-                              ...current,
-                              kind: event.target.value as WorkflowKind,
-                            }))
-                          }
-                          value={runninghubDraft.kind}
-                        >
-                          <option value="video">Video</option>
-                          <option value="image">Image</option>
-                          <option value="tts">TTS</option>
-                        </select>
-                      </Field>
-                      <Field label="本地名称">
-                        <Input
-                          onChange={(event) =>
-                            setRunninghubDraft((current) => ({
-                              ...current,
-                              name: event.target.value,
-                            }))
-                          }
-                          placeholder="wan2_2_custom"
-                          value={runninghubDraft.name}
-                        />
-                      </Field>
-                    </div>
-                    <Field label="RunningHub Workflow ID">
-                      <Input
-                        inputMode="numeric"
-                        onChange={(event) =>
-                          setRunninghubDraft((current) => ({
-                            ...current,
-                            workflowId: event.target.value,
-                          }))
-                        }
-                        placeholder="1985909483975188481"
-                        value={runninghubDraft.workflowId}
-                      />
-                    </Field>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        checked={runninghubDraft.overwrite}
-                        onChange={(event) =>
-                          setRunninghubDraft((current) => ({
-                            ...current,
-                            overwrite: event.target.checked,
-                          }))
-                        }
-                        type="checkbox"
-                      />
-                      覆盖同名 workflow
-                    </label>
-                    <Button
-                      disabled={
-                        runninghubActionState !== "idle" ||
-                        !runninghubDraft.name.trim() ||
-                        !runninghubDraft.workflowId.trim()
+                  <Field label="实例规格">
+                    <Select
+                      onValueChange={(value) =>
+                        patchSettings({
+                          comfyui: {
+                            ...settings.comfyui,
+                            runninghub_instance_type:
+                              value === "standard" ? null : value,
+                          },
+                        })
                       }
-                      onClick={() => void addWorkflow()}
-                      type="button"
-                      variant="outline"
+                      value={
+                        settings.comfyui.runninghub_instance_type || "standard"
+                      }
                     >
-                      {runninghubActionState === "saving" ? (
-                        <Loader2 className="animate-spin" data-icon="inline-start" />
-                      ) : (
-                        <Plus data-icon="inline-start" />
-                      )}
-                      添加 Workflow
-                    </Button>
-                    {runninghubStatus && (
-                      <StatusMessage
-                        ok={runninghubStatus.ok}
-                        message={runninghubStatus.message}
-                      />
-                    )}
-                    {runninghubWorkflows.length > 0 && (
-                      <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-5">
-                        {runninghubWorkflows.slice(0, 5).map((workflow) => (
-                          <div key={workflow.key}>
-                            {workflow.key}
-                            {" -> "}
-                            workflow_id={workflow.workflow_id}
-                          </div>
-                        ))}
-                        {runninghubWorkflows.length > 5 && (
-                          <div className="text-muted-foreground">
-                            还有 {runninghubWorkflows.length - 5} 个 workflow
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </Section>
-
-                <Section id="tts" title="Fish Audio">
-                  <Field label="API Key">
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="standard">24 GB</SelectItem>
+                          <SelectItem value="plus">48 GB</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="并发数">
                     <Input
+                      max={10}
+                      min={1}
                       onChange={(event) =>
                         patchSettings({
                           comfyui: {
                             ...settings.comfyui,
-                            tts: {
-                              ...settings.comfyui.tts,
-                              fish_audio: {
-                                ...settings.comfyui.tts.fish_audio,
-                                api_key: event.target.value,
-                              },
-                            },
+                            runninghub_concurrent_limit: Number(
+                              event.target.value || 1
+                            ),
                           },
                         })
                       }
-                      type="password"
-                      value={settings.comfyui.tts.fish_audio.api_key}
+                      type="number"
+                      value={settings.comfyui.runninghub_concurrent_limit}
                     />
                   </Field>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="模型">
-                      <select
-                        className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
-                        onChange={(event) =>
-                          patchSettings({
-                            comfyui: {
-                              ...settings.comfyui,
-                              tts: {
-                                ...settings.comfyui.tts,
-                                fish_audio: {
-                                  ...settings.comfyui.tts.fish_audio,
-                                  model: event.target.value as "s1" | "s2-pro",
-                                },
-                              },
-                            },
-                          })
+                  <Field label="超时秒数">
+                    <Input
+                      min={30}
+                      onChange={(event) =>
+                        patchSettings({
+                          comfyui: {
+                            ...settings.comfyui,
+                            runninghub_timeout: Number(
+                              event.target.value || 600
+                            ),
+                          },
+                        })
+                      }
+                      type="number"
+                      value={settings.comfyui.runninghub_timeout ?? 600}
+                    />
+                  </Field>
+                </div>
+              </Section>
+
+              {expertMode ? (
+                <Section id="runninghub" title="专家：注册生成流程">
+                  <div className="grid gap-4 sm:grid-cols-[140px_minmax(0,1fr)]">
+                    <Field label="产物类型">
+                      <Select
+                        onValueChange={(value) =>
+                          setRunninghubDraft((current) => ({
+                            ...current,
+                            kind: value as WorkflowKind,
+                          }))
                         }
-                        value={settings.comfyui.tts.fish_audio.model}
+                        value={runninghubDraft.kind}
                       >
-                        <option value="s2-pro">s2-pro</option>
-                        <option value="s1">s1</option>
-                      </select>
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="video">视频</SelectItem>
+                            <SelectItem value="image">图片</SelectItem>
+                            <SelectItem value="tts">语音</SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
                     </Field>
-                    <Field label="Reference ID">
+                    <Field label="显示名称">
                       <Input
                         onChange={(event) =>
-                          patchSettings({
-                            comfyui: {
-                              ...settings.comfyui,
-                              tts: {
-                                ...settings.comfyui.tts,
-                                fish_audio: {
-                                  ...settings.comfyui.tts.fish_audio,
-                                  reference_id: event.target.value,
-                                },
-                              },
-                            },
-                          })
+                          setRunninghubDraft((current) => ({
+                            ...current,
+                            name: event.target.value,
+                          }))
                         }
-                        value={settings.comfyui.tts.fish_audio.reference_id ?? ""}
+                        value={runninghubDraft.name}
                       />
                     </Field>
                   </div>
-                  <Field label="Base URL">
+                  <Field label="流程 ID">
                     <Input
+                      inputMode="numeric"
                       onChange={(event) =>
-                        patchSettings({
-                          comfyui: {
-                            ...settings.comfyui,
-                            tts: {
-                              ...settings.comfyui.tts,
-                              fish_audio: {
-                                ...settings.comfyui.tts.fish_audio,
-                                base_url: event.target.value,
-                              },
-                            },
-                          },
-                        })
+                        setRunninghubDraft((current) => ({
+                          ...current,
+                          workflowId: event.target.value,
+                        }))
                       }
-                      value={settings.comfyui.tts.fish_audio.base_url}
+                      value={runninghubDraft.workflowId}
                     />
                   </Field>
-                </Section>
-
-                <Section title="资源清单">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <ResourceMetric
-                      label="BGM"
-                      value={resourceState.bgm.length}
-                    />
-                    <ResourceMetric
-                      label="Frame templates"
-                      value={resourceState.frameTemplates.length}
-                    />
-                    <ResourceMetric
-                      label="Media workflows"
-                      value={resourceState.mediaWorkflows.length}
-                    />
-                    <ResourceMetric
-                      label="TTS workflows"
-                      value={resourceState.ttsWorkflows.length}
-                    />
-                  </div>
-                  {resourceError && (
-                    <InlineError title="资源读取失败" message={resourceError} />
-                  )}
-                  <div className="rounded-lg bg-muted/40 p-3 text-sm leading-6 text-muted-foreground">
-                    这些资源来自后端 `/api/resources/*`，供生成页和模板配置使用；provider
-                    选择仍然不进入普通生成主流程。
-                  </div>
-                </Section>
-
-                <Section title="发布">
-                  <Field label="Buffer API Key">
-                    <Input
+                  <label className="flex min-h-11 items-center gap-2 text-sm">
+                    <input
+                      checked={runninghubDraft.overwrite}
+                      className="size-4 accent-primary"
                       onChange={(event) =>
-                        patchSettings({
-                          publish: {
-                            ...settings.publish,
-                            buffer: {
-                              ...settings.publish.buffer,
-                              api_key: event.target.value,
-                            },
-                          },
-                        })
+                        setRunninghubDraft((current) => ({
+                          ...current,
+                          overwrite: event.target.checked,
+                        }))
                       }
-                      type="password"
-                      value={settings.publish.buffer.api_key}
+                      type="checkbox"
                     />
-                  </Field>
+                    覆盖同名流程
+                  </label>
                   <Button
-                    disabled={bufferActionState !== "idle"}
-                    onClick={() => void fetchChannels()}
-                    type="button"
+                    disabled={
+                      runninghubActionState !== "idle" ||
+                      !runninghubDraft.name.trim() ||
+                      !runninghubDraft.workflowId.trim()
+                    }
+                    onClick={() => void addWorkflow()}
                     variant="outline"
                   >
-                    {bufferActionState === "loading" ? (
-                      <Loader2 className="animate-spin" data-icon="inline-start" />
+                    {runninghubActionState === "saving" ? (
+                      <Loader2
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
                     ) : (
-                      <RefreshCw data-icon="inline-start" />
+                      <Plus data-icon="inline-start" />
                     )}
-                    拉取 Buffer Channels
+                    添加流程
                   </Button>
-                  {bufferStatus && (
+                  {runninghubStatus ? (
                     <StatusMessage
-                      ok={bufferStatus.ok}
-                      message={bufferStatus.message}
+                      message={runninghubStatus.message}
+                      ok={runninghubStatus.ok}
                     />
-                  )}
-                  {bufferChannels.length > 0 && (
-                    <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-5">
-                      {bufferChannels.slice(0, 5).map((channel) => (
-                        <div key={channel.id ?? channel.displayName ?? channel.name}>
-                          {formatBufferChannel(channel)}
+                  ) : null}
+                  {runninghubWorkflows.length > 0 ? (
+                    <div className="divide-y border-y font-mono text-xs">
+                      {runninghubWorkflows.slice(0, 5).map((workflow) => (
+                        <div className="py-2" key={workflow.key}>
+                          {workflow.key} · {workflow.workflow_id}
                         </div>
                       ))}
-                      {bufferChannels.length > 5 && (
-                        <div className="text-muted-foreground">
-                          还有 {bufferChannels.length - 5} 个 channel
-                        </div>
-                      )}
                     </div>
-                  )}
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {Object.entries(platformLabels).map(([platform, label]) => (
-                      <Field key={platform} label={`${label} Channel ID`}>
-                        <Input
-                          onChange={(event) =>
-                            patchSettings({
-                              publish: {
-                                ...settings.publish,
-                                buffer: {
-                                  ...settings.publish.buffer,
-                                  channels: {
-                                    ...settings.publish.buffer.channels,
-                                    [platform]: event.target.value,
-                                  },
-                                },
-                              },
-                            })
-                          }
-                          value={settings.publish.buffer.channels[platform] ?? ""}
-                        />
-                      </Field>
-                    ))}
-                  </div>
-                  <Separator />
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="COS Region">
-                      <Input
-                        onChange={(event) =>
-                          patchSettings({
-                            publish: {
-                              ...settings.publish,
-                              cos: {
-                                ...settings.publish.cos,
-                                region: event.target.value,
-                              },
-                            },
-                          })
-                        }
-                        value={settings.publish.cos.region}
-                      />
-                    </Field>
-                    <Field label="COS Bucket">
-                      <Input
-                        onChange={(event) =>
-                          patchSettings({
-                            publish: {
-                              ...settings.publish,
-                              cos: {
-                                ...settings.publish.cos,
-                                bucket: event.target.value,
-                              },
-                            },
-                          })
-                        }
-                        value={settings.publish.cos.bucket}
-                      />
-                    </Field>
-                    <Field label="COS SecretId">
-                      <Input
-                        onChange={(event) =>
-                          patchSettings({
-                            publish: {
-                              ...settings.publish,
-                              cos: {
-                                ...settings.publish.cos,
-                                secret_id: event.target.value,
-                              },
-                            },
-                          })
-                        }
-                        type="password"
-                        value={settings.publish.cos.secret_id}
-                      />
-                    </Field>
-                    <Field label="COS SecretKey">
-                      <Input
-                        onChange={(event) =>
-                          patchSettings({
-                            publish: {
-                              ...settings.publish,
-                              cos: {
-                                ...settings.publish.cos,
-                                secret_key: event.target.value,
-                              },
-                            },
-                          })
-                        }
-                        type="password"
-                        value={settings.publish.cos.secret_key}
-                      />
-                    </Field>
-                  </div>
-                  <Field label="COS Public Base URL">
-                    <Input
-                      onChange={(event) =>
-                        patchSettings({
-                          publish: {
-                            ...settings.publish,
-                            cos: {
-                              ...settings.publish.cos,
-                              public_base_url: event.target.value,
-                            },
-                          },
-                        })
-                      }
-                      value={settings.publish.cos.public_base_url}
-                    />
-                  </Field>
-                  <Field label="COS Endpoint URL">
-                    <Input
-                      onChange={(event) =>
-                        patchSettings({
-                          publish: {
-                            ...settings.publish,
-                            cos: {
-                              ...settings.publish.cos,
-                              endpoint_url: event.target.value,
-                            },
-                          },
-                        })
-                      }
-                      value={settings.publish.cos.endpoint_url ?? ""}
-                    />
-                  </Field>
+                  ) : null}
                 </Section>
-              </div>
+              ) : null}
 
-              {error && <InlineError title="设置保存失败" message={error} />}
-              {notice && (
-                <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-primary">
-                  {notice}
+              <Section id="resources" title="资源清单">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <ResourceMetric
+                    label="背景音乐"
+                    value={resourceState.bgm.length}
+                  />
+                  <ResourceMetric
+                    label="画面模板"
+                    value={resourceState.frameTemplates.length}
+                  />
+                  <ResourceMetric
+                    label="媒体流程"
+                    value={resourceState.mediaWorkflows.length}
+                  />
+                  <ResourceMetric
+                    label="语音流程"
+                    value={resourceState.ttsWorkflows.length}
+                  />
                 </div>
-              )}
+                {resourceError ? (
+                  <InlineError message={resourceError} title="资源读取失败" />
+                ) : null}
+              </Section>
+            </div>
+          ) : null}
 
-              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          {activeView === "publish-storage" && settings ? (
+            <div className="flex flex-col gap-5">
+              <SettingsViewHeader
+                description="配置发布渠道映射与腾讯云对象存储。"
+                dirty={dirtySections["publish-storage"]}
+                onSave={() => void saveSettings("publish-storage")}
+                saving={savingSection === "publish-storage"}
+                title="发布与存储"
+              />
+              <Section id="buffer" title="社媒发布">
+                <Field label="Buffer API Key">
+                  <Input
+                    onChange={(event) =>
+                      patchSettings({
+                        publish: {
+                          ...settings.publish,
+                          buffer: {
+                            ...settings.publish.buffer,
+                            api_key: event.target.value,
+                          },
+                        },
+                      })
+                    }
+                    type="password"
+                    value={settings.publish.buffer.api_key}
+                  />
+                </Field>
                 <Button
-                  disabled={isSaving || isResetting}
-                  onClick={() => void resetSettings()}
-                  size="lg"
-                  type="button"
-                  variant="destructive"
+                  disabled={bufferActionState !== "idle"}
+                  onClick={() => void fetchChannels()}
+                  variant="outline"
                 >
-                  {isResetting ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
+                  {bufferActionState === "loading" ? (
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
                   ) : (
                     <RefreshCw data-icon="inline-start" />
                   )}
-                  重置设置
+                  读取发布渠道
                 </Button>
-                <Button
-                  disabled={isSaving || isResetting}
-                  onClick={() => void saveSettings()}
-                  size="lg"
-                >
-                  {isSaving ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
-                  ) : (
-                    <Save data-icon="inline-start" />
-                  )}
-                  保存设置
-                </Button>
-              </div>
+                {bufferStatus ? (
+                  <StatusMessage
+                    message={bufferStatus.message}
+                    ok={bufferStatus.ok}
+                  />
+                ) : null}
+                {bufferChannels.length > 0 ? (
+                  <div className="divide-y border-y text-xs">
+                    {bufferChannels.slice(0, 5).map((channel) => (
+                      <div
+                        className="py-2"
+                        key={channel.id ?? channel.displayName ?? channel.name}
+                      >
+                        {formatBufferChannel(channel)}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {Object.entries(platformLabels).map(([platform, label]) => (
+                    <Field key={platform} label={`${label} 渠道 ID`}>
+                      <Input
+                        onChange={(event) =>
+                          patchSettings({
+                            publish: {
+                              ...settings.publish,
+                              buffer: {
+                                ...settings.publish.buffer,
+                                channels: {
+                                  ...settings.publish.buffer.channels,
+                                  [platform]: event.target.value,
+                                },
+                              },
+                            },
+                          })
+                        }
+                        value={settings.publish.buffer.channels[platform] ?? ""}
+                      />
+                    </Field>
+                  ))}
+                </div>
+              </Section>
+
+              <Section id="cos" title="云存储">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="地域">
+                    <Input
+                      onChange={(event) =>
+                        patchSettings({
+                          publish: {
+                            ...settings.publish,
+                            cos: {
+                              ...settings.publish.cos,
+                              region: event.target.value,
+                            },
+                          },
+                        })
+                      }
+                      value={settings.publish.cos.region}
+                    />
+                  </Field>
+                  <Field label="存储桶">
+                    <Input
+                      onChange={(event) =>
+                        patchSettings({
+                          publish: {
+                            ...settings.publish,
+                            cos: {
+                              ...settings.publish.cos,
+                              bucket: event.target.value,
+                            },
+                          },
+                        })
+                      }
+                      value={settings.publish.cos.bucket}
+                    />
+                  </Field>
+                  <Field label="Secret ID">
+                    <Input
+                      onChange={(event) =>
+                        patchSettings({
+                          publish: {
+                            ...settings.publish,
+                            cos: {
+                              ...settings.publish.cos,
+                              secret_id: event.target.value,
+                            },
+                          },
+                        })
+                      }
+                      type="password"
+                      value={settings.publish.cos.secret_id}
+                    />
+                  </Field>
+                  <Field label="Secret Key">
+                    <Input
+                      onChange={(event) =>
+                        patchSettings({
+                          publish: {
+                            ...settings.publish,
+                            cos: {
+                              ...settings.publish.cos,
+                              secret_key: event.target.value,
+                            },
+                          },
+                        })
+                      }
+                      type="password"
+                      value={settings.publish.cos.secret_key}
+                    />
+                  </Field>
+                </div>
+                <Field label="公开访问地址">
+                  <Input
+                    onChange={(event) =>
+                      patchSettings({
+                        publish: {
+                          ...settings.publish,
+                          cos: {
+                            ...settings.publish.cos,
+                            public_base_url: event.target.value,
+                          },
+                        },
+                      })
+                    }
+                    value={settings.publish.cos.public_base_url}
+                  />
+                </Field>
+                <Field label="自定义接入地址（可选）">
+                  <Input
+                    onChange={(event) =>
+                      patchSettings({
+                        publish: {
+                          ...settings.publish,
+                          cos: {
+                            ...settings.publish.cos,
+                            endpoint_url: event.target.value,
+                          },
+                        },
+                      })
+                    }
+                    value={settings.publish.cos.endpoint_url ?? ""}
+                  />
+                </Field>
+              </Section>
             </div>
-          )}
-        </CardContent>
-      </Card>
-        </TabsContent>
-      </Tabs>
-    </main>
+          ) : null}
+
+          {activeView === "recipes" ? <TemplateStatusPanel /> : null}
+          {activeView === "help" ? <HelpWorkspace /> : null}
+
+          {error && settings && requiresSettings(activeView) ? (
+            <div className="mt-5">
+              <InlineError message={error} title="设置保存失败" />
+            </div>
+          ) : null}
+          {notice ? (
+            <div
+              className="mt-5 rounded-lg border border-success/30 bg-success/10 p-3 text-sm text-success"
+              role="status"
+            >
+              {notice}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <UnsavedChangesGuard
+        allowSettingsViews
+        currentPath={path}
+        dirty={hasDirtySettings}
+      />
+    </PageFrame>
+  )
+}
+
+function SettingsViewHeader({
+  title,
+  description,
+  dirty = false,
+  saving = false,
+  onSave,
+}: {
+  title: string
+  description: string
+  dirty?: boolean
+  saving?: boolean
+  onSave?: () => void
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-4">
+      <div>
+        <h2 className="text-lg font-medium">{title}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      </div>
+      {onSave ? (
+        <div className="flex flex-col items-end gap-1.5">
+          <Button disabled={!dirty || saving} onClick={onSave}>
+            {saving ? (
+              <Loader2 className="animate-spin" data-icon="inline-start" />
+            ) : (
+              <Save data-icon="inline-start" />
+            )}
+            保存本分区
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            {dirty ? "有未保存更改" : "没有未保存更改"}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function OverviewLink({
+  label,
+  description,
+  view,
+}: {
+  label: string
+  description: string
+  view: SettingsView
+}) {
+  return (
+    <a
+      className="flex min-h-16 items-center justify-between gap-4 py-3 outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+      href={routeHref(settingsLink({ kind: "view", view }))}
+    >
+      <span>
+        <span className="block text-sm font-medium">{label}</span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">
+          {description}
+        </span>
+      </span>
+      <span className="shrink-0 text-sm text-primary">打开</span>
+    </a>
+  )
+}
+
+function ResetSettingsDialog({
+  isResetting,
+  onReset,
+}: {
+  isResetting: boolean
+  onReset: () => void
+}) {
+  return (
+    <section className="border-t pt-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-medium">恢复系统默认值</h3>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+            重置 AI、语音、生成、发布与存储配置。项目和已生成作品不会被删除。
+          </p>
+        </div>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button disabled={isResetting} variant="destructive">
+              {isResetting ? (
+                <Loader2 className="animate-spin" data-icon="inline-start" />
+              ) : (
+                <RefreshCw data-icon="inline-start" />
+              )}
+              重置系统设置
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>重置所有系统设置？</AlertDialogTitle>
+              <AlertDialogDescription>
+                AI、语音、生成服务、发布渠道与存储配置会恢复默认值。项目、配方和作品不会删除，此操作无法撤销。
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogAction onClick={onReset}>
+                重置系统设置
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </section>
   )
 }
 
@@ -1179,8 +1540,7 @@ function ExpertModeSection() {
     <Section title="专家模式">
       <div className="flex items-start justify-between gap-4">
         <p className="text-sm leading-6 text-muted-foreground">
-          开启后，生成页高级设置会显示画面 / TTS workflow 等底层覆盖项，
-          模板状态页可编辑模板级默认生成配置。日常使用建议保持关闭。
+          开启后显示生成流程、底层覆盖项与配方默认配置。日常生产建议保持关闭。
         </p>
         <Switch
           aria-label="专家模式"
@@ -1198,27 +1558,18 @@ function Section({
   id,
 }: {
   title: string
-  children: React.ReactNode
+  children: ReactNode
   id?: string
 }) {
   return (
-    <div className="scroll-mt-20 rounded-lg border bg-background p-4" id={id}>
-      <div className="mb-4 flex items-center gap-2 text-sm font-semibold">
-        <Settings className="size-4" />
-        {title}
-      </div>
-      <div className="flex flex-col gap-3">{children}</div>
-    </div>
+    <section className="scroll-mt-20 border-b pb-5" id={id}>
+      <h3 className="mb-4 text-sm font-medium">{title}</h3>
+      <div className="flex max-w-3xl flex-col gap-4">{children}</div>
+    </section>
   )
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string
-  children: React.ReactNode
-}) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-1.5">
       <span className="text-sm font-medium">{label}</span>
@@ -1229,10 +1580,10 @@ function Field({
 
 function ResourceMetric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border bg-muted/30 p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold">{value}</div>
-    </div>
+    <dl>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-1 text-lg font-medium">{value}</dd>
+    </dl>
   )
 }
 
@@ -1251,12 +1602,12 @@ function DiagnosticsPanel({
   ).length
 
   return (
-    <div className="rounded-lg border bg-background p-4">
+    <section className="border-b pb-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="text-sm font-semibold">生产前置检查</div>
           <div className="mt-1 text-sm leading-6 text-muted-foreground">
-            这些检查帮助判断 React 生成、语音、合成和发布链路是否具备生产前置条件。
+            检查内容生成、语音、合成和发布是否具备运行条件。
           </div>
         </div>
         <Badge variant={ok ? "secondary" : "destructive"}>
@@ -1264,21 +1615,21 @@ function DiagnosticsPanel({
         </Badge>
       </div>
 
-      <div className="mt-4 grid gap-2 lg:grid-cols-2">
+      <div className="mt-4 divide-y border-y">
         {checks.map((check) => (
           <div
-            className="rounded-lg border bg-muted/20 p-3 text-sm"
+            className="flex flex-wrap items-start justify-between gap-3 py-3 text-sm"
             key={check.id}
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
               <div className="font-medium">{check.label}</div>
-              <Badge variant={diagnosticBadgeVariant(check)}>
-                {diagnosticBadgeLabel(check)}
-              </Badge>
+              <div className="mt-1 leading-6 text-muted-foreground">
+                {check.message}
+              </div>
             </div>
-            <div className="mt-2 leading-6 text-muted-foreground">
-              {check.message}
-            </div>
+            <Badge variant={diagnosticBadgeVariant(check)}>
+              {diagnosticBadgeLabel(check)}
+            </Badge>
           </div>
         ))}
       </div>
@@ -1288,7 +1639,7 @@ function DiagnosticsPanel({
           还有 {warningCount} 项不会阻塞页面使用，但会影响部分生成或发布能力。
         </div>
       )}
-    </div>
+    </section>
   )
 }
 
@@ -1297,25 +1648,11 @@ function StatusMessage({ ok, message }: { ok: boolean; message: string }) {
     <div
       className={
         ok
-          ? "rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-primary"
+          ? "rounded-lg border border-success/30 bg-success/10 p-3 text-sm text-success"
           : "rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
       }
     >
       {message}
-    </div>
-  )
-}
-
-function InlineError({ title, message }: { title: string; message: string }) {
-  return (
-    <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-      <div className="flex items-start gap-2">
-        <AlertCircle className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <div className="font-medium">{title}</div>
-          <div className="mt-1 leading-6">{message}</div>
-        </div>
-      </div>
     </div>
   )
 }
@@ -1359,14 +1696,85 @@ function mergeSettings(
   }
 }
 
-function readableError(error: unknown) {
-  if (error instanceof ApiError) {
-    return error.message
-  }
+function requiresSettings(view: SettingsView) {
+  return (
+    view === "overview" ||
+    view === "ai-voice" ||
+    view === "generation" ||
+    view === "publish-storage"
+  )
+}
 
-  if (error instanceof Error) {
-    return error.message
-  }
+function isSettingsSectionDirty(
+  section: SaveSection,
+  settings: AppSettingsConfig | null,
+  savedSettings: AppSettingsConfig | null
+) {
+  if (!settings || !savedSettings) return false
+  return (
+    JSON.stringify(settingsSectionSnapshot(section, settings)) !==
+    JSON.stringify(settingsSectionSnapshot(section, savedSettings))
+  )
+}
 
-  return String(error)
+function settingsSectionSnapshot(
+  section: SaveSection,
+  settings: AppSettingsConfig
+) {
+  if (section === "ai-voice") {
+    return { llm: settings.llm, tts: settings.comfyui.tts }
+  }
+  if (section === "publish-storage") {
+    return settings.publish
+  }
+  const { tts, ...generation } = settings.comfyui
+  void tts
+  return generation
+}
+
+function settingsUpdateForSection(
+  section: SaveSection,
+  settings: AppSettingsConfig
+): SettingsConfigUpdate {
+  if (section === "ai-voice") {
+    return { llm: settings.llm, comfyui: { tts: settings.comfyui.tts } }
+  }
+  if (section === "publish-storage") {
+    return { publish: settings.publish }
+  }
+  const { tts, ...generation } = settings.comfyui
+  void tts
+  return { comfyui: generation }
+}
+
+function reconcileSavedSection(
+  section: SaveSection,
+  server: AppSettingsConfig,
+  current: AppSettingsConfig
+): AppSettingsConfig {
+  if (section === "ai-voice") {
+    return {
+      ...current,
+      llm: server.llm,
+      comfyui: { ...current.comfyui, tts: server.comfyui.tts },
+    }
+  }
+  if (section === "publish-storage") {
+    return { ...current, publish: server.publish }
+  }
+  return {
+    ...current,
+    comfyui: { ...server.comfyui, tts: current.comfyui.tts },
+  }
+}
+
+function settingsSectionLabel(section: SaveSection) {
+  if (section === "ai-voice") return "AI 与语音"
+  if (section === "generation") return "生成引擎"
+  return "发布与存储"
+}
+
+function replaceHashPath(path: string) {
+  window.history.replaceState(null, "", `#${path}`)
+  window.dispatchEvent(new HashChangeEvent("hashchange"))
 }

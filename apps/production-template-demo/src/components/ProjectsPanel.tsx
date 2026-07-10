@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useState } from "react"
-import { Archive, Loader2, Pencil, Plus, RotateCcw, Star } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import {
+  Archive,
+  FolderKanban,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Star,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -7,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -33,6 +43,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/components/ui/toast"
 import { InlineError } from "@/components/shared/feedback"
+import { AsyncState } from "@/components/shared/AsyncState"
+import { EmptyState } from "@/components/shared/EmptyState"
 import { refreshProjects } from "@/lib/currentProject"
 import { readableError } from "@/lib/format"
 import { languageLabel } from "@/lib/languages"
@@ -52,6 +64,7 @@ import {
 } from "@/lib/generationApi"
 
 const NONE = "__none__"
+type LoadState = "loading" | "ready" | "error" | "stale"
 
 /**
  * 项目卡片列表（设置页）：看概况、新建、设默认、归档/恢复。
@@ -65,7 +78,9 @@ export function ProjectsPanel() {
   const [profiles, setProfiles] = useState<DraftingProfile[]>([])
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [loadState, setLoadState] = useState<LoadState>("loading")
+  const [isRefreshing, setIsRefreshing] = useState(true)
+  const hasDataRef = useRef(false)
   const [busy, setBusy] = useState(false)
 
   const [createOpen, setCreateOpen] = useState(false)
@@ -83,9 +98,14 @@ export function ProjectsPanel() {
           setProfiles(profileResponse.profiles)
           setTemplates(templateResponse.templates)
           setLoadError(null)
+          hasDataRef.current = true
+          setLoadState("ready")
         })
-        .catch((error: unknown) => setLoadError(readableError(error)))
-        .finally(() => setIsLoading(false)),
+        .catch((error: unknown) => {
+          setLoadError(readableError(error))
+          setLoadState(hasDataRef.current ? "stale" : "error")
+        })
+        .finally(() => setIsRefreshing(false)),
     []
   )
 
@@ -96,7 +116,8 @@ export function ProjectsPanel() {
   const templateName = (id: string | null) =>
     templates.find((template) => template.id === id)?.display_name ?? null
   const profileForProject = (project: Project) =>
-    profiles.find((profile) => profile.project_id === project.project_id) ?? null
+    profiles.find((profile) => profile.project_id === project.project_id) ??
+    null
 
   async function refreshAll() {
     await refresh()
@@ -141,7 +162,11 @@ export function ProjectsPanel() {
       toast({ title: "已设为默认项目", variant: "success" })
       await refreshAll()
     } catch (error) {
-      toast({ title: "设置失败", description: readableError(error), variant: "error" })
+      toast({
+        title: "设置失败",
+        description: readableError(error),
+        variant: "error",
+      })
     } finally {
       setBusy(false)
     }
@@ -154,7 +179,11 @@ export function ProjectsPanel() {
       toast({ title: "项目已归档", variant: "success" })
       await refreshAll()
     } catch (error) {
-      toast({ title: "归档失败", description: readableError(error), variant: "error" })
+      toast({
+        title: "归档失败",
+        description: readableError(error),
+        variant: "error",
+      })
     } finally {
       setBusy(false)
     }
@@ -167,13 +196,19 @@ export function ProjectsPanel() {
       toast({ title: "项目已恢复", variant: "success" })
       await refreshAll()
     } catch (error) {
-      toast({ title: "恢复失败", description: readableError(error), variant: "error" })
+      toast({
+        title: "恢复失败",
+        description: readableError(error),
+        variant: "error",
+      })
     } finally {
       setBusy(false)
     }
   }
 
-  const activeProjects = projects.filter((project) => project.status === "active")
+  const activeProjects = projects.filter(
+    (project) => project.status === "active"
+  )
   const archivedProjects = projects.filter(
     (project) => project.status === "archived"
   )
@@ -205,7 +240,9 @@ export function ProjectsPanel() {
               起草：{profile?.script_template_name ?? "默认"}
             </Badge>
             <Badge variant="outline">
-              模板：{templateName(project.default_production_template_id) ?? "内置默认"}
+              配方：
+              {templateName(project.default_production_template_id) ??
+                "内置默认"}
             </Badge>
             <Badge variant="outline">
               {project.languages.map(languageLabel).join(" / ") || "无语言"}
@@ -239,7 +276,9 @@ export function ProjectsPanel() {
                 </Button>
               )}
               <Button
-                onClick={() => navigate(`/settings/projects/${project.project_id}`)}
+                onClick={() =>
+                  navigate(`/settings/projects/${project.project_id}`)
+                }
                 size="sm"
                 variant="outline"
               >
@@ -259,7 +298,9 @@ export function ProjectsPanel() {
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>归档「{project.name}」？</AlertDialogTitle>
+                    <AlertDialogTitle>
+                      归档「{project.name}」？
+                    </AlertDialogTitle>
                     <AlertDialogDescription>
                       归档后从切换器隐藏，数据保留，可随时恢复。
                     </AlertDialogDescription>
@@ -282,39 +323,113 @@ export function ProjectsPanel() {
   }
 
   return (
-    <div className="rounded-lg border bg-background p-4">
-      <div className="mb-1 flex items-center justify-between gap-3">
-        <div className="text-sm font-semibold">项目</div>
-        <Button onClick={() => setCreateOpen(true)} size="sm" variant="outline">
-          <Plus data-icon="inline-start" />
-          新建项目
-        </Button>
-      </div>
-      <p className="text-sm leading-6 text-muted-foreground">
-        一个项目 = 一个品牌 / 内容线，管起草配置、默认模板、语言与音色、发布平台。
-        点「编辑」进入项目详情页配置。
-      </p>
-
-      {loadError && <InlineError title="读取失败" message={loadError} />}
-
-      {isLoading ? (
-        <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          正在读取项目
+    <section aria-labelledby="projects-heading" className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
+        <div>
+          <h2 className="text-lg font-medium" id="projects-heading">
+            项目
+          </h2>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+            每个项目代表一个品牌或内容线，管理起草、配方、语言音色与发布平台。
+          </p>
         </div>
-      ) : (
-        <div className="mt-3 flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <Button
+            aria-label="刷新项目"
+            disabled={isRefreshing}
+            onClick={() => {
+              setIsRefreshing(true)
+              void refresh()
+            }}
+            size="icon-sm"
+            variant="outline"
+          >
+            <RefreshCw className={cn(isRefreshing && "animate-spin")} />
+          </Button>
+          <Button onClick={() => setCreateOpen(true)} size="sm">
+            <Plus data-icon="inline-start" />
+            新建项目
+          </Button>
+        </div>
+      </div>
+
+      {loadState === "loading" ? (
+        <AsyncState
+          className="mt-5"
+          description="正在同步项目、起草配置与配方默认值。"
+          state="loading"
+          title="正在读取项目"
+        />
+      ) : null}
+      {loadState === "error" ? (
+        <AsyncState
+          action={
+            <Button
+              onClick={() => {
+                setIsRefreshing(true)
+                void refresh()
+              }}
+              size="sm"
+              variant="outline"
+            >
+              重试
+            </Button>
+          }
+          className="mt-5"
+          description={loadError}
+          state="error"
+          title="项目读取失败"
+        />
+      ) : null}
+      {loadState === "stale" ? (
+        <AsyncState
+          action={
+            <Button
+              onClick={() => {
+                setIsRefreshing(true)
+                void refresh()
+              }}
+              size="sm"
+              variant="outline"
+            >
+              重新读取
+            </Button>
+          }
+          className="mt-5"
+          description={loadError}
+          state="stale"
+          title="项目列表可能不是最新状态"
+        />
+      ) : null}
+
+      {loadState === "ready" && projects.length === 0 ? (
+        <EmptyState
+          actions={
+            <Button onClick={() => setCreateOpen(true)} size="sm">
+              <Plus data-icon="inline-start" />
+              新建项目
+            </Button>
+          }
+          className="mt-5"
+          description="创建第一个项目后，可以配置品牌专属的生产默认值。"
+          icon={FolderKanban}
+          title="还没有项目"
+        />
+      ) : null}
+
+      {projects.length > 0 ? (
+        <div className="mt-4 flex flex-col gap-2">
           {activeProjects.map(renderCard)}
-          {archivedProjects.length > 0 && (
+          {archivedProjects.length > 0 ? (
             <>
-              <div className="mt-2 text-xs font-medium text-muted-foreground">
+              <div className="mt-3 border-b pb-2 text-xs font-medium text-muted-foreground">
                 已归档
               </div>
               {archivedProjects.map(renderCard)}
             </>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       {/* 新建项目（3 个输入，轻量 Sheet 合规；创建后直接进详情页） */}
       <Sheet onOpenChange={setCreateOpen} open={createOpen}>
@@ -335,7 +450,9 @@ export function ProjectsPanel() {
               />
             </label>
             <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-xs text-muted-foreground">描述（可选）</span>
+              <span className="text-xs text-muted-foreground">
+                描述（可选）
+              </span>
               <Textarea
                 onChange={(event) => setCreateDescription(event.target.value)}
                 rows={2}
@@ -351,25 +468,34 @@ export function ProjectsPanel() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={NONE}>不复制</SelectItem>
-                  {activeProjects.map((project) => (
-                    <SelectItem key={project.project_id} value={project.project_id}>
-                      {project.name}
-                    </SelectItem>
-                  ))}
+                  <SelectGroup>
+                    <SelectItem value={NONE}>不复制</SelectItem>
+                    {activeProjects.map((project) => (
+                      <SelectItem
+                        key={project.project_id}
+                        value={project.project_id}
+                      >
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </label>
-            {createError && <InlineError title="创建失败" message={createError} />}
+            {createError && (
+              <InlineError title="创建失败" message={createError} />
+            )}
           </div>
           <SheetFooter>
             <Button disabled={busy} onClick={() => void doCreate()}>
-              {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
+              {busy && (
+                <Loader2 className="animate-spin" data-icon="inline-start" />
+              )}
               创建并进入配置
             </Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>
-    </div>
+    </section>
   )
 }

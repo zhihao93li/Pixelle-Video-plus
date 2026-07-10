@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Archive,
   ChevronRight,
   Copy,
   Loader2,
+  PanelsTopLeft,
+  RefreshCw,
   SlidersHorizontal,
   Trash2,
 } from "lucide-react"
@@ -11,13 +13,6 @@ import { Collapsible as CollapsiblePrimitive } from "radix-ui"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
@@ -41,7 +36,9 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/components/ui/toast"
-import { Fact, InlineError } from "@/components/shared/feedback"
+import { AsyncState } from "@/components/shared/AsyncState"
+import { EmptyState } from "@/components/shared/EmptyState"
+import { Fact, InlineError, TechDetails } from "@/components/shared/feedback"
 import { useExpertMode } from "@/lib/expertMode"
 import { readableError } from "@/lib/format"
 import { navigate } from "@/lib/router"
@@ -65,13 +62,13 @@ import {
  * 面向用户的模板浏览在「快速生产」Gallery；这里保留工程视角的状态明细。
  */
 
-type LoadState = "loading" | "ready" | "error"
+type LoadState = "loading" | "ready" | "error" | "stale"
 
 function statusLabel(status: ProductionTemplate["migration_status"]) {
   const labels = {
-    ready: "React 可提交",
-    partial: "部分迁移",
-    legacy_only: "Legacy only",
+    ready: "可用",
+    partial: "部分能力可用",
+    legacy_only: "仅保留历史入口",
     planned: "计划中",
   }
   return labels[status]
@@ -125,7 +122,7 @@ function TemplateCloneSheet({
         displayName: displayName.trim(),
         description: description.trim() || undefined,
       })
-      toast({ title: "已克隆模板", variant: "success" })
+      toast({ title: "已克隆配方", variant: "success" })
       setOpen(false)
       onCloned()
     } catch (cloneError) {
@@ -143,15 +140,15 @@ function TemplateCloneSheet({
       </Button>
       <SheetContent className="flex flex-col gap-4">
         <SheetHeader>
-          <SheetTitle>克隆生产模板</SheetTitle>
+          <SheetTitle>克隆生产配方</SheetTitle>
           <SheetDescription>
-            以「{template.display_name}」为基础新建一条风格线；画面、声音等默认继承源模板，可在设置里调整默认配置。
+            {`以「${template.display_name}」为基础新建一条风格线；画面、声音等默认继承源配方，可在设置里调整默认配置。`}
           </SheetDescription>
         </SheetHeader>
 
         <div className="flex flex-col gap-4 px-4">
           <label className="flex flex-col gap-1.5 text-sm">
-            <span className="text-xs text-muted-foreground">模板名称</span>
+            <span className="text-xs text-muted-foreground">配方名称</span>
             <Input
               onChange={(event) => setDisplayName(event.target.value)}
               placeholder="给这条风格线起个名字"
@@ -199,7 +196,7 @@ function TemplateDeleteButton({
     setIsDeleting(true)
     try {
       await deleteProductionTemplate(template.id)
-      toast({ title: "已删除自定义模板", variant: "success" })
+      toast({ title: "已删除自定义配方", variant: "success" })
       onDeleted()
     } catch (deleteError) {
       toast({
@@ -222,15 +219,14 @@ function TemplateDeleteButton({
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>删除这条自定义模板？</AlertDialogTitle>
+          <AlertDialogTitle>删除这条自定义配方？</AlertDialogTitle>
           <AlertDialogDescription>
-            删除后「{template.display_name}」会从所有列表消失，已用它生成的作品不受影响。此操作不可撤销。
+            {`删除后「${template.display_name}」会从所有列表消失，已用它生成的作品不受影响。此操作不可撤销。`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
           <AlertDialogAction
-            className="bg-destructive text-white hover:bg-destructive/90"
             disabled={isDeleting}
             onClick={() => void remove()}
           >
@@ -261,7 +257,7 @@ function TemplateEnabledControl({
     setIsSaving(true)
     try {
       await setTemplateEnabled(template.id, next)
-      toast({ title: next ? "已启用模板" : "已停用模板", variant: "success" })
+      toast({ title: next ? "已启用配方" : "已停用配方", variant: "success" })
       setConfirmOpen(false)
       onChanged()
     } catch (toggleError) {
@@ -281,7 +277,7 @@ function TemplateEnabledControl({
         {template.enabled ? "已启用" : "已停用"}
       </span>
       <Switch
-        aria-label={template.enabled ? "停用模板" : "启用模板"}
+        aria-label={template.enabled ? "停用配方" : "启用配方"}
         checked={template.enabled}
         disabled={isSaving || lockedByProject}
         onCheckedChange={(next) => {
@@ -301,15 +297,16 @@ function TemplateEnabledControl({
       <AlertDialog onOpenChange={setConfirmOpen} open={confirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>停用「{template.display_name}」？</AlertDialogTitle>
+            <AlertDialogTitle>
+              停用「{template.display_name}」？
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              停用后它不再出现在快速生产和各处模板选择里；已用它生成的作品与历史不受影响，随时可重新启用。
+              停用后它不再出现在快速生产和各处配方选择里；已用它生成的作品与历史不受影响，随时可重新启用。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-white hover:bg-destructive/90"
               disabled={isSaving}
               onClick={() => void apply(false)}
             >
@@ -343,7 +340,7 @@ function RetiredTemplatesGroup({
           className={cn("size-3.5 transition-transform", open && "rotate-90")}
         />
         <Archive className="size-3.5 text-muted-foreground" />
-        已退役模板
+        已退役配方
         <Badge variant="outline">{templates.length}</Badge>
         <span className="ml-1 text-xs font-normal text-muted-foreground">
           只读 · 历史作品不受影响
@@ -363,9 +360,6 @@ function RetiredTemplatesGroup({
                 </div>
                 <Badge variant="outline">已退役</Badge>
               </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {template.id}
-              </div>
               {template.migration_notes && (
                 <div className="mt-3 rounded-lg bg-muted/40 p-3 text-sm leading-6 text-muted-foreground">
                   {template.migration_notes}
@@ -383,12 +377,15 @@ export function TemplateStatusPanel() {
   const [loadState, setLoadState] = useState<LoadState>("loading")
   const [error, setError] = useState<string | null>(null)
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
+  const [isRefreshing, setIsRefreshing] = useState(true)
+  const hasDataRef = useRef(false)
   const [projectDefaults, setProjectDefaults] = useState<
     Record<string, string[]>
   >({})
   const expertMode = useExpertMode()
 
   const reload = useCallback(async () => {
+    setIsRefreshing(true)
     try {
       const [response, projectResponse] = await Promise.all([
         listTemplates(),
@@ -403,10 +400,14 @@ export function TemplateStatusPanel() {
         }
       }
       setProjectDefaults(usage)
+      setError(null)
+      hasDataRef.current = true
       setLoadState("ready")
     } catch (loadError) {
       setError(readableError(loadError))
-      setLoadState("error")
+      setLoadState(hasDataRef.current ? "stale" : "error")
+    } finally {
+      setIsRefreshing(false)
     }
   }, [])
 
@@ -417,155 +418,224 @@ export function TemplateStatusPanel() {
     void initialLoad()
   }, [reload])
 
-  const readyCount = templates.filter((template) => template.enabled).length
-  const legacyCount = templates.filter(
-    (template) => template.migration_status === "legacy_only"
-  ).length
-  const plannedCount = templates.filter(
-    (template) => template.migration_status === "planned"
-  ).length
   const retiredTemplates = templates.filter(isRetiredTemplate)
   const visibleTemplates = templates.filter(
     (template) => !isRetiredTemplate(template)
   )
+  const readyCount = visibleTemplates.filter(
+    (template) =>
+      template.enabled &&
+      (template.migration_status === "ready" ||
+        template.migration_status === "partial")
+  ).length
+  const legacyCount = visibleTemplates.filter(
+    (template) => template.migration_status === "legacy_only"
+  ).length
+  const plannedCount = visibleTemplates.filter(
+    (template) => template.migration_status === "planned"
+  ).length
 
   return (
-    <Card className="rounded-lg">
-      <CardHeader className="border-b">
-        <CardTitle>模板与迁移状态</CardTitle>
-        <CardDescription>
-          团队内部视角：各生产模板的入口、pipeline 与迁移进度。
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loadState === "loading" && (
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            正在读取模板状态
+    <section aria-labelledby="recipes-heading" className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
+        <div>
+          <h2 className="text-lg font-medium" id="recipes-heading">
+            配方管理
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            启用、停用或克隆生产配方，并查看项目默认占用情况。
+          </p>
+        </div>
+        <Button
+          aria-label="刷新配方"
+          disabled={isRefreshing}
+          onClick={() => {
+            setIsRefreshing(true)
+            void reload()
+          }}
+          size="icon-sm"
+          variant="outline"
+        >
+          <RefreshCw className={cn(isRefreshing && "animate-spin")} />
+        </Button>
+      </div>
+
+      {loadState === "loading" ? (
+        <AsyncState
+          className="mt-5"
+          description="正在同步配方与项目默认占用情况。"
+          state="loading"
+          title="正在读取配方"
+        />
+      ) : null}
+      {loadState === "error" ? (
+        <AsyncState
+          action={
+            <Button
+              onClick={() => {
+                setIsRefreshing(true)
+                void reload()
+              }}
+              size="sm"
+              variant="outline"
+            >
+              重试
+            </Button>
+          }
+          className="mt-5"
+          description={error}
+          state="error"
+          title="配方读取失败"
+        />
+      ) : null}
+      {loadState === "stale" ? (
+        <AsyncState
+          action={
+            <Button
+              onClick={() => {
+                setIsRefreshing(true)
+                void reload()
+              }}
+              size="sm"
+              variant="outline"
+            >
+              重新读取
+            </Button>
+          }
+          className="mt-5"
+          description={error}
+          state="stale"
+          title="配方列表可能不是最新状态"
+        />
+      ) : null}
+
+      {(loadState === "ready" || loadState === "stale") &&
+      templates.length === 0 ? (
+        <EmptyState
+          className="mt-5"
+          description="当前服务没有返回可用配方。"
+          icon={PanelsTopLeft}
+          title="暂无配方"
+        />
+      ) : null}
+
+      {templates.length > 0 ? (
+        <>
+          <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3 border-b pb-4">
+            <Fact label="可用配方" value={`${readyCount} 个`} />
+            <Fact label="历史入口" value={`${legacyCount} 个`} />
+            <Fact label="计划中" value={`${plannedCount} 个`} />
           </div>
-        )}
 
-        {loadState === "error" && (
-          <InlineError title="模板读取失败" message={error || "未知错误"} />
-        )}
-
-        {loadState === "ready" && (
-          <>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Fact label="React 可提交" value={`${readyCount} 个`} />
-              <Fact label="Legacy only" value={`${legacyCount} 个`} />
-              <Fact label="Planned" value={`${plannedCount} 个`} />
-            </div>
-
-            <div className="mt-5 grid gap-3 lg:grid-cols-2">
-              {visibleTemplates.map((template) => {
-                const isDedicatedEntry = isDedicatedEntryTemplate(template)
-                return (
-                  <div
-                    className="scroll-mt-20 rounded-lg border bg-background p-4"
-                    id={template.id}
-                    key={template.id}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold">
-                          {template.display_name}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {template.id}
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        {template.is_custom && (
-                          <Badge variant="outline">自定义</Badge>
-                        )}
-                        <Badge
-                          variant={
-                            template.migration_status === "ready" ||
-                            template.migration_status === "partial"
-                              ? "secondary"
-                              : "outline"
-                          }
-                        >
-                          {statusLabel(template.migration_status)}
-                        </Badge>
+          <div className="mt-5 grid gap-3 lg:grid-cols-2">
+            {visibleTemplates.map((template) => {
+              const isDedicatedEntry = isDedicatedEntryTemplate(template)
+              return (
+                <div
+                  className="scroll-mt-20 rounded-lg border bg-background p-4"
+                  id={template.id}
+                  key={template.id}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">
+                        {template.display_name}
                       </div>
                     </div>
-                    <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                      {template.description}
-                    </p>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">
-                        {pipelineChipLabel(template.pipeline_id)}
-                      </Badge>
-                      {isDedicatedEntry && (
-                        <Badge variant="secondary">专用入口</Badge>
-                      )}
-                      <Badge variant="outline">
-                        输入：{template.input_requirements.join(", ")}
-                      </Badge>
-                      {expertMode && template.streamlit_source && (
-                        <Badge variant="outline">
-                          {template.streamlit_source}
-                        </Badge>
-                      )}
-                    </div>
-                    {!isDedicatedEntry && (
-                      <div className="mt-3">
-                        <TemplateEnabledControl
-                          onChanged={() => void reload()}
-                          template={template}
-                          usedByProjects={projectDefaults[template.id] ?? []}
-                        />
-                      </div>
-                    )}
-                    {template.migration_notes && (
-                      <div className="mt-3 rounded-lg bg-muted/40 p-3 text-sm leading-6 text-muted-foreground">
-                        {template.migration_notes}
-                      </div>
-                    )}
-                    <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-                      {template.enabled &&
-                        template.product_entry === "generate" && (
-                          <Button
-                            onClick={() =>
-                              navigate(`/create/recipes/${template.id}`)
-                            }
-                            size="sm"
-                            variant="outline"
-                          >
-                            <SlidersHorizontal data-icon="inline-start" />
-                            调参数
-                          </Button>
-                        )}
-                      {expertMode && template.product_entry === "generate" && (
-                        <TemplateCloneSheet
-                          onCloned={() => void reload()}
-                          template={template}
-                        />
-                      )}
+                    <div className="flex shrink-0 items-center gap-1.5">
                       {template.is_custom && (
-                        <TemplateDeleteButton
-                          onDeleted={() => void reload()}
-                          template={template}
-                        />
+                        <Badge variant="outline">自定义</Badge>
                       )}
-                      <Button
-                        onClick={() => navigate(templateRoute(template))}
-                        variant="outline"
+                      <Badge
+                        variant={
+                          template.migration_status === "ready" ||
+                          template.migration_status === "partial"
+                            ? "secondary"
+                            : "outline"
+                        }
                       >
-                        {isDedicatedEntry ? "打开专用入口" : "使用这个模板"}
-                      </Button>
+                        {statusLabel(template.migration_status)}
+                      </Badge>
                     </div>
                   </div>
-                )
-              })}
-            </div>
+                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                    {template.description}
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">
+                      {pipelineChipLabel(template.pipeline_id)}
+                    </Badge>
+                    {isDedicatedEntry && (
+                      <Badge variant="secondary">专用入口</Badge>
+                    )}
+                  </div>
+                  {expertMode ? (
+                    <TechDetails
+                      items={[
+                        { label: "配方 ID", value: template.id },
+                        {
+                          label: "输入字段",
+                          value: template.input_requirements.join(", "),
+                        },
+                        { label: "源文件", value: template.streamlit_source },
+                      ]}
+                    />
+                  ) : null}
+                  {!isDedicatedEntry && (
+                    <div className="mt-3">
+                      <TemplateEnabledControl
+                        onChanged={() => void reload()}
+                        template={template}
+                        usedByProjects={projectDefaults[template.id] ?? []}
+                      />
+                    </div>
+                  )}
+                  {expertMode && template.migration_notes ? (
+                    <div className="mt-3 rounded-lg bg-muted/40 p-3 text-sm leading-6 text-muted-foreground">
+                      {template.migration_notes}
+                    </div>
+                  ) : null}
+                  <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                    {template.enabled &&
+                      template.product_entry === "generate" && (
+                        <Button
+                          onClick={() =>
+                            navigate(`/create/recipes/${template.id}`)
+                          }
+                          size="sm"
+                          variant="outline"
+                        >
+                          <SlidersHorizontal data-icon="inline-start" />
+                          调参数
+                        </Button>
+                      )}
+                    {expertMode && template.product_entry === "generate" && (
+                      <TemplateCloneSheet
+                        onCloned={() => void reload()}
+                        template={template}
+                      />
+                    )}
+                    {template.is_custom && (
+                      <TemplateDeleteButton
+                        onDeleted={() => void reload()}
+                        template={template}
+                      />
+                    )}
+                    <Button
+                      onClick={() => navigate(templateRoute(template))}
+                      variant="outline"
+                    >
+                      {isDedicatedEntry ? "打开专用入口" : "使用这套配方"}
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
 
-            <RetiredTemplatesGroup templates={retiredTemplates} />
-          </>
-        )}
-      </CardContent>
-    </Card>
+          <RetiredTemplatesGroup templates={retiredTemplates} />
+        </>
+      ) : null}
+    </section>
   )
 }
