@@ -10,10 +10,9 @@ import { useSyncExternalStore } from "react"
 const DEFAULT_PATH = "/create"
 
 export type RouteLayout =
-  "standard" | "wide" | "narrow" | "workspace" | "standalone"
+  "standard" | "wide" | "narrow" | "workspace"
 
 export type RouteId =
-  | "demo-studio"
   | "legacy-batch"
   | "board"
   | "board-item"
@@ -75,14 +74,6 @@ function exact(...expected: string[]) {
 }
 
 export const ROUTE_MANIFEST: readonly RouteDefinition[] = [
-  {
-    id: "demo-studio",
-    path: "/demo/studio",
-    title: "生成工作台 Demo",
-    layout: "standalone",
-    projectScoped: true,
-    match: exact("demo", "studio"),
-  },
   {
     id: "legacy-batch",
     path: "/batch",

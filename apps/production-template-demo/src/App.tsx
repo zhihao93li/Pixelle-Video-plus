@@ -1,23 +1,9 @@
-import { useEffect, type ReactNode } from "react"
-import { ArrowLeft } from "lucide-react"
+import { lazy, Suspense, useEffect, type ReactNode } from "react"
+import { ArrowLeft, LoaderCircle } from "lucide-react"
 
 import { AppShell } from "@/components/AppShell"
-import { ContentItemDetailPage } from "@/components/ContentItemDetailPage"
-import { CreateGallery } from "@/components/CreateGallery"
-import { HighFidelityGenerationDemo } from "@/components/HighFidelityGenerationDemo"
-import { HistoryWorkspace } from "@/components/HistoryWorkspace"
-import { GenerateWorkspace } from "@/components/ProductionStudio"
-import { ProjectDetailPage } from "@/components/ProjectDetailPage"
-import { RecipeDetailPage } from "@/components/RecipeDetailPage"
-import { ScriptReviewWorkspace } from "@/components/ScriptReviewWorkspace"
-import { SettingsWorkspace } from "@/components/SettingsWorkspace"
-import {
-  SpecialPipelinesWorkspace,
-  type SpecialPipelineMode,
-} from "@/components/SpecialPipelinesWorkspace"
-import { TaskCenterWorkspace } from "@/components/TaskCenterWorkspace"
 import { Button } from "@/components/ui/button"
-import { WorkbenchBoard } from "@/components/WorkbenchBoard"
+import type { SpecialPipelineMode } from "@/components/SpecialPipelinesWorkspace"
 import {
   navigate,
   resolveRoute,
@@ -25,6 +11,62 @@ import {
   usePath,
   type ResolvedRoute,
 } from "@/lib/router"
+
+const ContentItemDetailPage = lazy(() =>
+  import("@/components/ContentItemDetailPage").then((module) => ({
+    default: module.ContentItemDetailPage,
+  }))
+)
+const CreateGallery = lazy(() =>
+  import("@/components/CreateGallery").then((module) => ({
+    default: module.CreateGallery,
+  }))
+)
+const HistoryWorkspace = lazy(() =>
+  import("@/components/HistoryWorkspace").then((module) => ({
+    default: module.HistoryWorkspace,
+  }))
+)
+const GenerateWorkspace = lazy(() =>
+  import("@/components/ProductionStudio").then((module) => ({
+    default: module.GenerateWorkspace,
+  }))
+)
+const ProjectDetailPage = lazy(() =>
+  import("@/components/ProjectDetailPage").then((module) => ({
+    default: module.ProjectDetailPage,
+  }))
+)
+const RecipeDetailPage = lazy(() =>
+  import("@/components/RecipeDetailPage").then((module) => ({
+    default: module.RecipeDetailPage,
+  }))
+)
+const ScriptReviewWorkspace = lazy(() =>
+  import("@/components/ScriptReviewWorkspace").then((module) => ({
+    default: module.ScriptReviewWorkspace,
+  }))
+)
+const SettingsWorkspace = lazy(() =>
+  import("@/components/SettingsWorkspace").then((module) => ({
+    default: module.SettingsWorkspace,
+  }))
+)
+const SpecialPipelinesWorkspace = lazy(() =>
+  import("@/components/SpecialPipelinesWorkspace").then((module) => ({
+    default: module.SpecialPipelinesWorkspace,
+  }))
+)
+const TaskCenterWorkspace = lazy(() =>
+  import("@/components/TaskCenterWorkspace").then((module) => ({
+    default: module.TaskCenterWorkspace,
+  }))
+)
+const WorkbenchBoard = lazy(() =>
+  import("@/components/WorkbenchBoard").then((module) => ({
+    default: module.WorkbenchBoard,
+  }))
+)
 
 export function App() {
   const path = usePath()
@@ -34,11 +76,6 @@ export function App() {
     document.title = `${route.title} · Pixelle`
   }, [route.title])
 
-  // 改版验收期保留独立 Demo；正式产品页面全部只经过下方单一 AppShell。
-  if (route.id === "demo-studio") {
-    return <HighFidelityGenerationDemo />
-  }
-
   return (
     <AppShell
       layout={route.layout}
@@ -46,7 +83,7 @@ export function App() {
       projectScoped={route.projectScoped}
       title={route.title}
     >
-      {renderRoute(route)}
+      <Suspense fallback={<RouteLoading />}>{renderRoute(route)}</Suspense>
     </AppShell>
   )
 }
@@ -111,9 +148,20 @@ function renderRoute(route: ResolvedRoute): ReactNode {
       )
     case "not-found":
       return <NotFoundPage pathname={route.pathname} />
-    case "demo-studio":
-      return null
   }
+}
+
+function RouteLoading() {
+  return (
+    <main
+      aria-live="polite"
+      className="flex min-h-[45vh] items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+      role="status"
+    >
+      <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+      正在加载页面…
+    </main>
+  )
 }
 
 function NotFoundPage({ pathname }: { pathname: string }) {
