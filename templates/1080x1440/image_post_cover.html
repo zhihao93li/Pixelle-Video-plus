@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="template:media-width" content="1024">
+    <meta name="template:media-height" content="1024">
+    <style>
+        html { margin: 0; padding: 0; }
+        body {
+            margin: 0;
+            padding: 0;
+            width: 1080px;
+            background: #23201b;
+            font-family: 'PingFang SC', 'Source Han Sans', 'Microsoft YaHei', sans-serif;
+            position: relative;
+            overflow: hidden;
+        }
+        .cover {
+            width: 1080px;
+            height: 1440px;
+            position: relative;
+        }
+        .cover-image {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .cover-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .scrim {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, rgba(20,18,14,0.15) 0%, rgba(20,18,14,0.30) 45%, rgba(20,18,14,0.82) 100%);
+        }
+        .cover-title {
+            position: absolute;
+            left: 80px;
+            right: 80px;
+            bottom: 130px;
+            font-size: 92px;
+            line-height: 1.22;
+            font-weight: 800;
+            color: #fbf9f5;
+            letter-spacing: 2px;
+            text-wrap: balance;
+            text-shadow: 0 6px 40px rgba(0, 0, 0, 0.45);
+        }
+        .cover-brand {
+            position: absolute;
+            left: 80px;
+            bottom: 72px;
+            font-size: 30px;
+            font-weight: 600;
+            color: rgba(251, 249, 245, 0.82);
+            letter-spacing: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="cover">
+        <div class="cover-image">
+            <img src="{{image}}" alt="cover">
+        </div>
+        <div class="scrim"></div>
+        <div class="cover-title">{{title}}</div>
+        <div class="cover-brand">{{brand=Pixelle}}</div>
+    </div>
+</body>
+</html>

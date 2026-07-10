@@ -28,6 +28,8 @@ from pixelle_video.generation import PipelineRegistry, build_pipeline_registry
 from pixelle_video.generation.defaults import build_default_pipeline_manifests
 from pixelle_video.pipelines.asset_based import AssetBasedPipeline
 from pixelle_video.pipelines.custom import CustomPipeline
+from pixelle_video.pipelines.image_post import ImagePostPipeline
+from pixelle_video.pipelines.long_form import LongFormPipeline
 from pixelle_video.pipelines.standard import StandardPipeline
 from pixelle_video.pipelines.workflow_video import (
     ActionTransferPipeline,
@@ -237,6 +239,8 @@ class PixelleVideoCore:
             "standard": StandardPipeline(self),
             "custom": CustomPipeline(self),
             "asset_based": AssetBasedPipeline(self),
+            "image_post": ImagePostPipeline(self),
+            "long_form": LongFormPipeline(self),
             "i2v": ImageToVideoPipeline(self),
             "action_transfer": ActionTransferPipeline(self),
             "digital_human": DigitalHumanPipeline(self),

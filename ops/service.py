@@ -1658,6 +1658,67 @@ def _generation_runner_params_for_request(
 
 
 def _asset_ref_from_generation_result(result: Any) -> dict[str, Any]:
+    artifact_type = getattr(result, "artifact_type", None) or "video"
+    metadata = getattr(result, "metadata", None) or {}
+
+    if artifact_type == "image_set":
+        # 图文帖：无主视频，用封面（首图/role=cover）作代表；全部图进 images
+        images = [
+            artifact
+            for artifact in (getattr(result, "artifacts", None) or [])
+            if getattr(artifact, "kind", None) == "image"
+        ]
+        cover = next(
+            (a for a in images if getattr(a, "role", None) == "cover"),
+            images[0] if images else None,
+        )
+        asset_ref = {
+            "artifact_type": "image_set",
+            "path": getattr(cover, "path", None),
+            "cover_path": getattr(cover, "path", None),
+            "image_paths": [a.path for a in images],
+            "media_type": getattr(cover, "media_type", None),
+            "file_size": result.file_size,
+            "generation_task_id": result.task_id,
+            "pipeline_id": result.pipeline_id,
+            "entry": result.entry,
+            "caption": metadata.get("caption"),
+            "page_count": metadata.get("page_count"),
+        }
+        for key in ("production_template",):
+            if metadata.get(key) is not None:
+                asset_ref[key] = metadata[key]
+        return {key: value for key, value in asset_ref.items() if value is not None}
+
+    if artifact_type == "text":
+        # 长文：无视频/图片，代表物是 markdown 文件；全文在 metadata.article
+        article_artifact = next(
+            (
+                a
+                for a in (getattr(result, "artifacts", None) or [])
+                if getattr(a, "role", None) == "article"
+            ),
+            None,
+        )
+        asset_ref = {
+            "artifact_type": "text",
+            "path": getattr(article_artifact, "path", None),
+            "article_path": getattr(article_artifact, "path", None),
+            "media_type": "text/markdown",
+            "file_size": result.file_size,
+            "generation_task_id": result.task_id,
+            "pipeline_id": result.pipeline_id,
+            "entry": result.entry,
+            "article": metadata.get("article"),
+            "title": metadata.get("title"),
+            "language": metadata.get("language"),
+            "word_count": metadata.get("word_count"),
+        }
+        for key in ("production_template",):
+            if metadata.get(key) is not None:
+                asset_ref[key] = metadata[key]
+        return {key: value for key, value in asset_ref.items() if value is not None}
+
     primary_video = result.primary_video
     asset_ref = {
         "video_path": primary_video.path,
@@ -1670,7 +1731,6 @@ def _asset_ref_from_generation_result(result: Any) -> dict[str, Any]:
         "pipeline_id": result.pipeline_id,
         "entry": result.entry,
     }
-    metadata = getattr(result, "metadata", None) or {}
     for key in (
         "asset_manifest",
         "quality_review",

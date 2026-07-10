@@ -517,7 +517,8 @@ async def test_plugin_lists_production_templates_and_sets_project_default(plugin
     current = await server.pixelle_get_current(project_id=project["entity"]["id"])
 
     assert listed["status"] == "ok"
-    assert listed["default_template"] == "petwoods_xhs_daily_v1"
+    # 骨架化后 PetWoods×小红书 的默认模板 = 标准骨架
+    assert listed["default_template"] == "pipeline_standard_base_v1"
     assert listed["templates"][0]["user_selectable_providers"] == []
     templates = {template["id"]: template for template in listed["templates"]}
     assert templates["petwoods_xhs_topic_to_video_v1"]["input_requirements"] == ["topic"]

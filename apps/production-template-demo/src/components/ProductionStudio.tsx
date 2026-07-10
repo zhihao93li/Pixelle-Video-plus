@@ -1,29 +1,39 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
-  AlertCircle,
-  CheckCircle2,
-  ClipboardCheck,
-  Clock3,
   Copy,
-  FileText,
-  HelpCircle,
-  History,
   ImageIcon,
-  Layers3,
+  Layers,
   Loader2,
   Play,
   RefreshCcw,
-  Sparkles,
-  Settings,
+  Send,
   UploadCloud,
   Video,
   Volume2,
-  XCircle,
+  X,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { BatchWorkspace } from "@/components/BatchWorkspace"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { useToast } from "@/components/ui/toast"
+import { Fact, InlineError, TechDetails } from "@/components/shared/feedback"
+import { StatusBadge } from "@/components/shared/StatusBadge"
+import {
+  formatBytes,
+  formatDuration,
+  readableError,
+} from "@/lib/format"
 import {
   Card,
   CardContent,
@@ -37,30 +47,62 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { HistoryWorkspace } from "@/components/HistoryWorkspace"
-import { HelpWorkspace } from "@/components/HelpWorkspace"
-import { ScriptReviewWorkspace } from "@/components/ScriptReviewWorkspace"
-import { SettingsWorkspace } from "@/components/SettingsWorkspace"
+import { AdvancedGroup } from "@/components/shared/AdvancedGroup"
+import { FileDropzone } from "@/components/shared/FileDropzone"
 import {
-  SpecialPipelinesWorkspace,
-  type SpecialPipelineMode,
-} from "@/components/SpecialPipelinesWorkspace"
+  artifactKindLabel,
+  isNonVideoPipeline,
+  templateArtifactType,
+  type ArtifactKind,
+} from "@/lib/artifactKind"
 import {
-  ApiError,
+  getBatchPreviewBody,
+  getBatchPreviewLineCount,
+  getBatchPreviewTitle,
+  parseFixedScriptItems,
+  removeScriptItem,
+  type ParsedScriptItem,
+} from "@/lib/batchInput"
+import { trackBatchTasks } from "@/lib/trackBatch"
+import { useBatchPolling } from "@/lib/useBatchPolling"
+import { BatchStatusCard } from "@/components/shared/BatchStatusCard"
+import { ImageSetView } from "@/components/shared/ImageSetView"
+import { RecipeSelect } from "@/components/shared/RecipeSelect"
+import { TextArticleView } from "@/components/shared/TextArticleView"
+import { imageSetLabel } from "@/lib/imageSet"
+import {
+  isActiveProductTemplate,
+  pipelineChipLabel,
+} from "@/lib/templatePresentation"
+import { useExpertMode } from "@/lib/expertMode"
+import { navigate } from "@/lib/router"
+import { useTaskCenter } from "@/lib/taskCenter"
+import { useCurrentProject } from "@/lib/currentProject"
+import { useLocalStorageState } from "@/lib/useLocalStorageState"
+import {
   artifactFileUrl,
   cancelGenerationTask,
+  createGenerationBatch,
   createGenerationTemplateTask,
   fileUrlFromPath,
   generateMediaPreview,
   getFrameTemplateParams,
-  getTask,
   getTaskResult,
   isTerminalStatus,
-  listGenerationProjects,
   listResourceBgm,
   listResourceMediaWorkflows,
   listResourceTemplates,
@@ -71,9 +113,7 @@ import {
   synthesizeTtsPreview,
   uploadGenerationAssets,
   uploadResourceBgm,
-  updateProjectGenerationSettings,
   type FramePreviewResponse,
-  type GenerationProject,
   type GenerationResult,
   type GenerationTask,
   type MediaPreviewResponse,
@@ -94,20 +134,12 @@ import {
 } from "@/lib/resultSummary"
 import { cn } from "@/lib/utils"
 
-const DAILY_TEMPLATE_ID = "petwoods_xhs_daily_v1"
+const STANDARD_TEMPLATE_ID = "pipeline_standard_base_v1"
 const sampleScript =
   "母猫配完以后还一直叫，不一定说明没有配上。发情期的激素变化不会马上停止，所以它可能还会持续叫几天。真正判断有没有配上，要看后续有没有再次发情、精神食欲是否正常，以及是否需要在合适时间做检查。"
+const sampleTopic = "猫咪夏天饮水少，主人应该怎么判断和处理"
 
 type LoadState = "loading" | "ready" | "error"
-type ActiveView =
-  | "generate"
-  | "scriptReview"
-  | "special"
-  | "batch"
-  | "history"
-  | "templates"
-  | "settings"
-  | "help"
 
 type GenerationResources = {
   bgm: ResourceBgm[]
@@ -191,20 +223,17 @@ const defaultAssetAdvancedSettings: AssetAdvancedSettings = {
   ttsSpeed: 1.2,
 }
 
-export function ProductionStudio() {
-  const [activeView, setActiveView] = useState<ActiveView>("generate")
-  const [specialMode, setSpecialMode] =
-    useState<SpecialPipelineMode>("image_to_video")
+export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   const [loadState, setLoadState] = useState<LoadState>("loading")
+  const [reloadToken, setReloadToken] = useState(0)
   const [templatesError, setTemplatesError] = useState<string | null>(null)
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
-  const [projects, setProjects] = useState<GenerationProject[]>([])
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
-  const [settingsError, setSettingsError] = useState<string | null>(null)
-  const [settingsNotice, setSettingsNotice] = useState<string | null>(null)
   const [template, setTemplate] = useState<ProductionTemplate | null>(null)
-  const [script, setScript] = useState(sampleScript)
-  const [topic, setTopic] = useState("猫咪夏天饮水少，主人应该怎么判断和处理")
+  const [script, setScript] = useLocalStorageState(
+    "pixelle-draft-script",
+    ""
+  )
+  const [topic, setTopic] = useLocalStorageState("pixelle-draft-topic", "")
   const [advancedSettings, setAdvancedSettings] =
     useState<StandardAdvancedSettings>(defaultAdvancedSettings)
   const [resources, setResources] =
@@ -219,14 +248,28 @@ export function ProductionStudio() {
   const [assetDuration, setAssetDuration] = useState(30)
   const [assetAdvancedSettings, setAssetAdvancedSettings] =
     useState<AssetAdvancedSettings>(defaultAssetAdvancedSettings)
-  const [task, setTask] = useState<GenerationTask | null>(null)
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
   const [result, setResult] = useState<GenerationResult | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [pollError, setPollError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCancellingTask, setIsCancellingTask] = useState(false)
   const [taskActionError, setTaskActionError] = useState<string | null>(null)
-  const [isSavingDefault, setIsSavingDefault] = useState(false)
+  // 批量提交模式（本页内存态，不持久化）
+  const [batchMode, setBatchMode] = useState(false)
+  const [batchText, setBatchText] = useState("")
+  const {
+    batch: submittedBatch,
+    setBatch: setSubmittedBatch,
+    retryItem: retryBatchItem,
+    retryingItemIndex: retryingBatchIndex,
+  } = useBatchPolling()
+  const taskCenter = useTaskCenter()
+  const toast = useToast()
+  const { projectId } = useCurrentProject()
+
+  const task = currentTaskId
+    ? (taskCenter.getTask(currentTaskId)?.task ?? null)
+    : null
 
   const trimmedScript = script.trim()
   const trimmedTopic = topic.trim()
@@ -236,6 +279,29 @@ export function ProductionStudio() {
     template?.requires_user_assets || template?.input_requirements.includes("assets")
   )
   const templateNeedsTopic = Boolean(template?.input_requirements.includes("topic"))
+  // 非视频产线（图文线 / 长文线）：无配音/画面/合成视频，隐藏视频专属输入与承诺文案
+  const isNonVideo = isNonVideoPipeline(template?.pipeline_id)
+  const nonVideoArtifact = templateArtifactType(template?.pipeline_id)
+  // 批量是「任何 script 入口配方生成页的一种提交模式」——topic/assets 入口不支持
+  const canBatch = Boolean(
+    template &&
+      template.product_entry === "generate" &&
+      template.input_requirements.includes("script") &&
+      !templateNeedsAssets &&
+      !templateNeedsTopic
+  )
+  const inBatch = batchMode && canBatch
+  const batchItems = useMemo(
+    () => parseFixedScriptItems(batchText),
+    [batchText]
+  )
+  const batchMeasureWord = nonVideoArtifact === "text" ? "篇" : "条"
+  const batchOutputNoun =
+    nonVideoArtifact === "text"
+      ? "长文"
+      : nonVideoArtifact === "image_set"
+        ? "图文帖"
+        : "视频"
   const templateCanSubmit = Boolean(
     template &&
       template.enabled &&
@@ -254,6 +320,21 @@ export function ProductionStudio() {
     hasRequiredTemplateInput &&
     !isSubmitting &&
     !(task && !isTerminalStatus(task.status))
+  const submitDisabledReason = canSubmit
+    ? null
+    : isSubmitting
+      ? null
+      : loadState !== "ready"
+        ? "正在读取可用模板"
+        : !templateCanSubmit
+          ? "当前模板暂不支持在此页提交"
+          : task && !isTerminalStatus(task.status)
+            ? "有任务正在生成中，完成后可再次提交"
+            : templateNeedsAssets
+              ? "请先选择素材文件"
+              : templateNeedsTopic
+                ? "请先输入选题"
+                : "请先输入文案"
 
   useEffect(() => {
     let cancelled = false
@@ -261,44 +342,23 @@ export function ProductionStudio() {
     async function loadTemplates() {
       setLoadState("loading")
       setTemplatesError(null)
-      setSettingsError(null)
       try {
-        const [templatesResult, projectsResult] = await Promise.allSettled([
-          listTemplates(),
-          listGenerationProjects(),
-        ])
+        // 默认模板 = 项目默认 > 全局（后端按 project 解析 default_template）
+        const response = await listTemplates(projectId ?? undefined)
         if (cancelled) {
           return
         }
 
-        if (templatesResult.status === "rejected") {
-          throw templatesResult.reason
-        }
-
-        const response = templatesResult.value
-        let projectDefaultTemplateId: string | null = null
-        if (projectsResult.status === "fulfilled") {
-          const loadedProjects = projectsResult.value.projects
-          const firstProject = loadedProjects[0] ?? null
-          setProjects(loadedProjects)
-          setSelectedProjectId(firstProject?.id ?? null)
-          projectDefaultTemplateId =
-            firstProject?.generation_settings?.default_production_template_id ??
-            null
-        } else {
-          setSettingsError(readableError(projectsResult.reason))
-        }
-
         const defaultId =
-          projectDefaultTemplateId || response.default_template || DAILY_TEMPLATE_ID
+          templateId || response.default_template || STANDARD_TEMPLATE_ID
         const selected =
           response.templates.find((item) => item.id === defaultId) ??
-          response.templates.find((item) => item.id === DAILY_TEMPLATE_ID) ??
+          response.templates.find((item) => item.id === STANDARD_TEMPLATE_ID) ??
           null
 
         if (!selected) {
           setLoadState("error")
-          setTemplatesError("没有找到可用于 P0 的日常生成模板。")
+          setTemplatesError("没有找到可用的默认生成模板。")
           return
         }
 
@@ -319,7 +379,7 @@ export function ProductionStudio() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [reloadToken, templateId, projectId])
 
   useEffect(() => {
     let cancelled = false
@@ -373,34 +433,7 @@ export function ProductionStudio() {
     }
   }, [])
 
-  useEffect(() => {
-    if (!task || isTerminalStatus(task.status)) {
-      return undefined
-    }
-
-    let cancelled = false
-    const interval = window.setInterval(async () => {
-      try {
-        const latestTask = await getTask(task.task_id)
-        if (cancelled) {
-          return
-        }
-        setTask(latestTask)
-        setPollError(null)
-      } catch (error) {
-        if (cancelled) {
-          return
-        }
-        setPollError(readableError(error))
-      }
-    }, 2000)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(interval)
-    }
-  }, [task])
-
+  // 轮询与终态通知由全局任务中心负责；这里只在完成后拉取结果。
   useEffect(() => {
     if (!task || task.status !== "completed" || result?.task_id === task.task_id) {
       return
@@ -413,11 +446,10 @@ export function ProductionStudio() {
         const taskResult = await getTaskResult(completedTaskId)
         if (!cancelled) {
           setResult(taskResult)
-          setPollError(null)
         }
       } catch (error) {
         if (!cancelled) {
-          setPollError(readableError(error))
+          setTaskActionError(readableError(error))
         }
       }
     }
@@ -436,9 +468,8 @@ export function ProductionStudio() {
 
     setIsSubmitting(true)
     setSubmitError(null)
-    setPollError(null)
     setTaskActionError(null)
-    setTask(null)
+    setCurrentTaskId(null)
     setResult(null)
 
     try {
@@ -464,7 +495,8 @@ export function ProductionStudio() {
             source: "react_p8_demo",
             uploaded_assets: uploaded,
             template_use_case: template.use_case,
-          }
+          },
+          projectId ?? undefined
         )
       } else {
         response = await createGenerationTemplateTask(
@@ -478,10 +510,12 @@ export function ProductionStudio() {
           {
             source: "react_streamlit_migration",
             template_use_case: template.use_case,
-          }
+          },
+          projectId ?? undefined
         )
       }
-      setTask(response.task)
+      taskCenter.trackTask(response.task, template.display_name)
+      setCurrentTaskId(response.task.task_id)
     } catch (error) {
       setSubmitError(readableError(error))
     } finally {
@@ -489,46 +523,38 @@ export function ProductionStudio() {
     }
   }
 
-  function selectProject(projectId: string) {
-    setSelectedProjectId(projectId)
-    setSettingsNotice(null)
-    const project = projects.find((item) => item.id === projectId)
-    const projectTemplateId =
-      project?.generation_settings?.default_production_template_id
-    const projectTemplate = templates.find((item) => item.id === projectTemplateId)
-    if (projectTemplate) {
-      setTemplate(projectTemplate)
-    }
-  }
-
-  async function saveDefaultTemplate() {
-    if (!selectedProjectId || !template) {
+  async function submitBatch() {
+    if (!template || batchItems.length === 0 || isSubmitting) {
       return
     }
-
-    setIsSavingDefault(true)
-    setSettingsError(null)
-    setSettingsNotice(null)
+    setIsSubmitting(true)
+    setSubmitError(null)
     try {
-      const response = await updateProjectGenerationSettings(
-        selectedProjectId,
-        template.id
-      )
-      setProjects((current) =>
-        current.map((project) =>
-          project.id === selectedProjectId
-            ? {
-                ...project,
-                generation_settings: response.generation_settings,
-              }
-            : project
-        )
-      )
-      setSettingsNotice("默认生产线已保存。")
+      // 每条：本条 script + 首行标题 + 其余高级设置作共享参数 merge（与旧批量页语义一致）
+      const items = batchItems.map((item) => ({
+        input: buildStandardTemplateInput({
+          template,
+          script: item.input.script,
+          topic: "",
+          advancedSettings: { ...advancedSettings, title: item.input.title },
+        }),
+      }))
+      const response = await createGenerationBatch({
+        templateId: template.id,
+        items,
+        metadata: { source: "react_generate_batch", mode: "fixed" },
+        projectId: projectId ?? undefined,
+      })
+      setSubmittedBatch(response)
+      toast({
+        title: `批量任务已创建（${response.total_count} ${batchMeasureWord}）`,
+        variant: "success",
+      })
+      void trackBatchTasks(response, taskCenter.trackTask, template.display_name)
     } catch (error) {
-      setSettingsError(readableError(error))
+      setSubmitError(readableError(error))
     } finally {
-      setIsSavingDefault(false)
+      setIsSubmitting(false)
     }
   }
 
@@ -541,8 +567,7 @@ export function ProductionStudio() {
     setTaskActionError(null)
     try {
       const latest = await cancelGenerationTask(task.task_id)
-      setTask(latest)
-      setPollError(null)
+      taskCenter.updateTask(latest)
     } catch (error) {
       setTaskActionError(readableError(error))
     } finally {
@@ -557,169 +582,88 @@ export function ProductionStudio() {
     }))
   }
 
-  function selectTemplateOrRoute(nextTemplate: ProductionTemplate) {
-    if (isSpecialProductEntry(nextTemplate.product_entry)) {
-      setSpecialMode(nextTemplate.product_entry)
-      setActiveView("special")
-      return
-    }
-    if (nextTemplate.product_entry === "script_review") {
-      setActiveView("scriptReview")
-      return
-    }
-    if (nextTemplate.product_entry === "batch") {
-      setActiveView("batch")
-      return
+  /**
+   * 页头下拉换配方：选择器只列启用的 generate 配方，故直接切换 + 同步 URL，
+   * 已输入文案保留（现状行为）。若新配方不支持批量（素材/选题入口），落回单条
+   * 模式但保留 batchText 以免丢字。
+   */
+  function handleSelectTemplate(nextTemplate: ProductionTemplate) {
+    const nextCanBatch =
+      nextTemplate.product_entry === "generate" &&
+      nextTemplate.input_requirements.includes("script") &&
+      !nextTemplate.requires_user_assets &&
+      !nextTemplate.input_requirements.includes("assets") &&
+      !nextTemplate.input_requirements.includes("topic")
+    if (!nextCanBatch) {
+      setBatchMode(false)
     }
     setTemplate(nextTemplate)
-    setActiveView("generate")
+    navigate(`/create/generate/${nextTemplate.id}`)
   }
 
   return (
     <TooltipProvider>
-      <div className="min-h-svh bg-muted/30 text-foreground">
-        <header className="border-b bg-background px-4 py-4 lg:px-6">
-          <div className="mx-auto flex max-w-[1240px] flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Video className="size-4" />
-                Pixelle 生产模板
-              </div>
-              <h1 className="mt-1 text-2xl font-semibold">
-                {activeView === "generate"
-                  ? templateNeedsAssets
-                    ? "用素材生成视频"
-                    : templateNeedsTopic
-                      ? "用选题生成视频"
-                      : "用已确认文案生成视频"
-                  : activeView === "history"
-                    ? "历史视频与发布准备"
-                    : activeView === "scriptReview"
-                      ? "文案审核后生成"
-                    : activeView === "special"
-                      ? "特殊视频生成"
-                    : activeView === "batch"
-                      ? "批量生产"
-                      : activeView === "templates"
-                      ? "模板与迁移状态"
-                    : activeView === "settings"
-                      ? "系统设置"
-                      : "帮助"}
-              </h1>
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">真实后端生成</Badge>
-                <Badge variant="outline">不选择 provider</Badge>
-              </div>
-              <div className="flex rounded-lg border bg-muted/40 p-1">
-                <Button
-                  onClick={() => setActiveView("generate")}
-                  size="sm"
-                  variant={activeView === "generate" ? "default" : "ghost"}
-                >
-                  <Play data-icon="inline-start" />
-                  生成视频
-                </Button>
-                <Button
-                  onClick={() => setActiveView("history")}
-                  size="sm"
-                  variant={activeView === "history" ? "default" : "ghost"}
-                >
-                  <History data-icon="inline-start" />
-                  历史与发布
-                </Button>
-                <Button
-                  onClick={() => setActiveView("scriptReview")}
-                  size="sm"
-                  variant={activeView === "scriptReview" ? "default" : "ghost"}
-                >
-                  <ClipboardCheck data-icon="inline-start" />
-                  文案审核
-                </Button>
-                <Button
-                  onClick={() => setActiveView("special")}
-                  size="sm"
-                  variant={activeView === "special" ? "default" : "ghost"}
-                >
-                  <Sparkles data-icon="inline-start" />
-                  特殊生成
-                </Button>
-                <Button
-                  onClick={() => setActiveView("batch")}
-                  size="sm"
-                  variant={activeView === "batch" ? "default" : "ghost"}
-                >
-                  <Layers3 data-icon="inline-start" />
-                  批量生产
-                </Button>
-                <Button
-                  onClick={() => setActiveView("templates")}
-                  size="sm"
-                  variant={activeView === "templates" ? "default" : "ghost"}
-                >
-                  <FileText data-icon="inline-start" />
-                  模板状态
-                </Button>
-                <Button
-                  onClick={() => setActiveView("settings")}
-                  size="sm"
-                  variant={activeView === "settings" ? "default" : "ghost"}
-                >
-                  <Settings data-icon="inline-start" />
-                  设置
-                </Button>
-                <Button
-                  onClick={() => setActiveView("help")}
-                  size="sm"
-                  variant={activeView === "help" ? "default" : "ghost"}
-                >
-                  <HelpCircle data-icon="inline-start" />
-                  帮助
-                </Button>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        {activeView === "generate" ? (
-          <main className="mx-auto grid max-w-[1240px] gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:p-6">
+      <div>
+        <main className="grid max-w-[1240px] gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:p-6">
             <section className="flex min-w-0 flex-col gap-5">
-              <TemplateCard
-              error={templatesError}
-              isSavingDefault={isSavingDefault}
-              loadState={loadState}
-              onReload={() => window.location.reload()}
-              onSaveDefault={() => void saveDefaultTemplate()}
-              onSelect={selectTemplateOrRoute}
-              onSelectProject={selectProject}
-              projects={projects}
-              selectedProjectId={selectedProjectId}
-              settingsError={settingsError}
-              settingsNotice={settingsNotice}
-              template={template}
-              templateCanSubmit={templateCanSubmit}
-              templates={templates}
-            />
-
               <Card className="rounded-lg">
                 <CardHeader className="border-b">
-                  <CardTitle>
-                    {templateNeedsAssets
-                      ? "1. 上传素材"
-                      : templateNeedsTopic
-                        ? "1. 输入选题"
-                        : "1. 填入已确认文案"}
-                  </CardTitle>
-                  <CardDescription>
-                    {templateNeedsAssets
-                      ? "这些素材会作为真实输入进入当前素材生产线，不会使用 mock 素材。"
-                      : templateNeedsTopic
-                        ? "后端会基于选题生成脚本，再进入同一个标准视频 pipeline。"
-                        : "这里不会生成选题，也不会重写文案。提交后会直接进入当前视频模板。"}
-                  </CardDescription>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <CardTitle>
+                        {templateNeedsAssets
+                          ? "上传素材"
+                          : templateNeedsTopic
+                            ? "输入选题"
+                            : "填入文案"}
+                      </CardTitle>
+                      <CardDescription>
+                        {templateNeedsAssets
+                          ? "上传你的照片或视频，AI 会围绕它们组织旁白和镜头。"
+                          : templateNeedsTopic
+                            ? "只需一个选题，AI 会自动撰写文案并完成配音、画面和合成。"
+                            : nonVideoArtifact === "text"
+                              ? "文案将扩写成结构化长文，不配音、不合成视频。"
+                              : nonVideoArtifact === "image_set"
+                                ? "文案将逐行排版成图集，不配音、不合成视频。"
+                                : "文案不会被改写，将按原文进行拆分、配音、配画面并合成视频。"}
+                      </CardDescription>
+                    </div>
+                    {canBatch && (
+                      <ToggleGroup
+                        onValueChange={(value) => {
+                          if (value) {
+                            setBatchMode(value === "batch")
+                          }
+                        }}
+                        type="single"
+                        value={inBatch ? "batch" : "single"}
+                        variant="outline"
+                      >
+                        <ToggleGroupItem value="single">单条</ToggleGroupItem>
+                        <ToggleGroupItem value="batch">批量</ToggleGroupItem>
+                      </ToggleGroup>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
+                  <TemplateSummaryBar
+                    error={templatesError}
+                    loadState={loadState}
+                    onReload={() => setReloadToken((token) => token + 1)}
+                    onSelect={handleSelectTemplate}
+                    template={template}
+                    templates={templates}
+                  />
+
+                  {!templateCanSubmit && loadState === "ready" && (
+                    <InlineError
+                      title="当前模板暂不支持在此页提交"
+                      message="请更换一个可用模板，或前往对应的专用入口。"
+                    />
+                  )}
+
+                  <div className="mt-5">
                   {templateNeedsAssets ? (
                     <AssetInput
                       assetAdvancedSettings={assetAdvancedSettings}
@@ -750,298 +694,227 @@ export function ProductionStudio() {
                       onTextChange={setTopic}
                       resources={resources}
                       resourcesError={resourcesError}
+                      sampleText={sampleTopic}
                       text={topic}
                     />
                   ) : (
                     <StandardInput
                       advancedSettings={advancedSettings}
+                      artifactKind={nonVideoArtifact}
+                      batchItems={batchItems}
+                      batchMode={inBatch}
+                      batchText={batchText}
                       inputKind="script"
+                      isNonVideo={isNonVideo}
+                      onBatchTextChange={setBatchText}
                       onBgmUploaded={addBgmResource}
                       onAdvancedSettingsChange={setAdvancedSettings}
+                      onRemoveBatchItem={(index) =>
+                        setBatchText((current) =>
+                          removeScriptItem(current, index)
+                        )
+                      }
                       onTextChange={setScript}
                       resources={resources}
                       resourcesError={resourcesError}
+                      sampleText={sampleScript}
                       text={script}
                     />
                   )}
+                  </div>
 
                   {submitError && (
                     <InlineError title="提交失败" message={submitError} />
                   )}
 
-                  <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="text-sm text-muted-foreground">
-                      {template
-                        ? `当前使用：${template.display_name}`
-                        : "正在读取可用模板"}
-                    </div>
-                    <Button disabled={!canSubmit} onClick={submitTask} size="lg">
-                      {isSubmitting ? (
-                        <Loader2 className="animate-spin" data-icon="inline-start" />
-                      ) : templateNeedsAssets ? (
-                        <UploadCloud data-icon="inline-start" />
-                      ) : (
-                        <Play data-icon="inline-start" />
-                      )}
-                      {isSubmitting
-                        ? templateNeedsAssets
-                          ? "上传并提交中"
-                          : "提交中"
-                        : "创建真实生成任务"}
-                    </Button>
+                  <div className="mt-5 flex flex-col items-end gap-1.5">
+                    {inBatch ? (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            disabled={batchItems.length === 0 || isSubmitting}
+                            size="lg"
+                          >
+                            {isSubmitting ? (
+                              <Loader2
+                                className="animate-spin"
+                                data-icon="inline-start"
+                              />
+                            ) : (
+                              <Layers data-icon="inline-start" />
+                            )}
+                            {isSubmitting
+                              ? "正在提交…"
+                              : `批量生成 ${batchItems.length} ${batchMeasureWord}${batchOutputNoun}`}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>
+                              批量生成 {batchItems.length} {batchMeasureWord}
+                              {batchOutputNoun}？
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              每条会占用一次生成额度，提交后可在下方与「任务」页跟踪进度、失败可单条重试。
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>再检查一下</AlertDialogCancel>
+                            <AlertDialogAction
+                              className={cn(
+                                buttonVariants({ variant: "default" })
+                              )}
+                              onClick={() => void submitBatch()}
+                            >
+                              确认提交
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    ) : (
+                      <Button disabled={!canSubmit} onClick={submitTask} size="lg">
+                        {isSubmitting ? (
+                          <Loader2 className="animate-spin" data-icon="inline-start" />
+                        ) : templateNeedsAssets ? (
+                          <UploadCloud data-icon="inline-start" />
+                        ) : (
+                          <Play data-icon="inline-start" />
+                        )}
+                        {isSubmitting
+                          ? templateNeedsAssets
+                            ? "正在上传并提交…"
+                            : "正在提交…"
+                          : "开始生成"}
+                      </Button>
+                    )}
+                    {!inBatch && submitDisabledReason && (
+                      <div className="text-xs text-muted-foreground">
+                        {submitDisabledReason}
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
+
+              {inBatch && submittedBatch && (
+                <BatchStatusCard
+                  artifactLabel={artifactKindLabel(nonVideoArtifact)}
+                  batch={submittedBatch}
+                  onRetryItem={retryBatchItem}
+                  retryingItemIndex={retryingBatchIndex}
+                />
+              )}
             </section>
 
-            <TaskPanel
-              isCancellingTask={isCancellingTask}
-              onCancelTask={cancelCurrentTask}
-              pollError={pollError}
-              result={result}
-              task={task}
-              taskActionError={taskActionError}
-              template={template}
-            />
+            {inBatch ? (
+              <aside className="flex min-w-0 flex-col gap-5">
+                <Card className="rounded-lg">
+                  <CardHeader className="border-b">
+                    <CardTitle>批量提交</CardTitle>
+                    <CardDescription>
+                      每条一个任务，共享上方的画面/声音等设置；提交后进度显示在左侧与「任务」页。
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-sm text-muted-foreground">
+                      {batchItems.length > 0
+                        ? `已解析 ${batchItems.length} ${batchMeasureWord}`
+                        : "在左侧粘贴多条内容开始批量。"}
+                    </div>
+                  </CardContent>
+                </Card>
+              </aside>
+            ) : (
+              <TaskPanel
+                isCancellingTask={isCancellingTask}
+                onCancelTask={cancelCurrentTask}
+                result={result}
+                task={task}
+                taskActionError={taskActionError}
+                template={template}
+              />
+            )}
           </main>
-        ) : activeView === "history" ? (
-          <HistoryWorkspace latestTaskId={task?.task_id ?? result?.task_id ?? null} />
-        ) : activeView === "scriptReview" ? (
-          <ScriptReviewWorkspace />
-        ) : activeView === "special" ? (
-          <SpecialPipelinesWorkspace
-            initialMode={specialMode}
-            key={specialMode}
-          />
-        ) : activeView === "batch" ? (
-          <BatchWorkspace />
-        ) : activeView === "templates" ? (
-          <TemplateStatusWorkspace
-            loadState={loadState}
-            onSelect={selectTemplateOrRoute}
-            templates={templates}
-          />
-        ) : activeView === "settings" ? (
-          <SettingsWorkspace />
-        ) : (
-          <HelpWorkspace />
-        )}
       </div>
     </TooltipProvider>
   )
 }
 
-function TemplateCard({
+function TemplateSummaryBar({
   loadState,
   template,
   templates,
-  templateCanSubmit,
   error,
-  settingsError,
-  settingsNotice,
-  projects,
-  selectedProjectId,
-  isSavingDefault,
   onReload,
   onSelect,
-  onSelectProject,
-  onSaveDefault,
 }: {
   loadState: LoadState
   template: ProductionTemplate | null
   templates: ProductionTemplate[]
-  templateCanSubmit: boolean
   error: string | null
-  settingsError: string | null
-  settingsNotice: string | null
-  projects: GenerationProject[]
-  selectedProjectId: string | null
-  isSavingDefault: boolean
   onReload: () => void
   onSelect: (template: ProductionTemplate) => void
-  onSelectProject: (projectId: string) => void
-  onSaveDefault: () => void
 }) {
+  if (loadState === "loading") {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+        正在读取可用配方
+      </div>
+    )
+  }
+
+  if (loadState === "error") {
+    return (
+      <div className="flex flex-col gap-3">
+        <InlineError title="配方读取失败" message={error || "未知错误"} />
+        <Button onClick={onReload} variant="outline">
+          <RefreshCcw data-icon="inline-start" />
+          重试
+        </Button>
+      </div>
+    )
+  }
+
+  if (!template) {
+    return null
+  }
+
+  // 只列启用、非退役、product_entry === "generate" 的配方——退役项与专用入口不出现。
+  // 兜底：当前配方即便被过滤掉（异常态）也保留在可选项，避免下拉空白。
+  const selectable = templates.filter(isActiveProductTemplate)
+  const options = selectable.some((item) => item.id === template.id)
+    ? selectable
+    : [template, ...selectable]
+
   return (
-    <Card className="rounded-lg">
-      <CardHeader className="border-b">
-        <CardTitle>当前真实生成方式</CardTitle>
-        <CardDescription>
-          选择用户能理解的生产线；provider、runtime 和 workflow 固定在模板里。
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loadState === "loading" && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            正在读取可用视频模板
-          </div>
-        )}
-
-        {loadState === "error" && (
-          <div className="flex flex-col gap-3">
-            <InlineError title="模板读取失败" message={error || "未知错误"} />
-            <Button onClick={onReload} variant="outline">
-              <RefreshCcw data-icon="inline-start" />
-              重新读取
-            </Button>
-          </div>
-        )}
-
-        {loadState === "ready" && template && (
-          <div className="flex flex-col gap-4">
-            <div className="flex items-start gap-3 rounded-lg bg-primary/5 p-4">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-background text-primary">
-                <FileText className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-lg font-semibold">{template.display_name}</h2>
-                  <Badge variant="secondary">{template.version}</Badge>
-                  <Badge variant="outline">{template.entry}</Badge>
-                  <MigrationBadge status={template.migration_status} />
-                </div>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  {template.description}
-                </p>
-                {template.migration_notes && (
-                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                    {template.migration_notes}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Fact label="输入" value={template.input_requirements.join(", ")} />
-              <Fact label="生成方式" value={template.runtime_label} />
-              <Fact label="预计耗时" value={template.estimated_turnaround} />
-            </div>
-
-            <div className="rounded-lg border bg-background p-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium">项目默认生产线</div>
-                  <div className="mt-1 text-sm text-muted-foreground">
-                    保存后，Ops/Codex 和 React 都会使用同一个项目默认模板。
-                  </div>
-                  {projects.length > 0 ? (
-                    <select
-                      className="mt-3 h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                      onChange={(event) => onSelectProject(event.target.value)}
-                      value={selectedProjectId ?? ""}
-                    >
-                      {projects.map((project) => (
-                        <option key={project.id} value={project.id}>
-                          {project.name} · {project.channel}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="mt-3 rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
-                      当前没有可用 Ops 项目，使用系统默认生产线。
-                    </div>
-                  )}
-                </div>
-                <Button
-                  disabled={!selectedProjectId || isSavingDefault}
-                  onClick={onSaveDefault}
-                  variant="outline"
-                >
-                  {isSavingDefault ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
-                  ) : (
-                    <RefreshCcw data-icon="inline-start" />
-                  )}
-                  保存为默认
-                </Button>
-              </div>
-              {settingsError && (
-                <InlineError title="设置读取或保存失败" message={settingsError} />
-              )}
-              {settingsNotice && (
-                <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-primary">
-                  {settingsNotice}
-                </div>
-              )}
-            </div>
-
-            {!templateCanSubmit && (
-              <InlineError
-                title="当前生产线需要额外输入"
-                message="这个生产线的输入类型还没有接入 React，不会用缺失输入创建假成功任务。"
-              />
-            )}
-
-            <Separator />
-
-            <div>
-              <div className="text-sm font-medium">更换生产线</div>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                {templates.map((item) => {
-                  const selected = item.id === template.id
-                  const supportsScript = item.input_requirements.includes("script")
-                  const supportsTopic = item.input_requirements.includes("topic")
-                  const supportsAssets = item.input_requirements.includes("assets")
-                  const isDedicatedEntry = item.product_entry !== "generate"
-                  const canUseHere =
-                    item.enabled &&
-                    !isDedicatedEntry &&
-                    ((supportsScript && !item.requires_user_assets) ||
-                      supportsTopic ||
-                      supportsAssets)
-                  const entryLabel = isDedicatedEntry
-                    ? "专用入口"
-                    : canUseHere
-                      ? "当前可用"
-                      : statusLabel(item.migration_status)
-                  return (
-                    <button
-                      className={cn(
-                        "rounded-lg border bg-background p-4 text-left transition-colors hover:bg-muted/50",
-                        selected && "border-primary bg-primary/5"
-                      )}
-                      key={item.id}
-                      onClick={() => onSelect(item)}
-                      type="button"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium">
-                            {item.display_name}
-                          </div>
-                          <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                            {item.description}
-                          </div>
-                        </div>
-                        <Badge variant={selected ? "secondary" : "outline"}>
-                          {item.use_case}
-                        </Badge>
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Badge variant="outline">
-                          输入：{item.input_requirements.join(", ")}
-                        </Badge>
-                        <Badge
-                          variant={
-                            canUseHere || isDedicatedEntry ? "secondary" : "outline"
-                          }
-                        >
-                          {entryLabel}
-                        </Badge>
-                        {item.streamlit_source && (
-                          <Badge variant="outline">{item.streamlit_source}</Badge>
-                        )}
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <RecipeSelect
+            onChange={onSelect}
+            templates={options}
+            triggerClassName="w-full sm:w-[260px]"
+            value={template.id}
+          />
+          <Badge variant="outline">
+            {pipelineChipLabel(template.pipeline_id)} ·{" "}
+            {artifactKindLabel(templateArtifactType(template.pipeline_id))}
+          </Badge>
+          <Badge variant="outline">预计 {template.estimated_turnaround}</Badge>
+        </div>
+        <button
+          className="shrink-0 self-start text-xs text-primary transition-colors hover:underline sm:self-auto"
+          onClick={() => navigate(`/create/recipes/${template.id}`)}
+          type="button"
+        >
+          调整默认配方
+        </button>
+      </div>
+      <p className="line-clamp-1 text-xs leading-5 text-muted-foreground">
+        {template.description}
+      </p>
+    </div>
   )
 }
 
@@ -1051,6 +924,14 @@ function StandardInput({
   advancedSettings,
   resources,
   resourcesError,
+  sampleText,
+  isNonVideo = false,
+  artifactKind = "video",
+  batchMode = false,
+  batchText = "",
+  batchItems = [],
+  onBatchTextChange,
+  onRemoveBatchItem,
   onTextChange,
   onAdvancedSettingsChange,
   onBgmUploaded,
@@ -1060,6 +941,14 @@ function StandardInput({
   advancedSettings: StandardAdvancedSettings
   resources: GenerationResources
   resourcesError: string | null
+  sampleText?: string
+  isNonVideo?: boolean
+  artifactKind?: ArtifactKind
+  batchMode?: boolean
+  batchText?: string
+  batchItems?: ParsedScriptItem[]
+  onBatchTextChange?: (value: string) => void
+  onRemoveBatchItem?: (index: number) => void
   onTextChange: (value: string) => void
   onAdvancedSettingsChange: (value: StandardAdvancedSettings) => void
   onBgmUploaded: (bgm: ResourceBgm) => void
@@ -1067,11 +956,23 @@ function StandardInput({
   const trimmedText = text.trim()
   const inputId = inputKind === "topic" ? "topic" : "script"
   const title =
-    inputKind === "topic" ? "选题或内容方向" : "视频文案"
+    inputKind === "topic" ? "选题或内容方向" : isNonVideo ? "文案" : "视频文案"
   const description =
     inputKind === "topic"
-      ? "后端会先生成脚本，再继续拆分、配音、画面生成和合成。"
-      : "这段文字会进入当前视频模板，后端负责拆分、配音、画面生成和合成。"
+      ? "AI 会先撰写文案，再继续拆分、配音、画面生成和合成。"
+      : artifactKind === "text"
+        ? "这段文字会扩写成结构化长文，不配音、不合成视频。"
+        : artifactKind === "image_set"
+          ? "这段文字会逐行排版成图集，不配音、不合成视频。"
+          : "这段文字会按原文拆分、配音、配画面并合成视频。"
+  const batchListLabel = artifactKind === "text" ? "稿件列表" : "文案列表"
+  const batchListHint =
+    artifactKind === "text"
+      ? "每篇会按配方的长文提示词扩写成结构化 markdown，换行不影响结果。"
+      : artifactKind === "image_set"
+        ? "用 --- 单独一行分隔多条；每条首行作标题。图文线按行分页，注意换行即分页。"
+        : "用 --- 单独一行分隔多条；每条首行作标题。"
+  const expertMode = useExpertMode()
   const [ttsPreview, setTtsPreview] = useState<TtsPreviewResponse | null>(null)
   const [ttsPreviewError, setTtsPreviewError] = useState<string | null>(null)
   const [isPreviewingTts, setIsPreviewingTts] = useState(false)
@@ -1095,8 +996,9 @@ function StandardInput({
     null
   )
   const [isLoadingTemplateParams, setIsLoadingTemplateParams] = useState(true)
-  const previewText = previewCopy(inputKind, text, advancedSettings.title)
-  const canPreview = previewText.length > 0
+  const previewText =
+    previewCopy(inputKind, text, advancedSettings.title) ||
+    "这是一段用于预览画面与声音的示例文案。"
   const ttsPreviewUrl = fileUrlFromPath(ttsPreview?.audio_path)
   const framePreviewUrl = fileUrlFromPath(framePreview?.frame_path)
   const mediaPreviewUrl = mediaPreviewFileUrl(mediaPreview?.media_path)
@@ -1216,7 +1118,7 @@ function StandardInput({
       const response = await uploadGenerationAssets([file])
       const asset = response.assets[0]
       if (!asset || asset.kind !== "audio") {
-        throw new Error("后端没有返回可用的音频资产。")
+        throw new Error("上传的文件不是可用的音频。")
       }
       patchAdvanced({
         ttsRefAudioPath: asset.path,
@@ -1231,11 +1133,6 @@ function StandardInput({
   }
 
   async function previewTts() {
-    if (!canPreview) {
-      setTtsPreviewError("请先输入要预览的文案。")
-      return
-    }
-
     setIsPreviewingTts(true)
     setTtsPreview(null)
     setTtsPreviewError(null)
@@ -1297,11 +1194,6 @@ function StandardInput({
   }
 
   async function previewFrame() {
-    if (!canPreview) {
-      setFramePreviewError("请先输入要预览的文案。")
-      return
-    }
-
     setIsPreviewingFrame(true)
     setFramePreview(null)
     setFramePreviewParams(null)
@@ -1327,53 +1219,82 @@ function StandardInput({
 
   return (
     <FieldGroup>
-      <Field data-invalid={!trimmedText && text.length > 0}>
-        <FieldLabel htmlFor={inputId}>{title}</FieldLabel>
-        <Textarea
-          aria-invalid={!trimmedText && text.length > 0}
-          className="min-h-52 resize-y text-base leading-7"
-          id={inputId}
-          onChange={(event) => updateText(event.target.value)}
-          value={text}
+      {batchMode ? (
+        <BatchScriptInput
+          artifactKind={artifactKind}
+          items={batchItems}
+          label={batchListLabel}
+          hint={batchListHint}
+          onRemoveItem={onRemoveBatchItem}
+          onTextChange={onBatchTextChange}
+          text={batchText}
         />
-        <FieldDescription>{description}</FieldDescription>
-      </Field>
+      ) : (
+        <Field data-invalid={!trimmedText && text.length > 0}>
+          <FieldLabel htmlFor={inputId}>{title}</FieldLabel>
+          <Textarea
+            aria-invalid={!trimmedText && text.length > 0}
+            className="min-h-52 resize-y text-base leading-7"
+            id={inputId}
+            onChange={(event) => updateText(event.target.value)}
+            placeholder={
+              inputKind === "topic"
+                ? "例如：猫咪夏天饮水少，主人应该怎么判断和处理"
+                : "粘贴或输入完整视频文案…"
+            }
+            value={text}
+          />
+          <FieldDescription className="flex flex-wrap items-center justify-between gap-2">
+            <span>{description}</span>
+            {sampleText && !trimmedText && (
+              <Button
+                onClick={() => updateText(sampleText)}
+                size="xs"
+                type="button"
+                variant="ghost"
+              >
+                填入示例
+              </Button>
+            )}
+          </FieldDescription>
+        </Field>
+      )}
 
-      <details className="rounded-lg border bg-background">
-        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
-          高级生成设置
-        </summary>
-        <div className="border-t p-4">
-          {resourcesError && (
-            <InlineError title="资源读取失败" message={resourcesError} />
-          )}
+      {resourcesError && (
+        <InlineError title="资源读取失败" message={resourcesError} />
+      )}
 
+      <div className="flex flex-col gap-3">
+        <AdvancedGroup
+          description="标题、分镜与提示词规则"
+          id="content"
+          title="内容结构"
+        >
           <div className="grid gap-4 lg:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor="advanced-title">视频标题</FieldLabel>
-              <input
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                id="advanced-title"
-                onChange={(event) =>
-                  patchAdvanced({ title: event.target.value })
-                }
-                placeholder="可选"
-                value={advancedSettings.title}
-              />
-            </Field>
+            {/* 批量态标题取每条首行，隐藏共享标题字段 */}
+            {!batchMode && (
+              <Field>
+                <FieldLabel htmlFor="advanced-title">
+                  {isNonVideo ? "标题" : "视频标题"}
+                </FieldLabel>
+                <Input
+                  id="advanced-title"
+                  onChange={(event) => patchAdvanced({ title: event.target.value })}
+                  placeholder="可选"
+                  value={advancedSettings.title}
+                />
+              </Field>
+            )}
 
             {inputKind === "topic" ? (
               <Field>
                 <FieldLabel htmlFor="advanced-scenes">分镜数量</FieldLabel>
-                <input
-                  className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                <Input
                   id="advanced-scenes"
                   max={12}
                   min={1}
                   onChange={(event) =>
-                    patchAdvanced({
-                      nScenes: Number(event.target.value || 5),
-                    })
+                    patchAdvanced({ nScenes: Number(event.target.value || 5) })
                   }
                   type="number"
                   value={advancedSettings.nScenes}
@@ -1381,246 +1302,115 @@ function StandardInput({
               </Field>
             ) : (
               <Field>
-                <FieldLabel htmlFor="advanced-split">文案拆分方式</FieldLabel>
-                <select
-                  className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                  id="advanced-split"
-                  onChange={(event) =>
-                    patchAdvanced({
-                      splitMode: event.target
-                        .value as StandardAdvancedSettings["splitMode"],
-                    })
-                  }
+                <FieldLabel>文案拆分方式</FieldLabel>
+                <ToggleGroup
+                  onValueChange={(value) => {
+                    if (value) {
+                      patchAdvanced({
+                        splitMode:
+                          value as StandardAdvancedSettings["splitMode"],
+                      })
+                    }
+                  }}
+                  type="single"
                   value={advancedSettings.splitMode}
+                  variant="outline"
                 >
-                  <option value="paragraph">按段落</option>
-                  <option value="line">按行</option>
-                  <option value="sentence">按句子</option>
-                </select>
+                  <ToggleGroupItem value="paragraph">按段落</ToggleGroupItem>
+                  <ToggleGroupItem value="line">按行</ToggleGroupItem>
+                  <ToggleGroupItem value="sentence">按句子</ToggleGroupItem>
+                </ToggleGroup>
               </Field>
             )}
+          </div>
 
+          <Field>
+            <FieldLabel htmlFor="advanced-prompt-rules">
+              画面提示词生成规则
+            </FieldLabel>
+            <Textarea
+              className="min-h-20 resize-y"
+              id="advanced-prompt-rules"
+              onChange={(event) =>
+                patchAdvanced({
+                  imagePromptGenerationRules: event.target.value,
+                })
+              }
+              placeholder="可选，用于约束每个分镜画面提示词的生成。"
+              value={advancedSettings.imagePromptGenerationRules}
+            />
+          </Field>
+        </AdvancedGroup>
+
+        {/* 长文（text）无画面；图集/视频保留画面风格 */}
+        {artifactKind !== "text" && (
+        <AdvancedGroup
+          description="画面模板、参数与帧图预览"
+          id="visual"
+          title="画面风格"
+        >
+          <div className="grid gap-4 lg:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="advanced-frame-template">画面模板</FieldLabel>
-              <select
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                id="advanced-frame-template"
-                onChange={(event) =>
-                  patchAdvanced({ frameTemplate: event.target.value })
+              <FieldLabel>画面模板</FieldLabel>
+              <Select
+                onValueChange={(value) =>
+                  patchAdvanced({ frameTemplate: value })
                 }
                 value={advancedSettings.frameTemplate}
               >
-                <option value="1080x1920/image_default.html">
-                  1080x1920/image_default.html
-                </option>
-                {resources.frameTemplates.map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.key}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="选择画面模板" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1080x1920/image_default.html">
+                    1080x1920/image_default.html
+                  </SelectItem>
+                  {resources.frameTemplates
+                    .filter(
+                      (item) => item.key !== "1080x1920/image_default.html"
+                    )
+                    .map((item) => (
+                      <SelectItem key={item.key} value={item.key}>
+                        {item.key}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
             </Field>
 
-            <Field>
-              <FieldLabel htmlFor="advanced-media-workflow">画面 workflow</FieldLabel>
-              <select
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                id="advanced-media-workflow"
-                onChange={(event) =>
-                  patchAdvanced({ mediaWorkflow: event.target.value })
-                }
-                value={advancedSettings.mediaWorkflow}
-              >
-                <option value="">使用模板默认</option>
-                {resources.mediaWorkflows.map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.display_name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field>
-              <FieldLabel htmlFor="advanced-tts-mode">TTS 模式</FieldLabel>
-              <select
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                id="advanced-tts-mode"
-                onChange={(event) =>
-                  patchAdvanced({
-                    ttsInferenceMode: event.target
-                      .value as StandardAdvancedSettings["ttsInferenceMode"],
-                  })
-                }
-                value={advancedSettings.ttsInferenceMode}
-              >
-                <option value="local">本地/Edge Voice</option>
-                <option value="comfyui">ComfyUI workflow</option>
-                <option value="fish">Fish Audio</option>
-              </select>
-            </Field>
-
-            <Field>
-              <FieldLabel htmlFor="advanced-tts-voice">声音或 Reference ID</FieldLabel>
-              <input
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                id="advanced-tts-voice"
-                onChange={(event) =>
-                  patchAdvanced({ ttsVoice: event.target.value })
-                }
-                value={advancedSettings.ttsVoice}
-              />
-            </Field>
-
-            <Field>
-              <FieldLabel htmlFor="advanced-tts-workflow">TTS workflow</FieldLabel>
-              <select
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                id="advanced-tts-workflow"
-                onChange={(event) =>
-                  patchAdvanced({ ttsWorkflow: event.target.value })
-                }
-                value={advancedSettings.ttsWorkflow}
-              >
-                <option value="">使用模板默认</option>
-                {resources.ttsWorkflows.map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.display_name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field>
-              <FieldLabel htmlFor="advanced-tts-speed">语速</FieldLabel>
-              <input
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                id="advanced-tts-speed"
-                max={2}
-                min={0.5}
-                onChange={(event) =>
-                  patchAdvanced({
-                    ttsSpeed: Number(event.target.value || 1),
-                  })
-                }
-                step={0.1}
-                type="number"
-                value={advancedSettings.ttsSpeed}
-              />
-            </Field>
-
-            {advancedSettings.ttsInferenceMode === "comfyui" && (
-              <Field className="lg:col-span-2">
-                <FieldLabel htmlFor="advanced-ref-audio">Reference audio</FieldLabel>
-                <input
-                  accept="audio/mpeg,audio/wav,audio/flac,audio/mp4,audio/aac,audio/ogg,.mp3,.wav,.flac,.m4a,.aac,.ogg"
-                  className="block w-full rounded-lg border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm"
-                  disabled={isUploadingRefAudio}
-                  id="advanced-ref-audio"
-                  onChange={(event) =>
-                    void uploadRefAudio(event.currentTarget.files?.[0] ?? null)
+            {expertMode && (
+              <Field>
+                <FieldLabel>画面 workflow</FieldLabel>
+                <Select
+                  onValueChange={(value) =>
+                    patchAdvanced({
+                      mediaWorkflow: value === "__default__" ? "" : value,
+                    })
                   }
-                  type="file"
-                />
-                <FieldDescription>
-                  用于 ComfyUI voice cloning。上传后会传给 TTS 预览和正式生成。
-                </FieldDescription>
-                {isUploadingRefAudio && (
-                  <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
-                    正在上传参考音频
-                  </div>
-                )}
-                {advancedSettings.ttsRefAudioPath && (
-                  <div className="mt-2 break-all rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
-                    {advancedSettings.ttsRefAudioName || "reference audio"} ·{" "}
-                    {advancedSettings.ttsRefAudioPath}
-                  </div>
-                )}
-                {refAudioUploadError && (
-                  <InlineError
-                    title="参考音频上传失败"
-                    message={refAudioUploadError}
-                  />
-                )}
+                  value={advancedSettings.mediaWorkflow || "__default__"}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">使用模板默认</SelectItem>
+                    {resources.mediaWorkflows.map((item) => (
+                      <SelectItem key={item.key} value={item.key}>
+                        {item.display_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldDescription>专家模式覆盖项。</FieldDescription>
               </Field>
             )}
-
-            <Field>
-              <FieldLabel htmlFor="advanced-bgm">背景音乐</FieldLabel>
-              <select
-                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                id="advanced-bgm"
-                onChange={(event) =>
-                  patchAdvanced({ bgmPath: event.target.value })
-                }
-                value={advancedSettings.bgmPath}
-              >
-                <option value="">不指定 BGM</option>
-                {resources.bgm.map((item) => (
-                  <option key={item.path} value={item.path}>
-                    {item.name} · {item.source}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <BgmUploadControl
-              onUploaded={(bgm) => {
-                onBgmUploaded(bgm)
-                patchAdvanced({ bgmPath: bgm.path })
-              }}
-            />
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field>
-                <FieldLabel htmlFor="advanced-bgm-volume">BGM 音量</FieldLabel>
-                <input
-                  className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                  id="advanced-bgm-volume"
-                  max={1}
-                  min={0}
-                  onChange={(event) =>
-                    patchAdvanced({
-                      bgmVolume: Number(event.target.value || 0),
-                    })
-                  }
-                  step={0.05}
-                  type="number"
-                  value={advancedSettings.bgmVolume}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="advanced-bgm-mode">BGM 模式</FieldLabel>
-                <select
-                  className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                  id="advanced-bgm-mode"
-                  onChange={(event) =>
-                    patchAdvanced({
-                      bgmMode: event.target
-                        .value as StandardAdvancedSettings["bgmMode"],
-                    })
-                  }
-                  value={advancedSettings.bgmMode}
-                >
-                  <option value="loop">循环</option>
-                  <option value="once">播放一次</option>
-                </select>
-              </Field>
-            </div>
           </div>
 
-          {bgmPreviewUrl && (
-            <div className="mt-4 rounded-lg border bg-muted/30 p-4">
-              <div className="text-sm font-medium">BGM 预览</div>
-              <audio className="mt-3 w-full" controls src={bgmPreviewUrl} />
-            </div>
-          )}
-
-          <div className="mt-5 rounded-lg border bg-muted/30 p-4">
+          <div className="rounded-lg border bg-muted/30 p-4">
             <div className="flex flex-col gap-1">
               <div className="text-sm font-medium">模板自定义参数</div>
               <p className="text-sm leading-6 text-muted-foreground">
-                参数来自当前 HTML 模板，会随生成任务一起提交。
+                参数来自当前画面模板，会随生成任务一起提交。
               </p>
             </div>
 
@@ -1697,121 +1487,107 @@ function StandardInput({
             )}
           </div>
 
-          <div className="mt-5 grid gap-4 xl:grid-cols-3">
-            <div className="rounded-lg border bg-muted/30 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="text-sm font-medium">声音预览</div>
-                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    使用当前 TTS 设置调用真实后端合成一小段音频。
-                  </p>
-                </div>
-                <Button
-                  disabled={!canPreview || isPreviewingTts}
-                  onClick={() => void previewTts()}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {isPreviewingTts ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
-                  ) : (
-                    <Volume2 data-icon="inline-start" />
-                  )}
-                  预览声音
-                </Button>
+          <div className="rounded-lg border bg-muted/30 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-sm font-medium">画面预览</div>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  用当前画面模板渲染一张示例帧图；未填文案时使用示例文案。
+                </p>
               </div>
-              {ttsPreviewError && (
-                <InlineError title="TTS 预览失败" message={ttsPreviewError} />
-              )}
-              {ttsPreview && (
-                <div className="mt-4 flex flex-col gap-3">
-                  {ttsPreviewUrl ? (
-                    <audio className="w-full" controls src={ttsPreviewUrl} />
-                  ) : (
-                    <InlineError
-                      title="音频不可预览"
-                      message="后端返回了 audio_path，但无法转换成 /api/files URL。"
-                    />
-                  )}
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Fact label="音频时长" value={formatDuration(ttsPreview.duration)} />
-                    <Fact label="TTS 模式" value={advancedSettings.ttsInferenceMode} />
-                  </div>
-                  <div className="break-all rounded-lg bg-background p-3 font-mono text-xs text-muted-foreground">
-                    {ttsPreview.audio_path}
-                  </div>
-                </div>
-              )}
+              <Button
+                disabled={isPreviewingFrame}
+                onClick={() => void previewFrame()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {isPreviewingFrame ? (
+                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                ) : (
+                  <ImageIcon data-icon="inline-start" />
+                )}
+                预览画面
+              </Button>
             </div>
-
-            <div className="rounded-lg border bg-muted/30 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="text-sm font-medium">画面模板预览</div>
-                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    使用当前模板和预览文案渲染一张真实帧图。
-                  </p>
+            {framePreviewError && (
+              <InlineError title="画面预览失败" message={framePreviewError} />
+            )}
+            {framePreview && (
+              <div className="mt-4 flex flex-col gap-3">
+                {framePreviewUrl ? (
+                  <img
+                    alt="画面模板预览"
+                    className="aspect-[9/16] max-h-[420px] rounded-lg border bg-background object-contain"
+                    src={framePreviewUrl}
+                  />
+                ) : (
+                  <InlineError
+                    title="画面不可预览"
+                    message="帧图已渲染，但当前无法在浏览器中显示。"
+                  />
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Fact
+                    label="渲染尺寸"
+                    value={`${framePreview.width} x ${framePreview.height}`}
+                  />
+                  <Fact
+                    label="媒体区域"
+                    value={
+                      framePreviewParams
+                        ? `${framePreviewParams.media_width} x ${framePreviewParams.media_height}`
+                        : "未返回"
+                    }
+                  />
                 </div>
-                <Button
-                  disabled={!canPreview || isPreviewingFrame}
-                  onClick={() => void previewFrame()}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {isPreviewingFrame ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
-                  ) : (
-                    <ImageIcon data-icon="inline-start" />
-                  )}
-                  预览画面
-                </Button>
+                <TechDetails
+                  items={[{ label: "帧图路径", value: framePreview.frame_path }]}
+                />
               </div>
-              {framePreviewError && (
-                <InlineError title="模板预览失败" message={framePreviewError} />
-              )}
-              {framePreview && (
-                <div className="mt-4 flex flex-col gap-3">
-                  {framePreviewUrl ? (
-                    <img
-                      alt="画面模板预览"
-                      className="aspect-[9/16] max-h-[420px] rounded-lg border bg-background object-contain"
-                      src={framePreviewUrl}
-                    />
-                  ) : (
-                    <InlineError
-                      title="画面不可预览"
-                      message="后端返回了 frame_path，但无法转换成 /api/files URL。"
-                    />
-                  )}
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Fact
-                      label="渲染尺寸"
-                      value={`${framePreview.width} x ${framePreview.height}`}
-                    />
-                    <Fact
-                      label="媒体区域"
-                      value={
-                        framePreviewParams
-                          ? `${framePreviewParams.media_width} x ${framePreviewParams.media_height}`
-                          : "未返回"
-                      }
-                    />
-                  </div>
-                  <div className="break-all rounded-lg bg-background p-3 font-mono text-xs text-muted-foreground">
-                    {framePreview.frame_path}
-                  </div>
-                </div>
-              )}
-            </div>
+            )}
+          </div>
 
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Field>
+              <FieldLabel htmlFor="advanced-prompt-prefix">
+                画面提示词前缀
+              </FieldLabel>
+              <Textarea
+                className="min-h-20 resize-y"
+                id="advanced-prompt-prefix"
+                onChange={(event) =>
+                  patchAdvanced({ promptPrefix: event.target.value })
+                }
+                placeholder="可选，例如：温暖自然光、真实宠物生活方式、竖屏构图"
+                value={advancedSettings.promptPrefix}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="advanced-visual-context">
+                画面视觉上下文
+              </FieldLabel>
+              <Textarea
+                className="min-h-20 resize-y"
+                id="advanced-visual-context"
+                onChange={(event) =>
+                  patchAdvanced({
+                    imagePromptVisualContext: event.target.value,
+                  })
+                }
+                placeholder="可选，例如品牌视觉、宠物品种、场景约束。"
+                value={advancedSettings.imagePromptVisualContext}
+              />
+            </Field>
+          </div>
+
+          {expertMode && (
             <div className="rounded-lg border bg-muted/30 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="text-sm font-medium">媒体工作流预览</div>
                   <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    使用当前 workflow 生成一张图片或一段短视频。
+                    生成一张示例图片或一段短视频；会调用生成服务并消耗额度。
                   </p>
                 </div>
                 <Button
@@ -1862,8 +1638,7 @@ function StandardInput({
                   <FieldLabel htmlFor="advanced-media-duration">
                     预览视频时长
                   </FieldLabel>
-                  <input
-                    className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                  <Input
                     id="advanced-media-duration"
                     max={20}
                     min={1}
@@ -1900,64 +1675,272 @@ function StandardInput({
                   ) : (
                     <InlineError
                       title="媒体不可预览"
-                      message="后端返回了媒体路径，但无法转换成可访问 URL。"
+                      message="媒体已生成，但当前无法在浏览器中显示。"
                     />
                   )}
-                  <div className="break-all rounded-lg bg-background p-3 font-mono text-xs text-muted-foreground">
-                    {mediaPreview.media_path}
-                  </div>
+                  <TechDetails
+                    items={[{ label: "媒体路径", value: mediaPreview.media_path }]}
+                  />
                 </div>
               )}
             </div>
+          )}
+        </AdvancedGroup>
+        )}
+
+        {/* 图文/长文无配音；仅视频保留声音与音乐 */}
+        {!isNonVideo && (
+        <AdvancedGroup
+          description="声音试听、语速与背景音乐"
+          id="audio"
+          title="声音与音乐"
+        >
+          <div className="grid gap-4 lg:grid-cols-2">
+            {expertMode && (
+              <Field>
+                <FieldLabel>TTS 模式</FieldLabel>
+                <Select
+                  onValueChange={(value) =>
+                    patchAdvanced({
+                      ttsInferenceMode:
+                        value as StandardAdvancedSettings["ttsInferenceMode"],
+                    })
+                  }
+                  value={advancedSettings.ttsInferenceMode}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="local">本地 / Edge Voice</SelectItem>
+                    <SelectItem value="comfyui">ComfyUI workflow</SelectItem>
+                    <SelectItem value="fish">Fish Audio</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FieldDescription>专家模式覆盖项。</FieldDescription>
+              </Field>
+            )}
+
+            <Field>
+              <FieldLabel htmlFor="advanced-tts-voice">
+                声音或 Reference ID
+              </FieldLabel>
+              <Input
+                id="advanced-tts-voice"
+                onChange={(event) =>
+                  patchAdvanced({ ttsVoice: event.target.value })
+                }
+                value={advancedSettings.ttsVoice}
+              />
+            </Field>
+
+            {expertMode && (
+              <Field>
+                <FieldLabel>TTS workflow</FieldLabel>
+                <Select
+                  onValueChange={(value) =>
+                    patchAdvanced({
+                      ttsWorkflow: value === "__default__" ? "" : value,
+                    })
+                  }
+                  value={advancedSettings.ttsWorkflow || "__default__"}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">使用模板默认</SelectItem>
+                    {resources.ttsWorkflows.map((item) => (
+                      <SelectItem key={item.key} value={item.key}>
+                        {item.display_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FieldDescription>专家模式覆盖项。</FieldDescription>
+              </Field>
+            )}
+
+            <Field>
+              <FieldLabel htmlFor="advanced-tts-speed">
+                语速 · {advancedSettings.ttsSpeed.toFixed(1)}x
+              </FieldLabel>
+              <Slider
+                id="advanced-tts-speed"
+                max={2}
+                min={0.5}
+                onValueChange={([value]) =>
+                  patchAdvanced({ ttsSpeed: value ?? 1 })
+                }
+                step={0.1}
+                value={[advancedSettings.ttsSpeed]}
+              />
+            </Field>
           </div>
 
-          <Field className="mt-4">
-            <FieldLabel htmlFor="advanced-prompt-prefix">画面提示词前缀</FieldLabel>
-            <Textarea
-              className="min-h-24 resize-y"
-              id="advanced-prompt-prefix"
-              onChange={(event) =>
-                patchAdvanced({ promptPrefix: event.target.value })
-              }
-              placeholder="可选，例如：温暖自然光、真实宠物生活方式、竖屏构图"
-              value={advancedSettings.promptPrefix}
-            />
-          </Field>
+          {expertMode && advancedSettings.ttsInferenceMode === "comfyui" && (
+            <Field>
+              <FieldLabel htmlFor="advanced-ref-audio">Reference audio</FieldLabel>
+              <input
+                accept="audio/mpeg,audio/wav,audio/flac,audio/mp4,audio/aac,audio/ogg,.mp3,.wav,.flac,.m4a,.aac,.ogg"
+                className="block w-full rounded-lg border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm"
+                disabled={isUploadingRefAudio}
+                id="advanced-ref-audio"
+                onChange={(event) =>
+                  void uploadRefAudio(event.currentTarget.files?.[0] ?? null)
+                }
+                type="file"
+              />
+              <FieldDescription>
+                用于 ComfyUI voice cloning，试听和正式生成都会使用。
+              </FieldDescription>
+              {isUploadingRefAudio && (
+                <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                  正在上传参考音频
+                </div>
+              )}
+              {advancedSettings.ttsRefAudioPath && (
+                <TechDetails
+                  items={[
+                    {
+                      label: advancedSettings.ttsRefAudioName || "参考音频",
+                      value: advancedSettings.ttsRefAudioPath,
+                    },
+                  ]}
+                />
+              )}
+              {refAudioUploadError && (
+                <InlineError
+                  title="参考音频上传失败"
+                  message={refAudioUploadError}
+                />
+              )}
+            </Field>
+          )}
 
-          <Field className="mt-4">
-            <FieldLabel htmlFor="advanced-visual-context">画面视觉上下文</FieldLabel>
-            <Textarea
-              className="min-h-24 resize-y"
-              id="advanced-visual-context"
-              onChange={(event) =>
-                patchAdvanced({
-                  imagePromptVisualContext: event.target.value,
-                })
-              }
-              placeholder="可选，例如品牌视觉、宠物品种、场景约束或不希望偏离的画面事实。"
-              value={advancedSettings.imagePromptVisualContext}
-            />
-            <FieldDescription>
-              对应旧 Streamlit 的 image_prompt_visual_context。
-            </FieldDescription>
-          </Field>
+          <div className="rounded-lg border bg-muted/30 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-sm font-medium">试听</div>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  用当前声音设置合成一小段试听音频。
+                </p>
+              </div>
+              <Button
+                disabled={isPreviewingTts}
+                onClick={() => void previewTts()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {isPreviewingTts ? (
+                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                ) : (
+                  <Volume2 data-icon="inline-start" />
+                )}
+                试听声音
+              </Button>
+            </div>
+            {ttsPreviewError && (
+              <InlineError title="试听失败" message={ttsPreviewError} />
+            )}
+            {ttsPreview && (
+              <div className="mt-4 flex flex-col gap-3">
+                {ttsPreviewUrl ? (
+                  <audio className="w-full" controls src={ttsPreviewUrl} />
+                ) : (
+                  <InlineError
+                    title="音频不可播放"
+                    message="音频已合成，但当前无法在浏览器中播放。"
+                  />
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Fact label="音频时长" value={formatDuration(ttsPreview.duration)} />
+                  <Fact label="声音" value={advancedSettings.ttsVoice || "默认"} />
+                </div>
+                <TechDetails
+                  items={[{ label: "音频路径", value: ttsPreview.audio_path }]}
+                />
+              </div>
+            )}
+          </div>
 
-          <Field className="mt-4">
-            <FieldLabel htmlFor="advanced-prompt-rules">画面提示词生成规则</FieldLabel>
-            <Textarea
-              className="min-h-24 resize-y"
-              id="advanced-prompt-rules"
-              onChange={(event) =>
-                patchAdvanced({
-                  imagePromptGenerationRules: event.target.value,
-                })
-              }
-              placeholder="可选，用于约束后端生成每个分镜的画面提示词。"
-              value={advancedSettings.imagePromptGenerationRules}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Field>
+              <FieldLabel>背景音乐</FieldLabel>
+              <Select
+                onValueChange={(value) =>
+                  patchAdvanced({ bgmPath: value === "__none__" ? "" : value })
+                }
+                value={advancedSettings.bgmPath || "__none__"}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">不指定 BGM</SelectItem>
+                  {resources.bgm.map((item) => (
+                    <SelectItem key={item.path} value={item.path}>
+                      {item.name} · {item.source}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+
+            <BgmUploadControl
+              onUploaded={(bgm) => {
+                onBgmUploaded(bgm)
+                patchAdvanced({ bgmPath: bgm.path })
+              }}
             />
-          </Field>
-        </div>
-      </details>
+
+            <Field>
+              <FieldLabel htmlFor="advanced-bgm-volume">
+                BGM 音量 · {Math.round(advancedSettings.bgmVolume * 100)}%
+              </FieldLabel>
+              <Slider
+                id="advanced-bgm-volume"
+                max={1}
+                min={0}
+                onValueChange={([value]) =>
+                  patchAdvanced({ bgmVolume: value ?? 0 })
+                }
+                step={0.05}
+                value={[advancedSettings.bgmVolume]}
+              />
+            </Field>
+
+            <Field>
+              <FieldLabel>BGM 模式</FieldLabel>
+              <ToggleGroup
+                onValueChange={(value) => {
+                  if (value) {
+                    patchAdvanced({
+                      bgmMode: value as StandardAdvancedSettings["bgmMode"],
+                    })
+                  }
+                }}
+                type="single"
+                value={advancedSettings.bgmMode}
+                variant="outline"
+              >
+                <ToggleGroupItem value="loop">循环</ToggleGroupItem>
+                <ToggleGroupItem value="once">播放一次</ToggleGroupItem>
+              </ToggleGroup>
+            </Field>
+          </div>
+
+          {bgmPreviewUrl && (
+            <div className="rounded-lg border bg-muted/30 p-4">
+              <div className="text-sm font-medium">BGM 预览</div>
+              <audio className="mt-3 w-full" controls src={bgmPreviewUrl} />
+            </div>
+          )}
+        </AdvancedGroup>
+        )}
+      </div>
     </FieldGroup>
   )
 }
@@ -2003,39 +1986,17 @@ function AssetInput({
     <FieldGroup>
       <Field data-invalid={assetFiles.length === 0}>
         <FieldLabel htmlFor="assets">图片或视频素材</FieldLabel>
-        <input
+        <FileDropzone
           accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm"
-          className="block w-full rounded-lg border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm"
+          files={assetFiles}
+          hint="支持图片和视频，可多选"
           id="assets"
-          multiple
-          onChange={(event) =>
-            onAssetFilesChange(Array.from(event.currentTarget.files ?? []))
-          }
-          type="file"
+          onFilesChange={onAssetFilesChange}
         />
         <FieldDescription>
-          支持图片和视频。提交时会先上传到本地素材目录，再把真实路径交给后端生成任务。
+          提交时会先上传素材，再开始生成。
         </FieldDescription>
       </Field>
-
-      {assetFiles.length > 0 && (
-        <div className="rounded-lg border bg-muted/30 p-3">
-          <div className="text-sm font-medium">待上传素材</div>
-          <div className="mt-2 flex flex-col gap-2">
-            {assetFiles.map((file) => (
-              <div
-                className="flex items-center justify-between gap-3 rounded-md bg-background px-3 py-2 text-sm"
-                key={`${file.name}-${file.size}-${file.lastModified}`}
-              >
-                <span className="min-w-0 truncate">{file.name}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {formatBytes(file.size)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {uploadedAssets.length > 0 && (
         <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-primary">
@@ -2205,7 +2166,6 @@ function TaskPanel({
   task,
   result,
   template,
-  pollError,
   taskActionError,
 }: {
   isCancellingTask: boolean
@@ -2213,10 +2173,26 @@ function TaskPanel({
   task: GenerationTask | null
   result: GenerationResult | null
   template: ProductionTemplate | null
-  pollError: string | null
   taskActionError: string | null
 }) {
+  const toast = useToast()
   const videoUrl = artifactFileUrl(result?.primary_video)
+  const isImageSet = result?.artifact_type === "image_set"
+  const isText = result?.artifact_type === "text"
+  const articleText =
+    isText && typeof result?.metadata?.article === "string"
+      ? result.metadata.article
+      : ""
+  const imageSetItems =
+    isImageSet && result
+      ? result.artifacts
+          .filter((artifact) => artifact.kind === "image")
+          .map((artifact, index) => ({
+            url: artifactFileUrl(artifact) ?? "",
+            label: imageSetLabel(index, artifact.role),
+          }))
+          .filter((item) => item.url)
+      : []
   const qualitySummary = buildQualitySummary(
     result?.metadata?.quality_review as QualityReviewInput | undefined
   )
@@ -2230,35 +2206,29 @@ function TaskPanel({
     <aside className="flex flex-col gap-5">
       <Card className="rounded-lg">
         <CardHeader className="border-b">
-          <CardTitle>2. 真实任务状态</CardTitle>
+          <CardTitle>任务状态</CardTitle>
           <CardDescription>
-            提交后展示后端返回的任务进度和失败原因。
+            提交后在这里跟踪进度；失败时会显示原因。
           </CardDescription>
         </CardHeader>
         <CardContent>
           {!task && (
             <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-              提交内容后，这里会显示真实
-              <code className="mx-1 rounded bg-background px-1 py-0.5 text-xs">
-                generation_task_id
-              </code>
-              和轮询状态。
+              提交后这里会显示生成进度。
             </div>
           )}
 
           {task && (
             <div className="flex flex-col gap-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm text-muted-foreground">任务 ID</div>
-                  <div className="mt-1 truncate font-mono text-sm">
-                    {task.task_id}
-                  </div>
-                </div>
+              <div className="flex items-center justify-between gap-3">
+                <StatusBadge status={task.status} />
                 <div className="flex shrink-0 items-center gap-2">
                   <Button
                     aria-label="复制任务 ID"
-                    onClick={() => void navigator.clipboard?.writeText(task.task_id)}
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(task.task_id)
+                      toast({ title: "任务 ID 已复制", variant: "success" })
+                    }}
                     size="icon-sm"
                     type="button"
                     variant="outline"
@@ -2277,7 +2247,6 @@ function TaskPanel({
                       取消任务
                     </Button>
                   )}
-                  <StatusBadge status={task.status} />
                 </div>
               </div>
 
@@ -2291,9 +2260,6 @@ function TaskPanel({
                   </span>
                 </div>
                 <Progress className="mt-3" value={task.progress.percentage} />
-                <div className="mt-2 text-xs text-muted-foreground">
-                  stage: {task.progress.stage}
-                </div>
                 {progressRuntimeItems.length > 0 && (
                   <div className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-2">
                     {progressRuntimeItems.map((item) => (
@@ -2303,14 +2269,9 @@ function TaskPanel({
                 )}
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                <Fact label="生成链路" value={task.pipeline_id} />
-                <Fact label="输入类型" value={task.entry} />
-              </div>
-
               {task.status === "failed" && task.error && (
                 <InlineError
-                  title={`任务失败：${task.error.layer}`}
+                  title="任务失败"
                   message={`${task.error.message}${
                     template?.failure_guidance
                       ? ` ${template.failure_guidance}`
@@ -2318,10 +2279,22 @@ function TaskPanel({
                   }`}
                 />
               )}
+
+              <TechDetails
+                items={[
+                  { label: "任务 ID", value: task.task_id },
+                  { label: "生成链路", value: task.pipeline_id },
+                  { label: "输入类型", value: task.entry },
+                  { label: "当前阶段", value: task.progress.stage },
+                  {
+                    label: "失败层级",
+                    value: task.status === "failed" ? task.error?.layer : null,
+                  },
+                ]}
+              />
             </div>
           )}
 
-          {pollError && <InlineError title="状态读取失败" message={pollError} />}
           {taskActionError && (
             <InlineError title="任务操作失败" message={taskActionError} />
           )}
@@ -2330,21 +2303,39 @@ function TaskPanel({
 
       <Card className="rounded-lg">
         <CardHeader className="border-b">
-          <CardTitle>3. 结果</CardTitle>
+          <CardTitle>生成结果</CardTitle>
           <CardDescription>
-            任务完成后会自动展示成片和关键产物信息。
+            任务完成后自动展示成片和关键信息。
           </CardDescription>
         </CardHeader>
         <CardContent>
           {!result && (
             <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-              任务完成前不会显示成片结果。
+              完成后这里会显示成片预览。
             </div>
           )}
 
           {result && (
             <div className="flex flex-col gap-4">
-              {videoUrl ? (
+              {isText ? (
+                <TextArticleView
+                  article={articleText}
+                  title={
+                    typeof result.metadata?.title === "string"
+                      ? result.metadata.title
+                      : null
+                  }
+                />
+              ) : isImageSet ? (
+                <ImageSetView
+                  caption={
+                    typeof result.metadata?.caption === "string"
+                      ? result.metadata.caption
+                      : null
+                  }
+                  items={imageSetItems}
+                />
+              ) : videoUrl ? (
                 <video
                   className="aspect-[9/16] max-h-[520px] rounded-lg border bg-black"
                   controls
@@ -2353,9 +2344,17 @@ function TaskPanel({
               ) : (
                 <InlineError
                   title="结果视频不可预览"
-                  message="后端返回了 primary_video.path，但无法转换成 /api/files URL。"
+                  message="成片已生成，但当前无法在浏览器中预览。"
                 />
               )}
+
+              <Button
+                onClick={() => navigate(`/library?task=${result.task_id}`)}
+                size="lg"
+              >
+                <Send data-icon="inline-start" />
+                前往发布
+              </Button>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <Fact
@@ -2434,116 +2433,27 @@ function TaskPanel({
 
               <Separator />
 
-              <div>
-                <div className="text-sm font-medium">成片路径</div>
-                <div className="mt-2 break-all rounded-lg bg-muted/40 p-3 font-mono text-xs text-muted-foreground">
-                  {result.primary_video.path}
-                </div>
-              </div>
+              <TechDetails
+                items={[
+                  {
+                    label: isText
+                      ? "长文字数"
+                      : isImageSet
+                        ? "图集封面"
+                        : "成片路径",
+                    value: isText
+                      ? `${articleText.length} 字`
+                      : (result.primary_video?.path ??
+                        imageSetItems[0]?.url ??
+                        "（图集）"),
+                  },
+                ]}
+              />
             </div>
           )}
         </CardContent>
       </Card>
     </aside>
-  )
-}
-
-function TemplateStatusWorkspace({
-  templates,
-  loadState,
-  onSelect,
-}: {
-  templates: ProductionTemplate[]
-  loadState: LoadState
-  onSelect: (template: ProductionTemplate) => void
-}) {
-  const readyCount = templates.filter((template) => template.enabled).length
-  const legacyCount = templates.filter(
-    (template) => template.migration_status === "legacy_only"
-  ).length
-  const plannedCount = templates.filter(
-    (template) => template.migration_status === "planned"
-  ).length
-
-  return (
-    <main className="mx-auto flex max-w-[1240px] flex-col gap-5 p-4 lg:p-6">
-      <Card className="rounded-lg">
-        <CardHeader className="border-b">
-          <CardTitle>模板与迁移状态</CardTitle>
-          <CardDescription>
-            Pipeline 是底层能力，模板是面向用户的固定生成方案。这里展示 React 入口和真实任务提交状态；最终视频和发布仍以 E2E 验收为准。
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Fact label="React 可提交" value={`${readyCount} 个`} />
-            <Fact label="Legacy only" value={`${legacyCount} 个`} />
-            <Fact label="Planned" value={`${plannedCount} 个`} />
-          </div>
-
-          {loadState === "loading" && (
-            <div className="mt-4 flex items-center gap-2 rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              正在读取模板状态
-            </div>
-          )}
-
-          <div className="mt-5 grid gap-3 lg:grid-cols-2">
-            {templates.map((template) => {
-              const isDedicatedEntry = template.product_entry !== "generate"
-              return (
-                <div className="rounded-lg border bg-background p-4" key={template.id}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold">
-                        {template.display_name}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {template.id}
-                      </div>
-                    </div>
-                    <MigrationBadge status={template.migration_status} />
-                  </div>
-                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                    {template.description}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Badge
-                      variant={
-                        template.enabled || isDedicatedEntry ? "secondary" : "outline"
-                      }
-                    >
-                      {isDedicatedEntry
-                        ? "专用入口"
-                        : template.enabled
-                          ? "React 可提交"
-                          : "不可提交"}
-                    </Badge>
-                    <Badge variant="outline">
-                      输入：{template.input_requirements.join(", ")}
-                    </Badge>
-                    <Badge variant="outline">{template.pipeline_id}</Badge>
-                    {template.streamlit_source && (
-                      <Badge variant="outline">{template.streamlit_source}</Badge>
-                    )}
-                  </div>
-                  {template.migration_notes && (
-                    <div className="mt-3 rounded-lg bg-muted/40 p-3 text-sm leading-6 text-muted-foreground">
-                      {template.migration_notes}
-                    </div>
-                  )}
-                  <div className="mt-4 flex justify-end">
-                    <Button onClick={() => onSelect(template)} variant="outline">
-                      {isDedicatedEntry ? "打开专用入口" : "使用这个模板"}
-                    </Button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
-    </main>
   )
 }
 
@@ -2700,6 +2610,87 @@ function formatTemplateParamDefault(value: unknown) {
   return String(value)
 }
 
+function BatchScriptInput({
+  text,
+  label,
+  hint,
+  items,
+  artifactKind,
+  onTextChange,
+  onRemoveItem,
+}: {
+  text: string
+  label: string
+  hint: string
+  items: ParsedScriptItem[]
+  artifactKind: ArtifactKind
+  onTextChange?: (value: string) => void
+  onRemoveItem?: (index: number) => void
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <Field>
+        <FieldLabel htmlFor="batch-text">{label}</FieldLabel>
+        <Textarea
+          className="min-h-64 resize-y text-base leading-7"
+          id="batch-text"
+          onChange={(event) => onTextChange?.(event.target.value)}
+          placeholder={
+            "第一条标题\n第一条完整文案...\n\n---\n\n第二条标题\n第二条完整文案..."
+          }
+          value={text}
+        />
+        <FieldDescription>{hint}</FieldDescription>
+      </Field>
+      {items.length > 0 ? (
+        <div className="rounded-lg border bg-muted/30 p-3">
+          <div className="text-sm font-medium">解析预览 · {items.length} 条</div>
+          <div className="mt-2 flex flex-col gap-1.5">
+            {items.map((item, index) => {
+              const itemTitle = getBatchPreviewTitle(item.input, index)
+              const chars = getBatchPreviewBody(item.input).length
+              const lines = getBatchPreviewLineCount(item.input)
+              const meta =
+                artifactKind === "text"
+                  ? `素材 ${chars} 字`
+                  : artifactKind === "image_set"
+                    ? `${chars} 字 · ${lines} 行`
+                    : `${chars} 字`
+              return (
+                <div
+                  className="flex items-center gap-3 rounded-lg border bg-background px-3 py-2 text-sm"
+                  key={`${index}-${itemTitle}`}
+                >
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {index + 1}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{itemTitle}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {meta}
+                  </span>
+                  <Button
+                    aria-label={`移除第 ${index + 1} 条`}
+                    onClick={() => onRemoveItem?.(index)}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <X />
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+          在上面粘贴多条内容，这里会实时显示解析出的条目。
+        </div>
+      )}
+    </div>
+  )
+}
+
 function buildStandardTemplateInput({
   template,
   script,
@@ -2757,14 +2748,6 @@ function compactRecord(record: Record<string, unknown>) {
   )
 }
 
-function isSpecialProductEntry(value: string): value is SpecialPipelineMode {
-  return (
-    value === "image_to_video" ||
-    value === "action_transfer" ||
-    value === "digital_human"
-  )
-}
-
 function QualityBadge({
   tone,
   label,
@@ -2816,98 +2799,6 @@ function QualityMessages({
   )
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-background p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate text-sm font-medium">{value}</div>
-    </div>
-  )
-}
-
-function StatusBadge({ status }: { status: GenerationTask["status"] }) {
-  const config = {
-    pending: { label: "pending", icon: Clock3, className: "" },
-    running: { label: "running", icon: Loader2, className: "animate-spin" },
-    completed: { label: "completed", icon: CheckCircle2, className: "" },
-    failed: { label: "failed", icon: XCircle, className: "" },
-    cancelled: { label: "cancelled", icon: AlertCircle, className: "" },
-  }[status]
-  const Icon = config.icon
-
-  return (
-    <Badge variant={status === "failed" ? "destructive" : "secondary"}>
-      <Icon className={cn(config.className)} data-icon="inline-start" />
-      {config.label}
-    </Badge>
-  )
-}
-
-function MigrationBadge({
-  status,
-}: {
-  status: ProductionTemplate["migration_status"]
-}) {
-  const label = statusLabel(status)
-  const variant = status === "ready" || status === "partial" ? "secondary" : "outline"
-  return <Badge variant={variant}>{label}</Badge>
-}
-
-function statusLabel(status: ProductionTemplate["migration_status"]) {
-  const labels = {
-    ready: "React 可提交",
-    partial: "部分迁移",
-    legacy_only: "Legacy only",
-    planned: "计划中",
-  }
-  return labels[status]
-}
-
-function InlineError({ title, message }: { title: string; message: string }) {
-  return (
-    <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-      <div className="flex items-start gap-2">
-        <AlertCircle className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <div className="font-medium">{title}</div>
-          <div className="mt-1 leading-6">{message}</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function readableError(error: unknown) {
-  if (error instanceof ApiError) {
-    return error.message
-  }
-
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
-}
-
-function formatDuration(value: number | null) {
-  if (value == null) {
-    return "未返回"
-  }
-
-  return `${value.toFixed(1)} 秒`
-}
-
-function formatBytes(value: number | null) {
-  if (value == null) {
-    return "未返回"
-  }
-
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`
-  }
-
-  return `${(value / 1024 / 1024).toFixed(1)} MB`
-}
 
 function productionTemplateLabel(
   result: GenerationResult,

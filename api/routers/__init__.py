@@ -15,6 +15,8 @@ API Routers
 """
 
 from api.routers.content import router as content_router
+from api.routers.content_items import router as content_items_router
+from api.routers.drafting import router as drafting_router
 from api.routers.files import router as files_router
 from api.routers.frame import router as frame_router
 from api.routers.generation import router as generation_router
@@ -25,6 +27,7 @@ from api.routers.health import router as health_router
 from api.routers.image import router as image_router
 from api.routers.llm import router as llm_router
 from api.routers.media import router as media_router
+from api.routers.projects import router as projects_router
 from api.routers.publish import router as publish_router
 from api.routers.resources import router as resources_router
 from api.routers.settings import router as settings_router
@@ -39,6 +42,9 @@ __all__ = [
     "image_router",
     "media_router",
     "content_router",
+    "content_items_router",
+    "drafting_router",
+    "projects_router",
     "video_router",
     "tasks_router",
     "files_router",

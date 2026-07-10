@@ -136,6 +136,22 @@ class PromptTemplate:
     source: str
 
 
+async def _call_llm_retrying_empty(llm_service, *, attempts: int = 3, **kwargs) -> str:
+    """LLM 偶发空响应属于可重试错误：小退避重试，多次为空则返回空串交由上层报错。"""
+    import asyncio
+
+    delay = 1.5
+    response = ""
+    for attempt in range(attempts):
+        response = await llm_service(**kwargs)
+        if (response or "").strip():
+            return response
+        if attempt < attempts - 1:
+            await asyncio.sleep(delay)
+            delay *= 2
+    return response
+
+
 def _extract_json_object(text: str) -> dict:
     raw = (text or "").strip()
     if not raw:
@@ -522,7 +538,8 @@ async def generate_independent_language_drafts(
         resolved_language_script_models[language] = selected_script_model
         selected_script_template = (language_script_templates or {}).get(language, script_template)
         script_prompt = render_language_script_prompt(selected_script_template, clean_topic, language)
-        script_response = await llm_service(
+        script_response = await _call_llm_retrying_empty(
+            llm_service,
             prompt=script_prompt,
             model=(selected_script_model or None),
             temperature=0.8,
@@ -557,7 +574,8 @@ async def generate_independent_language_drafts(
             status_callback("splitting_script", language)
 
         split_prompt = render_language_split_prompt(split_template, clean_topic, language, language_script)
-        split_response = await llm_service(
+        split_response = await _call_llm_retrying_empty(
+            llm_service,
             prompt=split_prompt,
             model=(split_model or None),
             temperature=0.1,
@@ -578,7 +596,8 @@ async def generate_independent_language_drafts(
             continue
         if status_callback:
             status_callback("generating_title", language)
-        title_response = await llm_service(
+        title_response = await _call_llm_retrying_empty(
+            llm_service,
             prompt=render_language_title_prompt(
                 topic=clean_topic,
                 language=language,

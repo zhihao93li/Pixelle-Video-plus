@@ -20,6 +20,13 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { HelpWorkspace } from "@/components/HelpWorkspace"
+import { ProjectsPanel } from "@/components/ProjectsPanel"
+import { TemplateStatusPanel } from "@/components/TemplateStatusPanel"
+import { setExpertMode, useExpertMode } from "@/lib/expertMode"
+import { parsePath, usePath } from "@/lib/router"
 import {
   ApiError,
   addRunninghubWorkflow,
@@ -119,6 +126,60 @@ export function SettingsWorkspace() {
     message: string
   } | null>(null)
   const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>([])
+
+  // Deep-link：?tab= 控制受控 Tabs；?section= / ?template= 滚动到目标区块并一次性高亮。
+  const { query } = parsePath(usePath())
+  const tabParam = query.get("tab")
+  const sectionParam = query.get("section")
+  const templateParam = query.get("template")
+
+  const [activeTab, setActiveTab] = useState(tabParam ?? "general")
+  const [lastTabParam, setLastTabParam] = useState(tabParam)
+  if (tabParam !== lastTabParam) {
+    // URL 的 tab 变了（deep-link 导航）→ 采用它；用户手动点 tab 不改 URL，不冲突。
+    setLastTabParam(tabParam)
+    if (tabParam) {
+      setActiveTab(tabParam)
+    }
+  }
+
+  useEffect(() => {
+    const targetId = activeTab === "templates" ? templateParam : sectionParam
+    if (!targetId) {
+      return
+    }
+    let cancelled = false
+    let timer: number | undefined
+    let attempts = 0
+    const HIGHLIGHT = ["ring-2", "ring-primary/40"]
+    function attempt() {
+      if (cancelled) {
+        return
+      }
+      const element = document.getElementById(targetId as string)
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "start" })
+        element.classList.add(...HIGHLIGHT)
+        timer = window.setTimeout(
+          () => element.classList.remove(...HIGHLIGHT),
+          1500
+        )
+        return
+      }
+      attempts += 1
+      if (attempts < 15) {
+        // 目标可能还在异步加载（设置/模板列表），短暂重试
+        timer = window.setTimeout(attempt, 200)
+      }
+    }
+    timer = window.setTimeout(attempt, 80)
+    return () => {
+      cancelled = true
+      if (timer) {
+        window.clearTimeout(timer)
+      }
+    }
+  }, [activeTab, sectionParam, templateParam])
 
   async function refreshDiagnostics() {
     try {
@@ -423,7 +484,23 @@ export function SettingsWorkspace() {
   }
 
   return (
-    <main className="mx-auto flex max-w-[1240px] flex-col gap-5 p-4 lg:p-6">
+    <main className="flex max-w-[1240px] flex-col gap-5 p-4 lg:p-6">
+      <Tabs onValueChange={setActiveTab} value={activeTab}>
+        <TabsList>
+          <TabsTrigger value="general">系统设置</TabsTrigger>
+          <TabsTrigger value="templates">模板状态</TabsTrigger>
+          <TabsTrigger value="help">帮助</TabsTrigger>
+        </TabsList>
+
+        <TabsContent className="mt-4" value="templates">
+          <TemplateStatusPanel />
+        </TabsContent>
+
+        <TabsContent className="mt-4" value="help">
+          <HelpWorkspace />
+        </TabsContent>
+
+        <TabsContent className="mt-4" value="general">
       <Card className="rounded-lg">
         <CardHeader className="border-b">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -454,8 +531,14 @@ export function SettingsWorkspace() {
             <div className="flex flex-col gap-5">
               <DiagnosticsPanel checks={diagnostics} ok={diagnosticsOk} />
 
+              <div className="scroll-mt-20 rounded-lg" id="projects">
+                <ProjectsPanel />
+              </div>
+
+              <ExpertModeSection />
+
               <div className="grid gap-5 lg:grid-cols-2">
-                <Section title="LLM">
+                <Section id="llm" title="LLM">
                   <Field label="AiHubMix API Key">
                     <Input
                       onChange={(event) =>
@@ -753,7 +836,7 @@ export function SettingsWorkspace() {
                   </div>
                 </Section>
 
-                <Section title="Fish Audio">
+                <Section id="tts" title="Fish Audio">
                   <Field label="API Key">
                     <Input
                       onChange={(event) =>
@@ -1084,19 +1167,42 @@ export function SettingsWorkspace() {
           )}
         </CardContent>
       </Card>
+        </TabsContent>
+      </Tabs>
     </main>
+  )
+}
+
+function ExpertModeSection() {
+  const expertMode = useExpertMode()
+  return (
+    <Section title="专家模式">
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-sm leading-6 text-muted-foreground">
+          开启后，生成页高级设置会显示画面 / TTS workflow 等底层覆盖项，
+          模板状态页可编辑模板级默认生成配置。日常使用建议保持关闭。
+        </p>
+        <Switch
+          aria-label="专家模式"
+          checked={expertMode}
+          onCheckedChange={setExpertMode}
+        />
+      </div>
+    </Section>
   )
 }
 
 function Section({
   title,
   children,
+  id,
 }: {
   title: string
   children: React.ReactNode
+  id?: string
 }) {
   return (
-    <div className="rounded-lg border bg-background p-4">
+    <div className="scroll-mt-20 rounded-lg border bg-background p-4" id={id}>
       <div className="mb-4 flex items-center gap-2 text-sm font-semibold">
         <Settings className="size-4" />
         {title}

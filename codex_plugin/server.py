@@ -196,7 +196,7 @@ async def pixelle_get_capabilities() -> dict[str, Any]:
             "full_operations_experiment",
         ],
         "default_pipeline": "standard",
-        "default_production_template": "petwoods_xhs_daily_v1",
+        "default_production_template": "pipeline_standard_base_v1",
         "p2_capabilities": {
             "cheat_workspace_summary": True,
             "context_export": True,

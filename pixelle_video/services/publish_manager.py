@@ -137,7 +137,16 @@ class PublishManager:
         if metadata.get("status") != "completed":
             raise ValueError(f"Task must be completed before publishing: {task_id}")
 
-        video_path = metadata.get("result", {}).get("video_path")
+        result = metadata.get("result", {}) or {}
+        # 非视频产物（图文帖 / 长文）没有 video_path，也没有 Buffer 自动发布路径：
+        # 给可读 400，防 agent/深链绕过前端触发裸 ValueError（旧数据无字段按 video 兼容）。
+        artifact_type = result.get("artifact_type") or "video"
+        if artifact_type != "video":
+            raise ValueError(
+                "该任务产物为图集/长文，暂不支持自动发布，请下载后手动发布。"
+            )
+
+        video_path = result.get("video_path")
         if not video_path:
             raise ValueError(f"Task has no result.video_path: {task_id}")
         if not Path(video_path).exists():

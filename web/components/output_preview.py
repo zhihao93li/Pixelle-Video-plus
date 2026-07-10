@@ -184,6 +184,11 @@ def render_single_output(pixelle_video, video_params):
                     raise RuntimeError(f"Generation task {task.task_id} finished without a result")
 
                 result = task.result
+                # 非视频产物（图文帖图集 / 长文）无主视频；旧 Streamlit 预览只支持视频
+                if result.primary_video is None:
+                    raise RuntimeError(
+                        "该产物不是视频（图文帖 / 长文），请在新版控制台的内容详情页查看、复制或下载。"
+                    )
                 video_path = result.primary_video.path
                 
                 # Calculate total generation time

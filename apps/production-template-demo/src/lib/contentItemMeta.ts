@@ -1,0 +1,57 @@
+import type { ContentVariantStatus } from "@/lib/generationApi"
+
+/** 内容工作台看板列定义：列名 → 包含的条目状态。archived 不在看板显示。 */
+export const BOARD_COLUMNS: Array<{ key: string; label: string; statuses: string[] }> = [
+  { key: "idea", label: "选题池", statuses: ["idea"] },
+  { key: "draft", label: "草稿", statuses: ["drafting", "draft_ready"] },
+  { key: "review", label: "待确认", statuses: ["pending_review", "confirmed"] },
+  { key: "producing", label: "生产中", statuses: ["producing"] },
+  { key: "ready", label: "待发布", statuses: ["produced", "scheduled"] },
+  { key: "published", label: "已发布", statuses: ["published", "measured"] },
+]
+
+export const STATUS_LABELS: Record<string, string> = {
+  idea: "选题",
+  drafting: "起草中",
+  draft_ready: "草稿完成",
+  pending_review: "待确认",
+  confirmed: "已确认",
+  producing: "生产中",
+  produced: "已出片",
+  scheduled: "已排期",
+  published: "已发布",
+  measured: "已复盘",
+  archived: "已归档",
+}
+
+export function statusLabel(status: string) {
+  return STATUS_LABELS[status] ?? status
+}
+
+export const VARIANT_STATUS_LABELS: Record<ContentVariantStatus, string> = {
+  pending: "待确认",
+  confirmed: "已确认",
+  rejected: "已打回",
+}
+
+export const EVENT_TYPE_LABELS: Record<string, string> = {
+  created: "创建",
+  status_changed: "状态变更",
+  draft_generated: "草稿生成",
+  confirmed: "已确认",
+  produced: "已出片",
+  scheduled: "已排期",
+  published: "已发布",
+  metrics_recorded: "数据录入",
+  note: "备注",
+}
+
+export function eventTypeLabel(type: string) {
+  return EVENT_TYPE_LABELS[type] ?? type
+}
+
+export const ACTOR_LABELS: Record<string, string> = {
+  user: "我",
+  agent: "AI",
+  system: "系统",
+}

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="template:media-width" content="1024">
+    <meta name="template:media-height" content="1024">
+    <style>
+        html { margin: 0; padding: 0; }
+        body {
+            margin: 0;
+            padding: 0;
+            width: 1080px;
+            background: #fbf9f5;
+            font-family: 'PingFang SC', 'Source Han Sans', 'Microsoft YaHei', sans-serif;
+            position: relative;
+            overflow: hidden;
+        }
+        .page {
+            width: 1080px;
+            height: 1440px;
+            padding: 72px 72px 88px 72px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 56px;
+        }
+        .image-card {
+            width: 100%;
+            height: 760px;
+            border-radius: 28px;
+            overflow: hidden;
+            box-shadow: 0 18px 60px rgba(0, 0, 0, 0.10);
+            background: #eee7db;
+            flex-shrink: 0;
+        }
+        .image-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .body-text {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            font-size: 52px;
+            line-height: 1.7;
+            font-weight: 600;
+            color: #23201b;
+            letter-spacing: 1px;
+            text-wrap: balance;
+        }
+        .footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-top: 2px solid rgba(120, 110, 95, 0.25);
+            padding-top: 28px;
+        }
+        .brand {
+            font-size: 26px;
+            font-weight: 600;
+            color: #8a7f6c;
+            letter-spacing: 2px;
+        }
+        .page-number {
+            font-size: 30px;
+            font-weight: 700;
+            color: #b9a98c;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="image-card">
+            <img src="{{image}}" alt="page image">
+        </div>
+        <div class="body-text">{{text}}</div>
+        <div class="footer">
+            <div class="brand">{{brand=Pixelle}}</div>
+            <div class="page-number">{{index}}</div>
+        </div>
+    </div>
+</body>
+</html>

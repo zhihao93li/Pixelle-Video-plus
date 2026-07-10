@@ -23,7 +23,6 @@ import {
   listResourceTemplates,
   listResourceTtsWorkflows,
   listRunninghubWorkflows,
-  listGenerationProjects,
   listGenerationBatches,
   listHistoryTasks,
   listPublishTimezones,
@@ -34,6 +33,7 @@ import {
   renderFramePreview,
   resetSettingsConfig,
   retryGenerationBatchItem,
+  setTemplateEnabled,
   submitScriptReviewDraftSetTasks,
   synthesizeTtsPreview,
   testComfyuiConnection,
@@ -42,7 +42,6 @@ import {
   uploadResourceBgm,
   updateScriptReviewDraftSet,
   updateSettingsConfig,
-  updateProjectGenerationSettings,
 } from "../src/lib/generationApi.ts"
 
 type FetchCall = {
@@ -120,28 +119,6 @@ test("publish APIs send selected platforms and copy without provider choices", a
       caption: "Caption #petcare",
       title: "Title",
       due_at: "2026-07-04T09:00:00+08:00",
-    })
-  )
-})
-
-test("project generation settings APIs read projects and persist default template", async () => {
-  const calls = installFetchMock({ status: "ok", projects: [] })
-
-  await listGenerationProjects()
-  await updateProjectGenerationSettings(
-    "project-1",
-    "petwoods_xhs_quality_explainer_v1"
-  )
-
-  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/generation/projects")
-  assert.equal(
-    calls[1].url,
-    "http://127.0.0.1:8000/api/generation/projects/project-1/generation-settings"
-  )
-  assert.equal(
-    calls[1].init?.body,
-    JSON.stringify({
-      default_production_template_id: "petwoods_xhs_quality_explainer_v1",
     })
   )
 })
@@ -388,7 +365,7 @@ test("generic production template task API sends asset template input and metada
   const calls = installFetchMock({ success: true, generation_task_id: "task-1" })
 
   await createGenerationTemplateTask(
-    "petwoods_xhs_asset_enhanced_v1",
+    "pipeline_asset_based_base_v1",
     {
       assets: ["/tmp/cat.jpg"],
       video_title: "猫咪日常",
@@ -403,7 +380,7 @@ test("generic production template task API sends asset template input and metada
 
   assert.equal(
     calls[0].url,
-    "http://127.0.0.1:8000/api/generation/templates/petwoods_xhs_asset_enhanced_v1/tasks"
+    "http://127.0.0.1:8000/api/generation/templates/pipeline_asset_based_base_v1/tasks"
   )
   assert.equal(
     calls[0].init?.body,
@@ -431,14 +408,27 @@ test("generation task cancel API uses task-scoped delete route", async () => {
   assert.equal(calls[0].init?.method, "DELETE")
 })
 
+test("template enabled API PUTs the toggle to the enabled route", async () => {
+  const calls = installFetchMock({ id: "pipeline_asset_based_base_v1", enabled: false })
+
+  await setTemplateEnabled("pipeline_asset_based_base_v1", false)
+
+  assert.equal(
+    calls[0].url,
+    "http://127.0.0.1:8000/api/generation/templates/pipeline_asset_based_base_v1/enabled"
+  )
+  assert.equal(calls[0].init?.method, "PUT")
+  assert.equal(calls[0].init?.body, JSON.stringify({ enabled: false }))
+})
+
 test("generation batch APIs persist real task batches", async () => {
   const calls = installFetchMock({ batches: [], batch_id: "batch-1", items: [] })
 
   await createGenerationBatch({
-    templateId: "petwoods_xhs_topic_to_video_v1",
+    templateId: "pipeline_standard_base_v1",
     items: [
       {
-        input: { topic: "Cat hydration" },
+        input: { script: "Cats need clean water daily." },
         metadata: { row: 1 },
       },
     ],
@@ -453,10 +443,10 @@ test("generation batch APIs persist real task batches", async () => {
   assert.equal(
     calls[0].init?.body,
     JSON.stringify({
-      template_id: "petwoods_xhs_topic_to_video_v1",
+      template_id: "pipeline_standard_base_v1",
       items: [
         {
-          input: { topic: "Cat hydration" },
+          input: { script: "Cats need clean water daily." },
           metadata: { row: 1 },
           idempotency_key: null,
         },
@@ -532,6 +522,8 @@ test("script review APIs persist drafts and submit reviewed tasks", async () => 
     JSON.stringify({
       topics: ["Cat hydration"],
       languages: ["English"],
+      project_id: null,
+      drafting_profile_id: null,
       script_template_name: "Short Oral Script",
       split_template_name: "Copy-Safe Scene Split",
       script_model: "model-a",
@@ -566,6 +558,7 @@ test("script review APIs persist drafts and submit reviewed tasks", async () => 
     calls[5].init?.body,
     JSON.stringify({
       drafts: [{ topic: "Cat hydration", selected_for_generation: true }],
+      template_id: null,
       base_params: { frame_template: "1080x1920/image_default.html" },
       language_tts_overrides: {
         English: {

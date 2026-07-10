@@ -1,0 +1,268 @@
+"""Persisted per-template generation-config overrides.
+
+模板级默认生成配置：三层配置模型的中间层（设置管接入，模板管默认，表单管这一次）。
+Overrides are stored as JSON at ``data/production-template-overrides.json`` and
+merged into each template's ``fixed_params`` when the registry is built, so
+every request (React, Ops, Codex) sees the same effective defaults.
+
+Only whitelisted keys can be overridden, and only when the target template also
+allows them as user params — pipeline-level wiring (pipeline_id, entry,
+capabilities) is never overridable from the API. ``compose_runtime`` IS
+overridable now（html_ffmpeg / hyperframes），让用户零代码自建动效配方；选
+hyperframes 时校验本机有 npx（动效合成依赖 Node 环境）。
+"""
+
+import json
+import os
+import shutil
+import threading
+from pathlib import Path
+from typing import Any
+
+from pixelle_video.utils.os_util import get_data_path, get_root_path
+
+OVERRIDES_FILENAME = "production-template-overrides.json"
+
+# 可通过 API 覆盖的生成默认值白名单。pipeline 结构性参数一律不在此列。
+OVERRIDABLE_PARAMS: dict[str, type | tuple[type, ...]] = {
+    "split_mode": str,
+    "frame_template": str,
+    "media_workflow": str,
+    "media_width": int,
+    "media_height": int,
+    "prompt_prefix": str,
+    "image_prompt_visual_context": str,
+    "image_prompt_generation_rules": str,
+    "bgm_path": str,
+    "bgm_volume": (int, float),
+    "bgm_mode": str,
+    "tts_inference_mode": str,
+    "tts_workflow": str,
+    "tts_voice": str,
+    "tts_speed": (int, float),
+    # 素材分析/媒体 workflow 的执行端（selfhost=本地 ComfyUI / runninghub=云端）
+    "source": str,
+    # 单 workflow 直跑玩法的 workflow 文件（相对 workflows/，如 runninghub/i2v_LTX2.json）
+    "workflow_key": str,
+    # 合成方式：html_ffmpeg（标准）/ hyperframes（动效，依赖本机 npx）
+    "compose_runtime": str,
+    # 长文线：改写提示词（多行，须含 {script} 占位）/ 目标字数 / 写作模型
+    "long_form_prompt": str,
+    "word_count": int,
+    "llm_model": str,
+}
+
+# 长文目标字数的合理区间
+WORD_COUNT_MIN = 200
+WORD_COUNT_MAX = 20000
+
+# compose_runtime 合法枚举（与 compose_runtime.py 注册的运行时一致）
+COMPOSE_RUNTIMES = ("html_ffmpeg", "hyperframes")
+
+_lock = threading.Lock()
+
+
+class TemplateOverrideError(ValueError):
+    pass
+
+
+def _overrides_path() -> str:
+    return get_data_path(OVERRIDES_FILENAME)
+
+
+def _workflows_dir() -> Path:
+    # workflow 文件在仓库根 workflows/ 下（pipeline 用 Path("workflows") / key 加载）
+    return Path(get_root_path("workflows"))
+
+
+def available_workflow_keys() -> list[str]:
+    base = _workflows_dir()
+    if not base.is_dir():
+        return []
+    return sorted(
+        str(path.relative_to(base)).replace(os.sep, "/")
+        for path in base.rglob("*.json")
+    )
+
+
+def _validate_workflow_key(value: str) -> None:
+    if not (_workflows_dir() / value).is_file():
+        available = available_workflow_keys()
+        listed = "、".join(available) if available else "（无）"
+        raise TemplateOverrideError(
+            f"workflow 文件不存在：{value}。可用：{listed}"
+        )
+
+
+def _validate_compose_runtime(value: str) -> None:
+    if value not in COMPOSE_RUNTIMES:
+        listed = " / ".join(COMPOSE_RUNTIMES)
+        raise TemplateOverrideError(
+            f"合成方式只能是 {listed}；收到 {value!r}。"
+        )
+    # 动效合成（hyperframes）在合成时调 `npx hyperframes`，本机缺 Node 会失败——
+    # 保存时就拦下来，别等到出片才报错。
+    if value == "hyperframes" and not shutil.which("npx"):
+        raise TemplateOverrideError(
+            "动效合成需要本机 Node 环境（npx），请先安装 Node.js。"
+        )
+
+
+def _validate_long_form_prompt(value: str) -> None:
+    # 空值已在 validate_overrides 里被当作"清除覆盖"跳过；这里只校验非空提示词
+    if "{script}" not in value:
+        raise TemplateOverrideError(
+            "长文提示词缺少 {script} 占位符，确认稿将无法注入。"
+        )
+
+
+def _validate_word_count(value: int) -> None:
+    if not (WORD_COUNT_MIN <= value <= WORD_COUNT_MAX):
+        raise TemplateOverrideError(
+            f"目标字数需在 {WORD_COUNT_MIN}–{WORD_COUNT_MAX} 之间；收到 {value}。"
+        )
+
+
+def _parse_entry(value: Any) -> tuple[dict[str, Any], bool | None]:
+    """把一条模板记录解析成 (参数 overrides, enabled)。
+
+    兼容两种格式：
+    - 旧扁平格式 ``{param: value, ...}`` → 全部是参数，enabled=None。
+    - 新包裹格式 ``{"overrides": {...}, "enabled": bool}`` → 参数与启用开关平级。
+    """
+    if not isinstance(value, dict):
+        return {}, None
+    if "overrides" in value or "enabled" in value:
+        raw_overrides = value.get("overrides")
+        overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
+        enabled = value.get("enabled")
+        enabled = enabled if isinstance(enabled, bool) else None
+    else:
+        overrides, enabled = value, None
+    filtered = {
+        key: val for key, val in overrides.items() if key in OVERRIDABLE_PARAMS
+    }
+    return filtered, enabled
+
+
+def _load_entries() -> dict[str, dict[str, Any]]:
+    path = _overrides_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    entries: dict[str, dict[str, Any]] = {}
+    for template_id, value in data.items():
+        if not isinstance(template_id, str):
+            continue
+        overrides, enabled = _parse_entry(value)
+        entries[template_id] = {"overrides": overrides, "enabled": enabled}
+    return entries
+
+
+def _write_entries(entries: dict[str, dict[str, Any]]) -> None:
+    out: dict[str, Any] = {}
+    for template_id, entry in entries.items():
+        overrides = entry.get("overrides") or {}
+        enabled = entry.get("enabled")
+        if not overrides and enabled is None:
+            continue  # 两者都空 → 删除该条
+        record: dict[str, Any] = {}
+        if overrides:
+            record["overrides"] = overrides
+        if enabled is not None:
+            record["enabled"] = enabled
+        out[template_id] = record
+    path = _overrides_path()
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(out, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+
+
+def load_all_overrides() -> dict[str, dict[str, Any]]:
+    return {
+        template_id: entry["overrides"]
+        for template_id, entry in _load_entries().items()
+        if entry["overrides"]
+    }
+
+
+def load_overrides(template_id: str) -> dict[str, Any]:
+    return _load_entries().get(template_id, {}).get("overrides", {})
+
+
+def load_all_enabled() -> dict[str, bool]:
+    """每模板用户侧的启用/停用开关（None 表示未设置）。"""
+    return {
+        template_id: entry["enabled"]
+        for template_id, entry in _load_entries().items()
+        if entry["enabled"] is not None
+    }
+
+
+def load_enabled(template_id: str) -> bool | None:
+    return _load_entries().get(template_id, {}).get("enabled")
+
+
+def save_enabled(template_id: str, enabled: bool | None) -> None:
+    """写入模板启用开关；None 清除该开关（回到代码默认）。"""
+    with _lock:
+        entries = _load_entries()
+        entry = entries.setdefault(template_id, {"overrides": {}, "enabled": None})
+        entry["enabled"] = enabled
+        _write_entries(entries)
+
+
+def validate_overrides(
+    overrides: dict[str, Any],
+    *,
+    allowed_user_params: list[str],
+) -> dict[str, Any]:
+    """Validate and normalize an overrides payload for one template."""
+    if not isinstance(overrides, dict):
+        raise TemplateOverrideError("overrides 必须是对象。")
+
+    cleaned: dict[str, Any] = {}
+    for key, value in overrides.items():
+        if key not in OVERRIDABLE_PARAMS:
+            raise TemplateOverrideError(f"参数 {key!r} 不允许作为模板默认值覆盖。")
+        if key not in allowed_user_params:
+            raise TemplateOverrideError(
+                f"当前模板不支持参数 {key!r}，不能为它设置默认值。"
+            )
+        if value is None or value == "":
+            # 空值表示清除该项覆盖
+            continue
+        expected = OVERRIDABLE_PARAMS[key]
+        if isinstance(expected, tuple):
+            ok = isinstance(value, expected) and not isinstance(value, bool)
+        else:
+            ok = isinstance(value, expected) and not isinstance(value, bool)
+        if not ok:
+            raise TemplateOverrideError(f"参数 {key!r} 的值类型不正确。")
+        if key == "workflow_key":
+            _validate_workflow_key(value)
+        if key == "compose_runtime":
+            _validate_compose_runtime(value)
+        if key == "long_form_prompt":
+            _validate_long_form_prompt(value)
+        if key == "word_count":
+            _validate_word_count(value)
+        cleaned[key] = value
+    return cleaned
+
+
+def save_overrides(template_id: str, overrides: dict[str, Any]) -> dict[str, Any]:
+    """Persist param overrides for a template; preserves the enabled flag."""
+    with _lock:
+        entries = _load_entries()
+        entry = entries.setdefault(template_id, {"overrides": {}, "enabled": None})
+        entry["overrides"] = overrides
+        _write_entries(entries)
+    return overrides

@@ -208,6 +208,97 @@ class GenerationService:
             callback(task)
 
     def _to_generation_result(self, task: GenerationTask, pipeline_result) -> GenerationResult:
+        artifact_type = self._get_result_value(pipeline_result, "artifact_type")
+        if artifact_type == "image_set":
+            return self._to_image_set_result(task, pipeline_result)
+        if artifact_type == "text":
+            return self._to_text_result(task, pipeline_result)
+        return self._to_video_result(task, pipeline_result)
+
+    def _to_text_result(self, task: GenerationTask, pipeline_result) -> GenerationResult:
+        article = self._get_result_value(pipeline_result, "article") or ""
+        if not article.strip():
+            raise ValueError("Long-form pipeline completed without any article text")
+        article_path = self._get_result_value(pipeline_result, "article_path")
+        title = self._get_result_value(pipeline_result, "title") or ""
+        language = self._get_result_value(pipeline_result, "language")
+        word_count = self._get_result_value(pipeline_result, "word_count")
+        if word_count is None:
+            word_count = len(article)
+
+        artifact = GenerationArtifact(
+            kind="metadata",
+            path=article_path or "",
+            media_type="text/markdown",
+            role="article",
+            metadata={"word_count": word_count, "language": language},
+        )
+        file_size = None
+        if article_path and os.path.exists(article_path):
+            file_size = os.path.getsize(article_path)
+
+        return GenerationResult(
+            task_id=task.task_id,
+            pipeline_id=task.pipeline_id,
+            entry=task.entry,
+            artifact_type="text",
+            artifacts=[artifact],
+            primary_video=None,
+            file_size=file_size,
+            metadata={
+                "source_result_type": type(pipeline_result).__name__,
+                "artifact_type": "text",
+                # 全文承载字段（与 image_set 存 caption 同一机制：读取端从 metadata 取）
+                "article": article,
+                "title": title,
+                "language": language,
+                "word_count": word_count,
+                **task.request.metadata,
+            },
+        )
+
+    def _to_image_set_result(self, task: GenerationTask, pipeline_result) -> GenerationResult:
+        image_paths = self._get_result_value(pipeline_result, "image_paths") or []
+        if not image_paths:
+            raise ValueError("Image-post pipeline completed without any images")
+        cover_path = self._get_result_value(pipeline_result, "cover_path")
+        caption = self._get_result_value(pipeline_result, "caption") or ""
+
+        artifacts: list[GenerationArtifact] = []
+        total_size = 0
+        for index, path in enumerate(image_paths):
+            is_cover = path == cover_path if cover_path else index == 0
+            if os.path.exists(path):
+                total_size += os.path.getsize(path)
+            artifacts.append(
+                GenerationArtifact(
+                    kind="image",
+                    path=path,
+                    media_type="image/png",
+                    role="cover" if is_cover else "page",
+                    metadata={"index": index, "is_cover": is_cover},
+                )
+            )
+
+        page_count = self._get_result_value(pipeline_result, "page_count")
+        return GenerationResult(
+            task_id=task.task_id,
+            pipeline_id=task.pipeline_id,
+            entry=task.entry,
+            artifact_type="image_set",
+            artifacts=artifacts,
+            primary_video=None,
+            file_size=total_size or None,
+            metadata={
+                "source_result_type": type(pipeline_result).__name__,
+                "artifact_type": "image_set",
+                "caption": caption,
+                "page_count": page_count if page_count is not None else len(artifacts),
+                **task.request.metadata,
+            },
+        )
+
+    def _to_video_result(self, task: GenerationTask, pipeline_result) -> GenerationResult:
         video_path = (
             self._get_result_value(pipeline_result, "video_path")
             or self._get_result_value(pipeline_result, "final_video_path")

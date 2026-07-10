@@ -340,6 +340,32 @@ def test_buffer_publisher_detects_supported_channel_ids_from_services():
 
 
 @pytest.mark.asyncio
+async def test_publish_manager_rejects_non_video_artifacts_with_readable_error(tmp_path):
+    persistence = PersistenceService(output_dir=str(tmp_path))
+    task_id = "20260708_longform"
+    (tmp_path / task_id).mkdir()
+    await persistence.save_task_metadata(
+        task_id,
+        {
+            "task_id": task_id,
+            "created_at": "2026-07-08T10:00:00",
+            "completed_at": "2026-07-08T10:00:30",
+            "status": "completed",
+            "input": {"title": "我的长文"},
+            # 长文/图集 result 没有 video_path，只有 artifact_type
+            "result": {"artifact_type": "text", "article": "# 标题\n正文", "word_count": 8},
+        },
+    )
+
+    manager = PublishManager(persistence=persistence, channel_ids={})
+
+    with pytest.raises(ValueError, match="暂不支持自动发布"):
+        await manager.publish_task(
+            task_id=task_id, platforms=["youtube"], caption="caption"
+        )
+
+
+@pytest.mark.asyncio
 async def test_publish_manager_records_each_platform_independently(tmp_path):
     persistence = PersistenceService(output_dir=str(tmp_path))
     task_id = "20260515_test"

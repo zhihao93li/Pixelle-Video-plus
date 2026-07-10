@@ -45,6 +45,8 @@ from api.dependencies import shutdown_pixelle_video
 # Import routers
 from api.routers import (
     content_router,
+    content_items_router,
+    drafting_router,
     files_router,
     frame_router,
     generation_router,
@@ -55,6 +57,7 @@ from api.routers import (
     image_router,
     llm_router,
     media_router,
+    projects_router,
     publish_router,
     resources_router,
     settings_router,
@@ -137,6 +140,9 @@ app.include_router(tts_router, prefix=api_config.api_prefix)
 app.include_router(image_router, prefix=api_config.api_prefix)
 app.include_router(media_router, prefix=api_config.api_prefix)
 app.include_router(content_router, prefix=api_config.api_prefix)
+app.include_router(content_items_router, prefix=api_config.api_prefix)
+app.include_router(drafting_router, prefix=api_config.api_prefix)
+app.include_router(projects_router, prefix=api_config.api_prefix)
 app.include_router(video_router, prefix=api_config.api_prefix)
 app.include_router(tasks_router, prefix=api_config.api_prefix)
 app.include_router(files_router, prefix=api_config.api_prefix)

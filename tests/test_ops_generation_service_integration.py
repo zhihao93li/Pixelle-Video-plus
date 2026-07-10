@@ -140,7 +140,7 @@ async def test_ops_uses_project_default_production_template_without_provider_cho
     project, _, experiment, approval = _seed_approved_draft(service)
     settings = service.set_project_generation_settings(
         project_id=project["id"],
-        default_production_template_id="petwoods_xhs_quality_explainer_v1",
+        default_production_template_id="pipeline_standard_base_v1",
         source=_source(),
     )
 
@@ -155,21 +155,21 @@ async def test_ops_uses_project_default_production_template_without_provider_cho
     snapshot = result["event"]["payload"]["generation_request_snapshot"]
 
     assert settings["generation_settings"]["default_production_template_id"] == (
-        "petwoods_xhs_quality_explainer_v1"
+        "pipeline_standard_base_v1"
     )
     assert store.get_project(project["id"])["generation_settings"]["default_production_template_id"] == (
-        "petwoods_xhs_quality_explainer_v1"
+        "pipeline_standard_base_v1"
     )
     assert request.pipeline_id == "standard"
     assert request.entry == "script"
     assert request.input == {"script": "Scene one.\nScene two."}
-    assert request.params["compose_runtime"] == "hyperframes"
-    assert request.params["quality_profile"] == "strict"
-    assert request.metadata["production_template"]["id"] == "petwoods_xhs_quality_explainer_v1"
+    assert request.params["compose_runtime"] == "html_ffmpeg"
+    assert request.params["quality_profile"] == "basic"
+    assert request.metadata["production_template"]["id"] == "pipeline_standard_base_v1"
     assert "provider" not in request.input
     assert "provider" not in request.params
-    assert snapshot["metadata"]["production_template"]["id"] == "petwoods_xhs_quality_explainer_v1"
-    assert result["event"]["payload"]["production_template_id"] == "petwoods_xhs_quality_explainer_v1"
+    assert snapshot["metadata"]["production_template"]["id"] == "pipeline_standard_base_v1"
+    assert result["event"]["payload"]["production_template_id"] == "pipeline_standard_base_v1"
 
 
 @pytest.mark.asyncio

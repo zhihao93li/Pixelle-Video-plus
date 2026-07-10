@@ -56,15 +56,13 @@ export function HelpWorkspace() {
   }, [])
 
   return (
-    <main className="mx-auto flex max-w-[920px] flex-col gap-5 p-4 lg:p-6">
+    <div className="flex flex-col gap-5">
       <Card className="rounded-lg">
         <CardHeader className="border-b">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <CardTitle>帮助</CardTitle>
-              <CardDescription>
-                旧 Streamlit Help 页 FAQ 已迁移到 React，通过后端读取同一份文档。
-              </CardDescription>
+              <CardDescription>常见问题与使用说明。</CardDescription>
             </div>
             <Badge variant="secondary">FAQ</Badge>
           </div>
@@ -131,7 +129,7 @@ export function HelpWorkspace() {
           )}
         </CardContent>
       </Card>
-    </main>
+    </div>
   )
 }
 

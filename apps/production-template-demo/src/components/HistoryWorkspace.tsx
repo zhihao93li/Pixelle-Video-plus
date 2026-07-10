@@ -1,19 +1,28 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react"
 import {
-  AlertCircle,
   CalendarClock,
-  CheckCircle2,
   Download,
+  FileText,
+  Images,
   Loader2,
   RefreshCcw,
   Send,
   Trash2,
   Video,
-  XCircle,
 } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import {
   Card,
   CardContent,
@@ -22,20 +31,52 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
-import { Textarea } from "@/components/ui/textarea"
 import {
-  ApiError,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { Textarea } from "@/components/ui/textarea"
+import { useToast } from "@/components/ui/toast"
+import { InlineError } from "@/components/shared/feedback"
+import { Stat } from "@/components/shared/Stat"
+import { StatusBadge } from "@/components/shared/StatusBadge"
+import { ImageSetView } from "@/components/shared/ImageSetView"
+import { TextArticleView } from "@/components/shared/TextArticleView"
+import { imageSetLabel } from "@/lib/imageSet"
+import { artifactKindLabel, type ArtifactKind } from "@/lib/artifactKind"
+import {
+  formatDate,
+  paramValueLabel,
+  readableError,
+  voiceLabel,
+} from "@/lib/format"
+import { useCurrentProject } from "@/lib/currentProject"
+import { navigate } from "@/lib/router"
+import {
   checkPublishConfiguration,
   deleteHistoryTask,
   fileUrlFromPath,
   getHistoryStatistics,
   getHistoryTaskDetail,
   getPublishRecord,
+  listContentItems,
   listHistoryTasks,
   listPublishPlatforms,
   listPublishTimezones,
+  listTemplates,
   publishTask,
+  type ContentItemMetrics,
   type HistoryStatistics,
   type HistoryTaskDetail,
   type HistoryTaskListResponse,
@@ -48,6 +89,21 @@ import { cn } from "@/lib/utils"
 
 type LoadState = "idle" | "loading" | "ready" | "error"
 type ScheduleMode = "queue" | "scheduled"
+
+function defaultPublishPlatforms(
+  available: PublishPlatform[],
+  projectPlatforms?: string[]
+): string[] {
+  const preferred = (projectPlatforms ?? []).filter((id) =>
+    available.some((platform) => platform.id === id)
+  )
+  if (preferred.length > 0) {
+    return preferred
+  }
+  const fallback =
+    available.find((platform) => platform.id === "youtube") ?? available[0]
+  return fallback ? [fallback.id] : []
+}
 
 export function HistoryWorkspace({
   latestTaskId,
@@ -62,7 +118,7 @@ export function HistoryWorkspace({
   const [statusFilter, setStatusFilter] = useState("all")
   const [sortBy, setSortBy] = useState("created_at")
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
-  const [pageSize, setPageSize] = useState(20)
+  const [pageSize] = useState(20)
   const [page, setPage] = useState(1)
 
   const [detailState, setDetailState] = useState<LoadState>("idle")
@@ -80,6 +136,7 @@ export function HistoryWorkspace({
   const [isPublishing, setIsPublishing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
+  const { project } = useCurrentProject()
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([])
   const [publishTitle, setPublishTitle] = useState("")
   const [publishCaption, setPublishCaption] = useState("")
@@ -87,6 +144,38 @@ export function HistoryWorkspace({
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("queue")
   const [dueAt, setDueAt] = useState("")
   const [publishTimezone, setPublishTimezone] = useState("Asia/Shanghai")
+  const [isPublishOpen, setIsPublishOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [artifactFilter, setArtifactFilter] = useState("all")
+  const [metricsByTask, setMetricsByTask] = useState<
+    Record<string, ContentItemMetrics>
+  >({})
+  const [templateIds, setTemplateIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
+  const toast = useToast()
+
+  const visibleTasks = useMemo(() => {
+    const tasks = history?.tasks ?? []
+    const query = searchQuery.trim().toLowerCase()
+    return tasks.filter((task) => {
+      if (
+        query &&
+        !(task.title ?? "").toLowerCase().includes(query) &&
+        !task.task_id.toLowerCase().includes(query)
+      ) {
+        return false
+      }
+      if (artifactFilter !== "all") {
+        const kind =
+          readString(readRecord(task.result)?.artifact_type) || "video"
+        if (kind !== artifactFilter) {
+          return false
+        }
+      }
+      return true
+    })
+  }, [history, searchQuery, artifactFilter])
 
   async function refreshHistory(preferredTaskId = selectedTaskId, nextPage = page) {
     setHistoryState("loading")
@@ -156,10 +245,12 @@ export function HistoryWorkspace({
         setSelectedTaskId(nextTaskId)
         setPublishPlatforms(platformResponse.platforms)
         if (platformResponse.platforms.length > 0) {
-          const defaultPlatform =
-            platformResponse.platforms.find((platform) => platform.id === "youtube") ??
-            platformResponse.platforms[0]
-          setSelectedPlatforms([defaultPlatform.id])
+          setSelectedPlatforms(
+            defaultPublishPlatforms(
+              platformResponse.platforms,
+              project?.publish_platforms
+            )
+          )
         }
       } catch (error) {
         if (!cancelled) {
@@ -174,6 +265,8 @@ export function HistoryWorkspace({
     return () => {
       cancelled = true
     }
+    // 项目预选只作为初始默认，无需随 project 变化重拉历史
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestTaskId, page, pageSize, sortBy, sortOrder, statusFilter])
 
   useEffect(() => {
@@ -215,10 +308,9 @@ export function HistoryWorkspace({
         }
         setPublishPlatforms(response.platforms)
         if (response.platforms.length > 0) {
-          const defaultPlatform =
-            response.platforms.find((platform) => platform.id === "youtube") ??
-            response.platforms[0]
-          setSelectedPlatforms([defaultPlatform.id])
+          setSelectedPlatforms(
+            defaultPublishPlatforms(response.platforms, project?.publish_platforms)
+          )
         }
       } catch (error) {
         if (!cancelled) {
@@ -232,7 +324,55 @@ export function HistoryWorkspace({
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publishPlatforms.length])
+
+  // 数据摘要：拉内容条目建 task_id→metrics 映射（失败静默，纯增强不阻塞）
+  useEffect(() => {
+    let cancelled = false
+    void listContentItems({ limit: 500 })
+      .then((items) => {
+        if (cancelled) {
+          return
+        }
+        const map: Record<string, ContentItemMetrics> = {}
+        for (const item of items) {
+          const metrics = item.metrics
+          const hasData =
+            metrics &&
+            (metrics.likes != null ||
+              metrics.favorites != null ||
+              metrics.comments != null)
+          if (!hasData) {
+            continue
+          }
+          for (const taskId of item.links?.task_ids ?? []) {
+            map[taskId] = metrics
+          }
+        }
+        setMetricsByTask(map)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // 配方存在性：详情速览「配方」仅在模板仍存在时链到配方详情页
+  useEffect(() => {
+    let cancelled = false
+    void listTemplates()
+      .then((response) => {
+        if (cancelled) {
+          return
+        }
+        setTemplateIds(new Set(response.templates.map((template) => template.id)))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!selectedTaskId) {
@@ -283,8 +423,14 @@ export function HistoryWorkspace({
   )
   const publishCaptionWithHashtags = appendHashtags(publishCaption, hashtags)
   const requiresTitle = selectedPlatforms.includes("youtube")
+  // 只有视频任务能走 Buffer 自动发布；图集/长文是手动路径（下载/复制）
+  const detailArtifactType =
+    readString(readRecord(readRecord(detail?.metadata)?.result)?.artifact_type) ||
+    "video"
+  const detailIsVideo = detailArtifactType === "video"
   const canPublish =
     detailStatus(detail) === "completed" &&
+    detailIsVideo &&
     selectedPlatforms.length > 0 &&
     publishCaptionWithHashtags.trim().length > 0 &&
     (!requiresTitle || publishTitle.trim().length > 0) &&
@@ -324,6 +470,7 @@ export function HistoryWorkspace({
         dueAt: scheduledDueAt,
       })
       setPublishRecord(response.record)
+      toast({ title: "发布任务已提交", variant: "success" })
     } catch (error) {
       setPublishError(readableError(error))
     } finally {
@@ -335,10 +482,6 @@ export function HistoryWorkspace({
     if (!selectedTaskId) {
       return
     }
-    const ok = window.confirm("删除后会移除这条生成记录和相关文件。确认删除？")
-    if (!ok) {
-      return
-    }
 
     setIsDeleting(true)
     setDetailError(null)
@@ -347,6 +490,7 @@ export function HistoryWorkspace({
       setSelectedTaskId(null)
       setDetail(null)
       setPublishRecord(null)
+      toast({ title: "记录已删除", variant: "success" })
       await refreshHistory(null, 1)
     } catch (error) {
       setDetailError(readableError(error))
@@ -355,193 +499,219 @@ export function HistoryWorkspace({
     }
   }
 
+  // 左栏行键盘上下导航：焦点在某行时上下键换选中（预览随之切换）
+  function handleListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+      return
+    }
+    const index = visibleTasks.findIndex(
+      (task) => task.task_id === selectedTaskId
+    )
+    if (index === -1) {
+      return
+    }
+    const nextIndex =
+      event.key === "ArrowDown"
+        ? Math.min(visibleTasks.length - 1, index + 1)
+        : Math.max(0, index - 1)
+    const next = visibleTasks[nextIndex]
+    if (next) {
+      event.preventDefault()
+      setSelectedTaskId(next.task_id)
+    }
+  }
+
   return (
-    <main className="mx-auto grid max-w-[1240px] gap-5 p-4 lg:grid-cols-[360px_minmax(0,1fr)] lg:p-6">
+    <main className="grid max-w-[1240px] gap-5 p-4 lg:grid-cols-[360px_minmax(0,1fr)] lg:p-6">
       <section className="flex flex-col gap-4">
-        <Card className="rounded-lg">
-          <CardHeader className="border-b">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle>历史记录</CardTitle>
-                <CardDescription>
-                  查看已生成视频，恢复详情并进入发布准备。
-                </CardDescription>
-              </div>
-              <Button
-                aria-label="刷新历史记录"
-                disabled={historyState === "loading"}
-                onClick={() => void refreshHistory()}
-                size="icon-sm"
-                variant="outline"
-              >
-                <RefreshCcw
-                  className={cn(historyState === "loading" && "animate-spin")}
-                />
-              </Button>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-medium">作品库</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              点选一条查看详情与发布。
+            </p>
+          </div>
+          <Button
+            aria-label="刷新作品库"
+            disabled={historyState === "loading"}
+            onClick={() => void refreshHistory()}
+            size="icon-sm"
+            variant="outline"
+          >
+            <RefreshCcw
+              className={cn(historyState === "loading" && "animate-spin")}
+            />
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2 border-b pb-3">
+          <Stat label="全部" value={statistics?.total_tasks} />
+          <Stat label="完成" value={statistics?.completed} />
+          <Stat
+            destructive={(statistics?.failed ?? 0) > 0}
+            label="失败"
+            value={statistics?.failed}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            className="h-8 max-w-[240px]"
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="搜索标题…"
+            value={searchQuery}
+          />
+          <Select onValueChange={setArtifactFilter} value={artifactFilter}>
+            <SelectTrigger className="h-8 w-auto text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部形态</SelectItem>
+              <SelectItem value="video">视频</SelectItem>
+              <SelectItem value="image_set">图集</SelectItem>
+              <SelectItem value="text">长文</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            onValueChange={(value) => {
+              setStatusFilter(value)
+              setPage(1)
+            }}
+            value={statusFilter}
+          >
+            <SelectTrigger className="h-8 w-auto text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部状态</SelectItem>
+              <SelectItem value="completed">已完成</SelectItem>
+              <SelectItem value="failed">失败</SelectItem>
+              <SelectItem value="running">生成中</SelectItem>
+              <SelectItem value="pending">排队中</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            onValueChange={(value) => {
+              const [nextSortBy, nextOrder] = value.split(":")
+              setSortBy(nextSortBy)
+              setSortOrder(nextOrder as "asc" | "desc")
+              setPage(1)
+            }}
+            value={`${sortBy}:${sortOrder}`}
+          >
+            <SelectTrigger className="h-8 w-auto text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="created_at:desc">最新创建</SelectItem>
+              <SelectItem value="created_at:asc">最早创建</SelectItem>
+              <SelectItem value="completed_at:desc">最近完成</SelectItem>
+              <SelectItem value="duration:desc">时长最长</SelectItem>
+              <SelectItem value="status:asc">按状态</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {historyError && (
+          <InlineError title="作品库读取失败" message={historyError} />
+        )}
+
+        {historyState === "loading" && (
+          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            正在读取作品库
+          </div>
+        )}
+
+        {historyState === "ready" && history?.tasks.length === 0 && (
+          <div className="flex flex-col items-start gap-3 py-6">
+            <div className="text-sm text-muted-foreground">还没有生成记录。</div>
+            <Button onClick={() => navigate("/create")} size="sm">
+              去快速生产
+            </Button>
+          </div>
+        )}
+
+        {visibleTasks.length === 0 &&
+          historyState === "ready" &&
+          (history?.tasks.length ?? 0) > 0 && (
+            <div className="py-6 text-sm text-muted-foreground">
+              没有匹配的记录。
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-3 gap-2">
-              <Metric label="全部" value={String(statistics?.total_tasks ?? "-")} />
-              <Metric label="完成" value={String(statistics?.completed ?? "-")} />
-              <Metric label="失败" value={String(statistics?.failed ?? "-")} />
+          )}
+
+        <div className="flex flex-col gap-0.5" onKeyDown={handleListKeyDown}>
+          {visibleTasks.map((task) => (
+            <LibraryRow
+              key={task.task_id}
+              metrics={metricsByTask[task.task_id] ?? null}
+              onOpenPublish={() => {
+                setSelectedTaskId(task.task_id)
+                setIsPublishOpen(true)
+              }}
+              onSelect={() => setSelectedTaskId(task.task_id)}
+              selected={selectedTaskId === task.task_id}
+              task={task}
+            />
+          ))}
+        </div>
+
+        {history && history.total > 0 && (
+          <div className="flex items-center justify-between gap-3 border-t pt-3">
+            <Button
+              disabled={page <= 1 || historyState === "loading"}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              size="sm"
+              variant="outline"
+            >
+              上一页
+            </Button>
+            <div className="text-xs text-muted-foreground">
+              第 {history.page} / {history.total_pages ?? 1} 页
             </div>
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">状态</span>
-                <select
-                  className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-                  onChange={(event) => {
-                    setStatusFilter(event.target.value)
-                    setPage(1)
-                  }}
-                  value={statusFilter}
-                >
-                  <option value="all">全部</option>
-                  <option value="completed">已完成</option>
-                  <option value="failed">失败</option>
-                  <option value="running">进行中</option>
-                  <option value="pending">等待中</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">排序字段</span>
-                <select
-                  className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-                  onChange={(event) => {
-                    setSortBy(event.target.value)
-                    setPage(1)
-                  }}
-                  value={sortBy}
-                >
-                  <option value="created_at">创建时间</option>
-                  <option value="completed_at">完成时间</option>
-                  <option value="duration">时长</option>
-                  <option value="status">状态</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">排序方向</span>
-                <select
-                  className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-                  onChange={(event) => {
-                    setSortOrder(event.target.value as "asc" | "desc")
-                    setPage(1)
-                  }}
-                  value={sortOrder}
-                >
-                  <option value="desc">从新到旧</option>
-                  <option value="asc">从旧到新</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">每页数量</span>
-                <select
-                  className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
-                  onChange={(event) => {
-                    setPageSize(Number(event.target.value))
-                    setPage(1)
-                  }}
-                  value={pageSize}
-                >
-                  <option value={10}>10</option>
-                  <option value={20}>20</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                </select>
-              </label>
-            </div>
-
-            {historyError && (
-              <InlineError title="历史读取失败" message={historyError} />
-            )}
-
-            <div className="mt-4 flex flex-col gap-2">
-              {historyState === "loading" && (
-                <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" />
-                  正在读取历史记录
-                </div>
-              )}
-
-              {historyState === "ready" && history?.tasks.length === 0 && (
-                <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-                  暂无生成记录。先在“生成视频”里创建一个真实任务。
-                </div>
-              )}
-
-              {history?.tasks.map((task) => (
-                <button
-                  className={cn(
-                    "rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted/50",
-                    selectedTaskId === task.task_id &&
-                      "border-primary bg-primary/5"
-                  )}
-                  key={task.task_id}
-                  onClick={() => setSelectedTaskId(task.task_id)}
-                  type="button"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">
-                        {task.title || task.task_id}
-                      </div>
-                      <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                        {task.task_id}
-                      </div>
-                    </div>
-                    <StatusBadge status={String(task.status)} />
-                  </div>
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    {formatDate(task.created_at)}
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            {history && history.total > 0 && (
-              <div className="mt-4 flex items-center justify-between gap-3">
-                <Button
-                  disabled={page <= 1 || historyState === "loading"}
-                  onClick={() => setPage((current) => Math.max(1, current - 1))}
-                  variant="outline"
-                >
-                  上一页
-                </Button>
-                <div className="text-sm text-muted-foreground">
-                  第 {history.page} / {history.total_pages ?? 1} 页
-                </div>
-                <Button
-                  disabled={
-                    historyState === "loading" ||
-                    page >= (history.total_pages ?? 1)
-                  }
-                  onClick={() =>
-                    setPage((current) =>
-                      Math.min(history.total_pages ?? current, current + 1)
-                    )
-                  }
-                  variant="outline"
-                >
-                  下一页
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+            <Button
+              disabled={
+                historyState === "loading" ||
+                page >= (history.total_pages ?? 1)
+              }
+              onClick={() =>
+                setPage((current) =>
+                  Math.min(history.total_pages ?? current, current + 1)
+                )
+              }
+              size="sm"
+              variant="outline"
+            >
+              下一页
+            </Button>
+          </div>
+        )}
       </section>
 
       <section className="flex min-w-0 flex-col gap-5">
         <DetailCard
+          canPublish={detailStatus(detail) === "completed" && detailIsVideo}
           detail={detail}
           detailError={detailError}
           detailState={detailState}
           isDeleting={isDeleting}
           onDelete={() => void deleteSelectedTask()}
+          onOpenPublish={() => setIsPublishOpen(true)}
+          publishRecord={publishRecord}
           selectedTask={selectedTask}
+          templateIds={templateIds}
         />
+      </section>
 
+      <Sheet onOpenChange={setIsPublishOpen} open={isPublishOpen}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+          <SheetHeader>
+            <SheetTitle>发布到社媒</SheetTitle>
+            <SheetDescription>
+              确认标题、文案与平台后提交；可加入队列或定时发布。
+            </SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-4">
         <PublishCard
           caption={publishCaption}
           checks={publishChecks}
@@ -574,217 +744,328 @@ export function HistoryWorkspace({
           timezones={publishTimezones}
           title={publishTitle}
         />
-      </section>
+          </div>
+        </SheetContent>
+      </Sheet>
     </main>
   )
 }
-
 function DetailCard({
   selectedTask,
   detail,
   detailState,
   detailError,
   isDeleting,
+  canPublish,
+  publishRecord,
   onDelete,
+  onOpenPublish,
+  templateIds,
 }: {
   selectedTask: HistoryTaskSummary | null
   detail: HistoryTaskDetail | null
   detailState: LoadState
   detailError: string | null
   isDeleting: boolean
+  canPublish: boolean
+  publishRecord: PublishRecord | null
   onDelete: () => void
+  onOpenPublish: () => void
+  templateIds: ReadonlySet<string>
 }) {
   const metadata = detail?.metadata ?? null
   const input = readRecord(metadata?.input)
   const result = readRecord(metadata?.result)
+  const templateInfo = readRecord(metadata?.production_template)
   const videoUrl = fileUrlFromPath(readString(result?.video_path))
+  const artifactType = (readString(result?.artifact_type) ||
+    "video") as ArtifactKind
+  const isImageSet = artifactType === "image_set"
+  const isText = artifactType === "text"
+  const isVideo = artifactType === "video"
+  const imageSetItems = isImageSet
+    ? readArray(result?.image_paths)
+        .map((path, index) => {
+          const url = fileUrlFromPath(readString(path))
+          return url ? { url, label: imageSetLabel(index) } : null
+        })
+        .filter((item): item is { url: string; label: string } => item !== null)
+    : []
+  const imageSetCaption = readString(result?.caption)
+  const articleText = readString(result?.article)
+  const articleTitle = readString(result?.title)
   const storyboardFrames = readArray(readRecord(detail?.storyboard)?.frames)
-  const inputMode = readString(input?.mode) || "未返回"
-  const inputScenes = readString(input?.n_scenes) || "未返回"
-  const ttsMode = readString(input?.tts_inference_mode) || "未返回"
-  const ttsVoice = readString(input?.tts_voice) || "未返回"
+  const inputText = readString(input?.text) || readString(input?.script)
+  const title = selectedTask
+    ? selectedTask.title || buildDefaultTitle(metadata)
+    : ""
+
+  // 速览定义行：缺值不渲染（不显示「未返回」占位），全部中文化
+  const specValue = isVideo
+    ? (() => {
+        const duration = readNumber(result?.duration)
+        return duration === null ? "" : formatDuration(duration)
+      })()
+    : isImageSet
+      ? (() => {
+          const pages = readString(result?.page_count)
+          return pages ? `${pages} 页` : ""
+        })()
+      : (() => {
+          const words = readString(result?.word_count)
+          return words ? `${words} 字` : ""
+        })()
+  const specLabel = isVideo ? "时长" : isImageSet ? "页数" : "字数"
+  const fileSizeValue = (() => {
+    const size = readNumber(result?.file_size)
+    return size === null ? "" : formatFileSize(size)
+  })()
+  const voice = readString(input?.tts_voice)
+  const ttsMode = readString(input?.tts_inference_mode)
+  const voiceValue = voice
+    ? voiceLabel(voice)
+    : ttsMode
+      ? paramValueLabel(ttsMode)
+      : ""
+  const templateId = readString(templateInfo?.id)
+  const templateName = readString(templateInfo?.name)
+  const overviewItems: Array<{ label: string; value: string; to?: string }> = [
+    {
+      label: "创建时间",
+      value: selectedTask?.created_at ? formatDate(selectedTask.created_at) : "",
+    },
+    {
+      label: "完成时间",
+      value: selectedTask?.completed_at
+        ? formatDate(selectedTask.completed_at)
+        : "",
+    },
+    { label: specLabel, value: specValue },
+    { label: "文件大小", value: isVideo ? fileSizeValue : "" },
+    { label: "声音", value: isVideo ? voiceValue : "" },
+    {
+      label: "配方",
+      value: templateName,
+      to:
+        templateId && templateIds.has(templateId)
+          ? `/create/recipes/${templateId}`
+          : undefined,
+    },
+  ].filter((item) => item.value)
 
   return (
-    <Card className="rounded-lg">
-      <CardHeader className="border-b">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <CardTitle>视频详情</CardTitle>
-            <CardDescription>
-              这里展示真实历史记录中的输入、成片和 storyboard。
-            </CardDescription>
-          </div>
-          {selectedTask && (
-            <Button
-              disabled={isDeleting}
-              onClick={onDelete}
-              variant="destructive"
-            >
-              {isDeleting ? (
-                <Loader2 className="animate-spin" data-icon="inline-start" />
-              ) : (
-                <Trash2 data-icon="inline-start" />
-              )}
-              删除
-            </Button>
-          )}
+    <div className="flex min-w-0 flex-col gap-5">
+      {!selectedTask && (
+        <div className="py-6 text-sm text-muted-foreground">
+          选择左侧一条记录查看详情。
         </div>
-      </CardHeader>
-      <CardContent>
-        {!selectedTask && (
-          <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-            选择左侧一条历史记录查看详情。
-          </div>
-        )}
+      )}
 
-        {detailState === "loading" && (
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            正在读取任务详情
-          </div>
-        )}
+      {detailState === "loading" && (
+        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          正在读取详情
+        </div>
+      )}
 
-        {detailError && <InlineError title="详情读取失败" message={detailError} />}
+      {detailError && <InlineError title="详情读取失败" message={detailError} />}
 
-        {selectedTask && detail && (
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <div className="flex min-w-0 flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusBadge status={detailStatus(detail)} />
-                <Badge variant="outline">{selectedTask.task_id}</Badge>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Fact label="标题" value={selectedTask.title || buildDefaultTitle(metadata)} />
-                <Fact label="创建时间" value={formatDate(selectedTask.created_at)} />
-                <Fact label="完成时间" value={formatDate(selectedTask.completed_at)} />
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-4">
-                <Fact label="模式" value={inputMode} />
-                <Fact label="分镜数" value={inputScenes} />
-                <Fact label="TTS" value={ttsMode} />
-                <Fact label="声音" value={ttsVoice} />
-              </div>
-
-              <div>
-                <div className="text-sm font-medium">输入文案</div>
-                <div className="mt-2 max-h-48 overflow-auto rounded-lg border bg-muted/30 p-3 text-sm leading-6 text-muted-foreground">
-                  {readString(input?.text) || readString(input?.script) || "未返回"}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-sm font-medium">Storyboard</div>
-                {storyboardFrames.length > 0 ? (
-                  <div className="mt-2 grid gap-2">
-                    {storyboardFrames.map((frame, index) => {
-                      const item = readRecord(frame)
-                      const frameIndex = readNumber(item?.index)
-                      const frameNumber =
-                        frameIndex === null ? index + 1 : frameIndex + 1
-                      const imageUrl = fileUrlFromPath(
-                        readString(item?.composed_image_path) ||
-                          readString(item?.image_path)
-                      )
-                      const videoSegmentUrl = fileUrlFromPath(
-                        readString(item?.video_segment_path) ||
-                          readString(item?.video_path)
-                      )
-                      const audioUrl = fileUrlFromPath(readString(item?.audio_path))
-                      return (
-                        <div className="rounded-lg border bg-background p-3" key={index}>
-                          <div className="text-xs text-muted-foreground">
-                            Frame {frameNumber}
-                          </div>
-                          <div className="mt-1 text-sm leading-6">
-                            {readString(item?.narration) || "未返回旁白"}
-                          </div>
-                          {readString(item?.image_prompt) && (
-                            <div className="mt-2 rounded-lg bg-muted/40 p-2 text-xs leading-5 text-muted-foreground">
-                              {readString(item?.image_prompt)}
-                            </div>
-                          )}
-                          {(imageUrl || videoSegmentUrl || audioUrl) && (
-                            <div className="mt-3 grid gap-3 md:grid-cols-2">
-                              {imageUrl && (
-                                <img
-                                  alt={`Frame ${index + 1}`}
-                                  className="max-h-72 w-full rounded-lg border object-contain"
-                                  src={imageUrl}
-                                />
-                              )}
-                              {videoSegmentUrl && (
-                                <video
-                                  className="max-h-72 w-full rounded-lg border bg-black"
-                                  controls
-                                  src={videoSegmentUrl}
-                                />
-                              )}
-                              {audioUrl && (
-                                <audio
-                                  className="md:col-span-2 w-full"
-                                  controls
-                                  src={audioUrl}
-                                />
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="mt-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                    这条记录没有返回 storyboard。
-                  </div>
-                )}
-              </div>
+      {selectedTask && detail && (
+        <>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="truncate text-lg font-medium">{title}</h2>
+              <StatusBadge status={detailStatus(detail)} />
             </div>
-
-            <div className="flex flex-col gap-3">
-              {videoUrl ? (
-                <>
-                  <video
-                    className="aspect-[9/16] max-h-[520px] rounded-lg border bg-black"
-                    controls
-                    src={videoUrl}
-                  />
-                  <Button asChild variant="outline">
-                    <a download href={videoUrl}>
-                      <Download data-icon="inline-start" />
-                      下载或打开成片
-                    </a>
+            <div className="flex shrink-0 items-center gap-2">
+              {canPublish && (
+                <Button onClick={onOpenPublish} size="sm">
+                  <Send data-icon="inline-start" />
+                  {publishRecord ? "再次发布" : "发布"}
+                </Button>
+              )}
+              {isVideo && videoUrl && (
+                <Button asChild size="sm" variant="outline">
+                  <a download href={videoUrl}>
+                    <Download data-icon="inline-start" />
+                    下载
+                  </a>
+                </Button>
+              )}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    aria-label="删除记录"
+                    disabled={isDeleting}
+                    size="icon-sm"
+                    variant="ghost"
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Trash2 />
+                    )}
                   </Button>
-                  <div className="grid gap-2">
-                    <Fact
-                      label="时长"
-                      value={formatDuration(readNumber(result?.duration))}
-                    />
-                    <Fact
-                      label="帧数"
-                      value={
-                        readString(result?.n_frames) ||
-                        readString(result?.frames) ||
-                        "未返回"
-                      }
-                    />
-                    <Fact
-                      label="文件大小"
-                      value={formatFileSize(readNumber(result?.file_size))}
-                    />
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>删除这条记录？</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      删除后会移除这条生成记录和相关文件，无法恢复。
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>取消</AlertDialogCancel>
+                    <AlertDialogAction onClick={onDelete}>删除</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </div>
+
+          {overviewItems.length > 0 && (
+            <div className="flex flex-wrap gap-x-6 gap-y-2 border-b pb-3">
+              {overviewItems.map((item) => (
+                <div key={item.label}>
+                  <div className="text-[11px] text-muted-foreground">
+                    {item.label}
                   </div>
-                </>
+                  <div className="mt-0.5 text-[13px]">
+                    {item.to ? (
+                      <button
+                        className="text-primary transition-colors hover:underline"
+                        onClick={() => navigate(item.to as string)}
+                        type="button"
+                      >
+                        {item.value}
+                      </button>
+                    ) : (
+                      item.value
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="grid gap-5 sm:grid-cols-[220px_minmax(0,1fr)]">
+            <div className="flex flex-col gap-3">
+              {isText ? (
+                <TextArticleView article={articleText} title={articleTitle || null} />
+              ) : isImageSet ? (
+                <ImageSetView items={imageSetItems} caption={imageSetCaption || null} />
+              ) : videoUrl ? (
+                <video
+                  className="aspect-[9/16] w-full rounded-lg border bg-black"
+                  controls
+                  src={videoUrl}
+                />
               ) : (
                 <div className="flex aspect-[9/16] items-center justify-center rounded-lg border bg-muted/30 p-4 text-center text-sm text-muted-foreground">
-                  没有可预览的成片路径
+                  没有可预览的成片
                 </div>
               )}
             </div>
+
+            {inputText && (
+              <div className="min-w-0">
+                <div className="text-sm font-medium">输入文案</div>
+                <CollapsibleText text={inputText} />
+              </div>
+            )}
           </div>
+
+          {isVideo && storyboardFrames.length > 0 && (
+            <div>
+              <div className="text-sm font-medium">
+                分镜{" "}
+                <span className="font-normal text-muted-foreground">
+                  {storyboardFrames.length}
+                </span>
+              </div>
+              <div className="mt-2">
+                {storyboardFrames.map((frame, index) => (
+                  <StoryboardRow frame={frame} index={index} key={index} />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** 输入文案：默认 6 行截断，长文案给「展开全文」inline 切换。 */
+function CollapsibleText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const expandable = text.length > 200 || text.split(/\r?\n/).length > 6
+  return (
+    <>
+      <div
+        className={cn(
+          "mt-2 whitespace-pre-wrap text-[13px] leading-6 text-muted-foreground",
+          !expanded && "line-clamp-6"
         )}
-      </CardContent>
-    </Card>
+      >
+        {text}
+      </div>
+      {expandable && (
+        <button
+          className="mt-1 text-xs text-primary transition-colors hover:underline"
+          onClick={() => setExpanded((value) => !value)}
+          type="button"
+        >
+          {expanded ? "收起" : "展开全文"}
+        </button>
+      )}
+    </>
+  )
+}
+
+/** 分镜紧凑行：帧缩略 + 文案首行截断 +「配图提示词」inline 展开（不进弹层）。 */
+function StoryboardRow({ frame, index }: { frame: unknown; index: number }) {
+  const [showPrompt, setShowPrompt] = useState(false)
+  const item = readRecord(frame)
+  const frameIndex = readNumber(item?.index)
+  const frameNumber = frameIndex === null ? index + 1 : frameIndex + 1
+  const imageUrl = fileUrlFromPath(
+    readString(item?.composed_image_path) || readString(item?.image_path)
+  )
+  const narration = readString(item?.narration)
+  const prompt = readString(item?.image_prompt)
+  return (
+    <div className="flex gap-2.5 border-b py-2 last:border-0">
+      <div className="h-9 w-6 shrink-0 overflow-hidden rounded-sm bg-muted">
+        {imageUrl && (
+          <img alt="" className="h-full w-full object-cover" src={imageUrl} />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            #{frameNumber}
+          </span>
+          <span className="truncate text-[13px]">{narration || "（无旁白）"}</span>
+        </div>
+        {prompt && (
+          <>
+            <button
+              className="mt-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setShowPrompt((value) => !value)}
+              type="button"
+            >
+              {showPrompt ? "收起配图提示词" : "配图提示词"}
+            </button>
+            {showPrompt && (
+              <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                {prompt}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -862,7 +1143,7 @@ function PublishCard({
 
         {detail && !completed && (
           <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-            当前任务状态不是 completed，不能提交发布。
+            这条记录尚未完成，完成后才能提交发布。
           </div>
         )}
 
@@ -984,29 +1265,26 @@ function PublishCard({
             </div>
 
             <div className="flex flex-col gap-4">
-              <div className="rounded-lg border bg-muted/30 p-4">
+              <div>
                 <div className="text-sm font-medium">当前发布记录</div>
                 {record ? (
-                  <div className="mt-3 flex flex-col gap-2">
+                  <div className="mt-2 flex flex-col">
                     {(record.jobs ?? []).map((job, index) => (
-                      <div className="rounded-lg bg-background p-3" key={index}>
+                      <div
+                        className="flex flex-col gap-1 border-b py-2 last:border-0"
+                        key={index}
+                      >
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-sm font-medium">{job.platform}</span>
-                          <Badge
-                            variant={
-                              job.status === "failed" ? "destructive" : "secondary"
-                            }
-                          >
-                            {job.status}
-                          </Badge>
+                          <StatusBadge status={job.status} />
                         </div>
                         {job.buffer_post_id && (
-                          <div className="mt-1 font-mono text-xs text-muted-foreground">
+                          <div className="font-mono text-xs text-muted-foreground">
                             {job.buffer_post_id}
                           </div>
                         )}
                         {job.error && (
-                          <div className="mt-2 text-xs text-destructive">
+                          <div className="text-xs text-destructive">
                             {job.error}
                           </div>
                         )}
@@ -1014,7 +1292,7 @@ function PublishCard({
                     ))}
                   </div>
                 ) : (
-                  <div className="mt-3 text-sm text-muted-foreground">
+                  <div className="mt-2 text-sm text-muted-foreground">
                     还没有提交过发布。
                   </div>
                 )}
@@ -1072,55 +1350,164 @@ function PublishCard({
   )
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-background p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold">{value}</div>
-    </div>
-  )
-}
+function LibraryRow({
+  task,
+  selected,
+  onSelect,
+  onOpenPublish,
+  metrics,
+}: {
+  task: HistoryTaskSummary
+  selected: boolean
+  onSelect: () => void
+  onOpenPublish: () => void
+  metrics: ContentItemMetrics | null
+}) {
+  const resultRecord = readRecord(task.result)
+  const artifactType = (readString(resultRecord?.artifact_type) ||
+    "video") as ArtifactKind
+  const isImageSet = artifactType === "image_set"
+  const isText = artifactType === "text"
+  const isVideo = artifactType === "video"
+  const coverUrl = fileUrlFromPath(readString(resultRecord?.cover_path))
+  const videoUrl = fileUrlFromPath(readString(resultRecord?.video_path))
+  const status = String(task.status)
+  const isFailed = status === "failed" || status === "partial_failed"
+  const title =
+    task.title ||
+    (isText ? "未命名长文" : isImageSet ? "未命名图文帖" : "未命名视频")
 
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-background p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate text-sm font-medium">{value}</div>
-    </div>
-  )
-}
+  const metaParts: string[] = [artifactKindLabel(artifactType)]
+  if (isFailed) {
+    metaParts.push(readString(resultRecord?.error) || "生成失败")
+  } else if (isVideo) {
+    const duration = readNumber(resultRecord?.duration)
+    if (duration !== null) {
+      metaParts.push(formatDuration(duration))
+    }
+  } else if (isImageSet) {
+    const pages = readString(resultRecord?.page_count)
+    if (pages) {
+      metaParts.push(`${pages} 页`)
+    }
+  } else if (isText) {
+    const words = readString(resultRecord?.word_count)
+    if (words) {
+      metaParts.push(`${words} 字`)
+    }
+  }
+  if (!isFailed && metrics) {
+    const bits: string[] = []
+    if (metrics.likes != null) {
+      bits.push(`赞 ${metrics.likes}`)
+    }
+    if (metrics.favorites != null) {
+      bits.push(`藏 ${metrics.favorites}`)
+    }
+    if (metrics.comments != null) {
+      bits.push(`评 ${metrics.comments}`)
+    }
+    if (bits.length > 0) {
+      metaParts.push(bits.join(" "))
+    }
+  }
+  if (task.created_at) {
+    metaParts.push(formatDate(task.created_at))
+  }
 
-function StatusBadge({ status }: { status: string }) {
-  const normalized = status || "unknown"
-  const Icon =
-    normalized === "completed"
-      ? CheckCircle2
-      : normalized === "failed"
-        ? XCircle
-        : normalized === "running"
-          ? Loader2
-          : Video
-
   return (
-    <Badge variant={normalized === "failed" ? "destructive" : "secondary"}>
-      <Icon
-        className={cn(normalized === "running" && "animate-spin")}
-        data-icon="inline-start"
-      />
-      {normalized}
-    </Badge>
-  )
-}
+    <div
+      className={cn(
+        "group flex cursor-pointer gap-2.5 rounded-md px-2 py-2",
+        selected ? "bg-muted" : "hover:bg-muted/50"
+      )}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          onSelect()
+        }
+      }}
+      role="button"
+      tabIndex={0}
+    >
+      <div className="relative h-11 w-8 shrink-0 overflow-hidden rounded bg-muted">
+        {isImageSet && coverUrl ? (
+          <img alt="" className="h-full w-full object-cover" src={coverUrl} />
+        ) : isVideo && videoUrl ? (
+          <video
+            className="h-full w-full object-cover"
+            muted
+            playsInline
+            preload="metadata"
+            src={`${videoUrl}#t=0.1`}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+            {isText ? (
+              <FileText className="size-4" />
+            ) : isImageSet ? (
+              <Images className="size-4" />
+            ) : (
+              <Video className="size-4" />
+            )}
+          </div>
+        )}
+      </div>
 
-function InlineError({ title, message }: { title: string; message: string }) {
-  return (
-    <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-      <div className="flex items-start gap-2">
-        <AlertCircle className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <div className="font-medium">{title}</div>
-          <div className="mt-1 leading-6">{message}</div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium">{title}</div>
+        <div
+          className={cn(
+            "truncate text-xs",
+            isFailed ? "text-destructive" : "text-muted-foreground"
+          )}
+        >
+          {metaParts.join(" · ")}
         </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        {isVideo && videoUrl ? (
+          <Button
+            aria-label="下载"
+            asChild
+            className="size-7"
+            size="icon-sm"
+            variant="ghost"
+          >
+            <a download href={videoUrl} onClick={(event) => event.stopPropagation()}>
+              <Download />
+            </a>
+          </Button>
+        ) : !isVideo ? (
+          <Button
+            aria-label="下载"
+            className="size-7"
+            onClick={(event) => {
+              event.stopPropagation()
+              onSelect()
+            }}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <Download />
+          </Button>
+        ) : null}
+        {isVideo && status === "completed" && (
+          <Button
+            aria-label="发布"
+            className="size-7"
+            onClick={(event) => {
+              event.stopPropagation()
+              onOpenPublish()
+            }}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <Send />
+          </Button>
+        )}
       </div>
     </div>
   )
@@ -1309,32 +1696,4 @@ function formatFileSize(bytes: number | null) {
     return `${(bytes / 1024 / 1024).toFixed(1)}MB`
   }
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)}GB`
-}
-
-function formatDate(value?: string | null) {
-  if (!value) {
-    return "未返回"
-  }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date)
-}
-
-function readableError(error: unknown) {
-  if (error instanceof ApiError) {
-    return error.message
-  }
-
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
 }

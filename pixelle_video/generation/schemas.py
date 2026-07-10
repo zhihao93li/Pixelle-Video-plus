@@ -128,8 +128,11 @@ class GenerationResult(BaseModel):
     pipeline_id: str
     entry: EntryId
     status: Literal["completed"] = "completed"
+    # 产物形态：video（默认，向后兼容——旧数据无此字段即按 video 处理）/ image_set（图文帖图集）/ text（长文）
+    artifact_type: Literal["video", "image_set", "text"] = "video"
     artifacts: list[GenerationArtifact]
-    primary_video: GenerationArtifact
+    # 图集产物没有主视频；读 primary_video 的地方必须按 artifact_type 分支，勿假设非空
+    primary_video: GenerationArtifact | None = None
     duration: float | None = None
     file_size: int | None = None
     storyboard_path: str | None = None

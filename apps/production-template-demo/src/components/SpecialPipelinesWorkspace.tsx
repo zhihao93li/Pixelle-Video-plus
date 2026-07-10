@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react"
-import { AlertCircle, Loader2, Play } from "lucide-react"
+import { Layers, Loader2, Play } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -10,12 +10,34 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { BatchStatusCard } from "@/components/shared/BatchStatusCard"
+import { FileDropzone } from "@/components/shared/FileDropzone"
+import { InlineError } from "@/components/shared/feedback"
+import { useToast } from "@/components/ui/toast"
+import { artifactKindLabel, templateArtifactType } from "@/lib/artifactKind"
+import { useCurrentProject } from "@/lib/currentProject"
+import { readableError } from "@/lib/format"
+import { useTaskCenter } from "@/lib/taskCenter"
+import { trackBatchTasks } from "@/lib/trackBatch"
+import { useBatchPolling } from "@/lib/useBatchPolling"
 import {
-  ApiError,
   artifactFileUrl,
   cancelGenerationTask,
+  createGenerationBatch,
   createGenerationTemplateTask,
   getTask,
   getTaskResult,
@@ -27,6 +49,7 @@ import {
   type ProductionTemplate,
 } from "@/lib/generationApi"
 import { buildProgressRuntimeItems } from "@/lib/resultSummary"
+import { cn } from "@/lib/utils"
 
 export type SpecialPipelineMode = "image_to_video" | "action_transfer" | "digital_human"
 
@@ -35,7 +58,6 @@ const modeLabels: Record<SpecialPipelineMode, string> = {
   action_transfer: "动作迁移视频",
   digital_human: "数字人视频",
 }
-
 export function SpecialPipelinesWorkspace({
   initialMode = "image_to_video",
 }: {
@@ -63,11 +85,26 @@ export function SpecialPipelinesWorkspace({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCancellingTask, setIsCancellingTask] = useState(false)
   const [taskActionError, setTaskActionError] = useState<string | null>(null)
+  // i2v 批量提交模式（本页内存态）
+  const [batchMode, setBatchMode] = useState(false)
+  const {
+    batch: submittedBatch,
+    setBatch: setSubmittedBatch,
+    retryItem: retryBatchItem,
+    retryingItemIndex: retryingBatchIndex,
+  } = useBatchPolling()
+  const taskCenter = useTaskCenter()
+  const toast = useToast()
+  const { projectId } = useCurrentProject()
 
   const template = useMemo(
     () => templates.find((item) => item.use_case === mode) ?? null,
     [mode, templates]
   )
+  // 批量只对 i2v 开放（多输入配对的动作迁移/数字人本期不做）
+  const isI2v = mode === "image_to_video"
+  const inBatch = batchMode && isI2v
+  const i2vArtifactLabel = artifactKindLabel(templateArtifactType(template?.pipeline_id))
   const canSubmit = Boolean(template?.enabled) && hasRequiredInput({
     characterFiles,
     digitalMode,
@@ -169,6 +206,44 @@ export function SpecialPipelinesWorkspace({
         template_use_case: template.use_case,
       })
       setTask(response.task)
+      taskCenter.trackTask(response.task, template.display_name)
+    } catch (error) {
+      setSubmitError(readableError(error))
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function submitI2vBatch() {
+    if (!template || imageFiles.length === 0 || isSubmitting) {
+      return
+    }
+    setIsSubmitting(true)
+    setSubmitError(null)
+    try {
+      // 多图上传 → 每张图一条任务，提示词/标题作共享参数
+      const uploaded = await uploadGenerationAssets(imageFiles)
+      const trimmedPrompt = prompt.trim()
+      const trimmedTitle = title.trim()
+      const items = uploaded.assets.map((asset) => ({
+        input: {
+          assets: [asset.path],
+          prompt: trimmedPrompt,
+          ...(trimmedTitle ? { title: trimmedTitle } : {}),
+        },
+      }))
+      const response = await createGenerationBatch({
+        templateId: template.id,
+        items,
+        metadata: { source: "react_generate_batch", mode: "fixed" },
+        projectId: projectId ?? undefined,
+      })
+      setSubmittedBatch(response)
+      toast({
+        title: `批量任务已创建（${response.total_count} 条）`,
+        variant: "success",
+      })
+      void trackBatchTasks(response, taskCenter.trackTask, template.display_name)
     } catch (error) {
       setSubmitError(readableError(error))
     } finally {
@@ -195,13 +270,13 @@ export function SpecialPipelinesWorkspace({
   }
 
   return (
-    <main className="mx-auto grid max-w-[1240px] gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_400px] lg:p-6">
+    <main className="grid max-w-[1240px] gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_400px] lg:p-6">
       <section className="flex min-w-0 flex-col gap-5">
         <Card className="rounded-lg">
           <CardHeader className="border-b">
             <CardTitle>特殊生成</CardTitle>
             <CardDescription>
-              I2V、动作迁移和数字人都走固定生产模板，不在每次生成时选择 provider。
+              图生视频、动作迁移和数字人口播，上传素材即可生成。
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -227,6 +302,29 @@ export function SpecialPipelinesWorkspace({
               )}
 
               <TemplateSummary template={template} />
+
+              {isI2v && (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="text-sm text-muted-foreground">
+                    {inBatch
+                      ? `${imageFiles.length} 张图 → ${imageFiles.length} 个任务，参数全同`
+                      : "一张图生成一条视频"}
+                  </span>
+                  <ToggleGroup
+                    onValueChange={(value) => {
+                      if (value) {
+                        setBatchMode(value === "batch")
+                      }
+                    }}
+                    type="single"
+                    value={inBatch ? "batch" : "single"}
+                    variant="outline"
+                  >
+                    <ToggleGroupItem value="single">单条</ToggleGroupItem>
+                    <ToggleGroupItem value="batch">批量</ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+              )}
 
               {mode === "image_to_video" ? (
                 <ImageToVideoForm
@@ -274,28 +372,101 @@ export function SpecialPipelinesWorkspace({
               {submitError && <InlineError title="提交失败" message={submitError} />}
 
               <div className="flex justify-end">
-                <Button disabled={!canSubmit} onClick={() => void submitSpecialTask()}>
-                  {isSubmitting ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
-                  ) : (
-                    <Play data-icon="inline-start" />
-                  )}
-                  创建真实生成任务
-                </Button>
+                {inBatch ? (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        disabled={imageFiles.length === 0 || isSubmitting}
+                      >
+                        {isSubmitting ? (
+                          <Loader2
+                            className="animate-spin"
+                            data-icon="inline-start"
+                          />
+                        ) : (
+                          <Layers data-icon="inline-start" />
+                        )}
+                        {isSubmitting
+                          ? "正在提交…"
+                          : `批量生成 ${imageFiles.length} 条视频`}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>
+                          批量生成 {imageFiles.length} 条视频？
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                          每张图会占用一次生成额度，提交后可在下方与「任务」页跟踪进度、失败可单条重试。
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>再检查一下</AlertDialogCancel>
+                        <AlertDialogAction
+                          className={cn(buttonVariants({ variant: "default" }))}
+                          onClick={() => void submitI2vBatch()}
+                        >
+                          确认提交
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                ) : (
+                  <Button
+                    disabled={!canSubmit}
+                    onClick={() => void submitSpecialTask()}
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="animate-spin" data-icon="inline-start" />
+                    ) : (
+                      <Play data-icon="inline-start" />
+                    )}
+                    开始生成
+                  </Button>
+                )}
               </div>
             </div>
           </CardContent>
         </Card>
+
+        {inBatch && submittedBatch && (
+          <BatchStatusCard
+            artifactLabel={i2vArtifactLabel}
+            batch={submittedBatch}
+            onRetryItem={retryBatchItem}
+            retryingItemIndex={retryingBatchIndex}
+          />
+        )}
       </section>
 
-      <TaskPanel
-        isCancellingTask={isCancellingTask}
-        onCancelTask={cancelCurrentTask}
-        pollError={pollError}
-        result={result}
-        task={task}
-        taskActionError={taskActionError}
-      />
+      {inBatch ? (
+        <aside className="flex min-w-0 flex-col gap-5">
+          <Card className="rounded-lg">
+            <CardHeader className="border-b">
+              <CardTitle>批量提交</CardTitle>
+              <CardDescription>
+                每张图一个任务，共享上方提示词与标题；进度显示在左侧与「任务」页。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm text-muted-foreground">
+                {imageFiles.length > 0
+                  ? `已选 ${imageFiles.length} 张图`
+                  : "上传多张图片开始批量。"}
+              </div>
+            </CardContent>
+          </Card>
+        </aside>
+      ) : (
+        <TaskPanel
+          isCancellingTask={isCancellingTask}
+          onCancelTask={cancelCurrentTask}
+          pollError={pollError}
+          result={result}
+          task={task}
+          taskActionError={taskActionError}
+        />
+      )}
     </main>
   )
 }
@@ -312,7 +483,7 @@ function TemplateSummary({ template }: { template: ProductionTemplate | null }) 
     <div className="rounded-lg border bg-muted/30 p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={template.enabled ? "secondary" : "destructive"}>
-          {template.migration_status}
+          {template.enabled ? "可用" : "暂不可用"}
         </Badge>
         <span className="font-medium">{template.display_name}</span>
       </div>
@@ -520,15 +691,12 @@ function FileInput({
   return (
     <label className="flex flex-col gap-1.5 text-sm">
       <span className="font-medium">{label}</span>
-      <Input
+      <FileDropzone
         accept={accept}
-        multiple
-        onChange={(event) => onChange(Array.from(event.target.files ?? []))}
-        type="file"
+        files={files}
+        id={`special-file-${label}`}
+        onFilesChange={onChange}
       />
-      <span className="text-xs text-muted-foreground">
-        已选择 {files.length} 个文件
-      </span>
     </label>
   )
 }
@@ -821,28 +989,4 @@ function hasRequiredInput({
     goodsFiles.length > 0 &&
     (script.trim().length > 0 || goodsTitle.trim().length > 0)
   )
-}
-
-function InlineError({ title, message }: { title: string; message: string }) {
-  return (
-    <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-      <div className="flex items-start gap-2">
-        <AlertCircle className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <div className="font-medium">{title}</div>
-          <div className="mt-1 leading-6">{message}</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function readableError(error: unknown) {
-  if (error instanceof ApiError) {
-    return error.message
-  }
-  if (error instanceof Error) {
-    return error.message
-  }
-  return String(error)
 }

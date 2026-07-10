@@ -74,7 +74,7 @@ def test_build_generation_request_from_video_params_can_use_production_template(
             "tts_voice": "should-not-override-template",
             "media_workflow": "should-not-override-template",
         },
-        production_template_id="petwoods_xhs_daily_v1",
+        production_template_id="pipeline_standard_base_v1",
     )
 
     assert request.pipeline_id == "standard"
@@ -84,7 +84,7 @@ def test_build_generation_request_from_video_params_can_use_production_template(
     assert request.params["tts_voice"] == "zh-CN-YunjianNeural"
     assert request.params["compose_runtime"] == "html_ffmpeg"
     assert "media_workflow" not in request.params
-    assert request.metadata["production_template"]["id"] == "petwoods_xhs_daily_v1"
+    assert request.metadata["production_template"]["id"] == "pipeline_standard_base_v1"
 
 
 @pytest.mark.asyncio

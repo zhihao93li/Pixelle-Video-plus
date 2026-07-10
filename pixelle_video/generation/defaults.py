@@ -27,6 +27,8 @@ def build_default_pipeline_manifests() -> list[PipelineManifest]:
         _standard_manifest(),
         _custom_manifest(),
         _asset_based_manifest(),
+        _image_post_manifest(),
+        _long_form_manifest(),
         _i2v_manifest(),
         _action_transfer_manifest(),
         _digital_human_manifest(),
@@ -180,6 +182,89 @@ def _asset_based_manifest() -> PipelineManifest:
             PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
         ],
         outputs=_standard_outputs(),
+    )
+
+
+def _image_post_manifest() -> PipelineManifest:
+    return PipelineManifest(
+        id="image_post",
+        name="Xiaohongshu Image Post",
+        description="Turn a confirmed script into a cover + one image per scene line as an image-set post.",
+        category="image_post",
+        default_entry="script",
+        required_capabilities=["llm", "media", "persistence"],
+        entries=[
+            PipelineEntrySpec(
+                id="script",
+                name="Script",
+                description="Use a confirmed script; each line becomes one page image.",
+                required_fields=[_field("script", description="Confirmed script (one line per page)")],
+                optional_fields=[
+                    _field("title", description="Optional cover title"),
+                    _field("split_mode", description="Pagination mode", default="line"),
+                    _field("frame_template", description="Page layout template path"),
+                    _field("media_workflow", description="Per-page image workflow"),
+                ],
+                start_stage="paginate",
+                skipped_stages=["generate_script"],
+            )
+        ],
+        stages=[
+            PipelineStageSpec(id="paginate", name="Paginate Script"),
+            PipelineStageSpec(id="generate_image_prompts", name="Generate Image Prompts"),
+            PipelineStageSpec(id="generate_media", name="Generate Page Images"),
+            PipelineStageSpec(id="compose_pages", name="Compose Pages"),
+            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+        ],
+        outputs=[
+            PipelineOutputSpec(kind="image", role="cover", description="Cover image"),
+            PipelineOutputSpec(kind="image", role="page", description="Per-scene page image"),
+            PipelineOutputSpec(
+                kind="metadata",
+                role="caption",
+                description="Publish caption text",
+                required=False,
+            ),
+        ],
+    )
+
+
+def _long_form_manifest() -> PipelineManifest:
+    return PipelineManifest(
+        id="long_form",
+        name="Long-form Article",
+        description="Expand a confirmed script into a structured long-form markdown article (LLM only).",
+        category="long_form",
+        default_entry="script",
+        required_capabilities=["llm", "persistence"],
+        entries=[
+            PipelineEntrySpec(
+                id="script",
+                name="Script",
+                description="Use a confirmed script; expand it into one long-form article per language.",
+                required_fields=[_field("script", description="Confirmed script to expand")],
+                optional_fields=[
+                    _field("title", description="Optional article title"),
+                    _field("language", description="Target language"),
+                    _field("long_form_prompt", description="Long-form writing prompt (must include {script})"),
+                    _field("word_count", "integer", "Target word count", 1800),
+                    _field("llm_model", description="Writing model (blank = system default)"),
+                ],
+                start_stage="write_article",
+                skipped_stages=["generate_script"],
+            )
+        ],
+        stages=[
+            PipelineStageSpec(id="write_article", name="Write Article"),
+            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+        ],
+        outputs=[
+            PipelineOutputSpec(
+                kind="metadata",
+                role="article",
+                description="Long-form markdown article",
+            ),
+        ],
     )
 
 

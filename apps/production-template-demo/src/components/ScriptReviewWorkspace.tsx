@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import {
-  AlertCircle,
   CheckCircle2,
+  Eye,
   Loader2,
   RefreshCcw,
   Save,
@@ -28,38 +28,91 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { Slider } from "@/components/ui/slider"
+import { InlineError, InlineNotice } from "@/components/shared/feedback"
 import {
-  ApiError,
+  ProductionSubmitPanel,
+  type ProductionOverrides,
+} from "@/components/shared/ProductionSubmitPanel"
+import { PromptPeekSheet } from "@/components/shared/PromptPeekSheet"
+import { SourceChip } from "@/components/shared/SourceChip"
+import { navigate } from "@/lib/router"
+import { settingsLink } from "@/lib/settingsLinks"
+import { useCurrentProject } from "@/lib/currentProject"
+import { useTaskCenter } from "@/lib/taskCenter"
+import { draftSetProvenance, readableError } from "@/lib/format"
+import {
   getGenerationBatch,
+  getSettingsConfig,
+  getTask,
   listScriptReviewDraftSets,
+  listDraftingProfiles,
   listScriptReviewTemplates,
+  listTemplates,
   createScriptReviewDraftSet,
   submitScriptReviewDraftSetTasks,
   updateScriptReviewDraftSet,
+  type DraftingProfile,
   type GenerationBatch,
+  type ProductionTemplate,
   type ScriptReviewDraft,
   type ScriptReviewDraftSet,
   type ScriptReviewLanguageDraft,
   type ScriptReviewTemplateListResponse,
 } from "@/lib/generationApi"
+import {
+  isNonVideoPipeline,
+  templateArtifactType,
+} from "@/lib/artifactKind"
 import { buildScriptReviewDraftFeedback } from "@/lib/scriptReviewDraftFeedback"
 import { cn } from "@/lib/utils"
+import { LANGUAGE_LABELS, PRESET_LANGUAGES } from "@/lib/languages"
 
-const DEFAULT_FRAME_TEMPLATE = "1080x1920/image_default.html"
 const BAZI_TEMPLATE_NAME = "Bazi Storyboard Oral Script"
 const BAZI_ENGLISH_TEMPLATE_NAME = "Bazi Storyboard Oral Script English"
+
+function validateDraftContent(draft: ScriptReviewDraft): string[] {
+  if (draft.selected_for_generation === false) {
+    return []
+  }
+  const errors: string[] = []
+  for (const language of draft.selected_languages ?? []) {
+    const languageDraft = draft.language_drafts?.[language]
+    if (!(languageDraft?.script ?? "").trim()) {
+      errors.push(`${draft.topic} / ${language}：完整文案为空`)
+    }
+    if ((languageDraft?.narrations ?? []).length === 0) {
+      errors.push(`${draft.topic} / ${language}：分镜文案为空`)
+    }
+  }
+  return errors
+}
+
+function dedupeLanguages(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+}
+
 const BAZI_LANGUAGE_SCRIPT_MODEL_DEFAULTS: Record<string, string> = {
   Chinese: "doubao-seed-2-0-lite-260428",
   English: "gemini-3.5-flash",
 }
-
 export function ScriptReviewWorkspace() {
+  const { projectId, project } = useCurrentProject()
+  const [sourceProfile, setSourceProfile] = useState<DraftingProfile | null>(null)
+  const [peek, setPeek] = useState<{ kind: "script" | "split"; name: string } | null>(
+    null
+  )
   const [templates, setTemplates] =
     useState<ScriptReviewTemplateListResponse | null>(null)
   const [draftSets, setDraftSets] = useState<ScriptReviewDraftSet[]>([])
   const [draftSet, setDraftSet] = useState<ScriptReviewDraftSet | null>(null)
-  const [topicsText, setTopicsText] = useState("猫咪夏天饮水少怎么办")
-  const [languagesText, setLanguagesText] = useState("Chinese, English")
+  const [topicsText, setTopicsText] = useState("")
+  const [step, setStep] = useState<1 | 2 | 3>(1)
+  const [presetLanguages, setPresetLanguages] = useState<string[]>([
+    "Chinese",
+    "English",
+  ])
+  const [customLanguagesText, setCustomLanguagesText] = useState("")
   const [scriptTemplateName, setScriptTemplateName] = useState("")
   const [splitTemplateName, setSplitTemplateName] = useState("")
   const [scriptModel, setScriptModel] = useState("")
@@ -67,8 +120,12 @@ export function ScriptReviewWorkspace() {
   const [languageScriptModels, setLanguageScriptModels] = useState<
     Record<string, string>
   >({})
-  const [frameTemplate, setFrameTemplate] = useState(DEFAULT_FRAME_TEMPLATE)
-  const [promptPrefix, setPromptPrefix] = useState("")
+  const [productionTemplateId, setProductionTemplateId] = useState("")
+  const [productionTemplates, setProductionTemplates] = useState<
+    ProductionTemplate[]
+  >([])
+  const [productionOverrides, setProductionOverrides] =
+    useState<ProductionOverrides>({})
   const [ttsVoiceByLanguage, setTtsVoiceByLanguage] = useState<Record<string, string>>({})
   const [ttsSpeedByLanguage, setTtsSpeedByLanguage] = useState<Record<string, number>>({})
   const [submittedBatch, setSubmittedBatch] = useState<GenerationBatch | null>(null)
@@ -79,13 +136,28 @@ export function ScriptReviewWorkspace() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const taskCenter = useTaskCenter()
 
   const topics = useMemo(() => parseLines(topicsText), [topicsText])
-  const languages = useMemo(() => parseLanguages(languagesText), [languagesText])
+  const languages = useMemo(
+    () =>
+      dedupeLanguages([
+        ...presetLanguages,
+        ...parseLanguages(customLanguagesText),
+      ]),
+    [presetLanguages, customLanguagesText]
+  )
   const currentScriptTemplateName =
     scriptTemplateName || templates?.script_templates[0]?.name || ""
   const currentSplitTemplateName =
     splitTemplateName || templates?.split_templates[0]?.name || ""
+  // 首步默认值是否被用户改过（脚本/分镜模板名 + 两个模型；语言不参与，语言归项目）
+  const defaultsModified =
+    sourceProfile != null &&
+    (currentScriptTemplateName !== sourceProfile.script_template_name ||
+      currentSplitTemplateName !== sourceProfile.split_template_name ||
+      scriptModel !== sourceProfile.script_model ||
+      splitModel !== sourceProfile.split_model)
   const selectedLanguages = useMemo(
     () => draftSetSelectedLanguages(draftSet),
     [draftSet]
@@ -96,23 +168,63 @@ export function ScriptReviewWorkspace() {
     Boolean(currentScriptTemplateName) &&
     Boolean(currentSplitTemplateName) &&
     !isCreatingDrafts
+  const draftValidationErrors = useMemo(
+    () => (draftSet?.drafts ?? []).flatMap(validateDraftContent),
+    [draftSet]
+  )
+  const jobCount = useMemo(
+    () =>
+      (draftSet?.drafts ?? [])
+        .filter((draft) => draft.selected_for_generation !== false)
+        .reduce(
+          (count, draft) => count + (draft.selected_languages?.length ?? 0),
+          0
+        ),
+    [draftSet]
+  )
+  // 非视频模板（图文帖 / 长文）无配音；提交时不要求每语言音色，也不显示音色区
+  const selectedTemplatePipeline = productionTemplates.find(
+    (template) => template.id === productionTemplateId
+  )?.pipeline_id
+  const isNonVideoTemplate = isNonVideoPipeline(selectedTemplatePipeline)
+  const nonVideoOutputLabel =
+    templateArtifactType(selectedTemplatePipeline) === "text" ? "长文" : "图文帖"
   const canSubmit =
     Boolean(draftSet) &&
+    Boolean(productionTemplateId) &&
+    jobCount > 0 &&
+    draftValidationErrors.length === 0 &&
     selectedLanguages.length > 0 &&
-    selectedLanguages.every((language) => (ttsVoiceByLanguage[language] || "").trim()) &&
+    (isNonVideoTemplate ||
+      selectedLanguages.every((language) =>
+        (ttsVoiceByLanguage[language] || "").trim()
+      )) &&
     !isSubmitting
+
+  // 生产模板列表（仅用来判断选中模板是不是图文帖，决定是否显示音色区）
+  useEffect(() => {
+    let cancelled = false
+    void listTemplates()
+      .then((response) => {
+        if (!cancelled) {
+          setProductionTemplates(response.templates)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
 
-    Promise.all([listScriptReviewTemplates(), listScriptReviewDraftSets()])
-      .then(([templateResponse, draftSetResponse]) => {
+    listScriptReviewTemplates()
+      .then((templateResponse) => {
         if (cancelled) {
           return
         }
         setTemplates(templateResponse)
-        setDraftSets(draftSetResponse.draft_sets)
-        setDraftSet((current) => current ?? draftSetResponse.draft_sets[0] ?? null)
       })
       .catch((loadError) => {
         if (!cancelled) {
@@ -125,10 +237,90 @@ export function ScriptReviewWorkspace() {
         }
       })
 
+    void Promise.allSettled([getSettingsConfig()]).then(
+      ([settingsResult]) => {
+      if (cancelled) {
+        return
+      }
+      if (settingsResult.status === "fulfilled") {
+        const defaultReferenceId = (
+          settingsResult.value.config?.comfyui?.tts?.fish_audio
+            ?.reference_id ?? ""
+        ).trim()
+        if (defaultReferenceId) {
+          // 与旧版一致：中文默认带入设置里的 Fish reference_id
+          setTtsVoiceByLanguage((current) =>
+            current.Chinese ? current : { ...current, Chinese: defaultReferenceId }
+          )
+        }
+      }
+      }
+    )
+
     return () => {
       cancelled = true
     }
   }, [])
+
+  // 项目作用域：草稿集列表随项目切换刷新；首步默认配方/语言/每语言音色取项目默认。
+  useEffect(() => {
+    let cancelled = false
+
+    void listScriptReviewDraftSets(projectId ?? undefined)
+      .then((response) => {
+        if (cancelled) {
+          return
+        }
+        setDraftSets(response.draft_sets)
+        // 切换项目时重置选中草稿，避免看到别的项目的草稿
+        setDraftSet(response.draft_sets[0] ?? null)
+      })
+      .catch(() => {
+        // 列表读取失败不阻塞页面
+      })
+
+    void listDraftingProfiles()
+      .then((response) => {
+        if (cancelled) {
+          return
+        }
+        // 起草配置与项目 1:1：取当前项目的配置
+        const profile =
+          response.profiles.find((item) => item.project_id === projectId) ?? null
+        setSourceProfile(profile)
+        if (profile) {
+          setScriptTemplateName((current) => current || profile.script_template_name)
+          setSplitTemplateName((current) => current || profile.split_template_name)
+          setScriptModel((current) => current || profile.script_model)
+          setSplitModel((current) => current || profile.split_model)
+          if (Object.keys(profile.language_script_models).length > 0) {
+            setLanguageScriptModels((current) => ({
+              ...profile.language_script_models,
+              ...current,
+            }))
+          }
+        }
+        // 语言归项目管
+        if (project?.languages?.length) {
+          setPresetLanguages(project.languages)
+        }
+        // 每语言音色预填项目默认（项目 > 设置全局）
+        if (project && Object.keys(project.tts_voice_by_language).length > 0) {
+          setTtsVoiceByLanguage((current) => ({
+            ...current,
+            ...project.tts_voice_by_language,
+          }))
+        }
+      })
+      .catch(() => {
+        // 配方读取失败不阻塞页面
+      })
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
 
   useEffect(() => {
     if (!submittedBatch || isTerminalBatchStatus(submittedBatch.status)) {
@@ -146,7 +338,7 @@ export function ScriptReviewWorkspace() {
     setIsRefreshingDrafts(true)
     setError(null)
     try {
-      const response = await listScriptReviewDraftSets()
+      const response = await listScriptReviewDraftSets(projectId ?? undefined)
       setDraftSets(response.draft_sets)
       setDraftSet((current) => current ?? response.draft_sets[0] ?? null)
     } catch (refreshError) {
@@ -167,6 +359,7 @@ export function ScriptReviewWorkspace() {
       const response = await createScriptReviewDraftSet({
         topics,
         languages,
+        projectId: projectId ?? undefined,
         scriptTemplateName: currentScriptTemplateName,
         splitTemplateName: currentSplitTemplateName,
         scriptModel: scriptModel.trim() || undefined,
@@ -184,6 +377,7 @@ export function ScriptReviewWorkspace() {
         metadata: { source: "react_script_review" },
       })
       setDraftSet(response)
+      setStep(2)
       setDraftSets((current) => [
         response,
         ...current.filter((item) => item.draft_set_id !== response.draft_set_id),
@@ -233,16 +427,12 @@ export function ScriptReviewWorkspace() {
     try {
       const response = await submitScriptReviewDraftSetTasks(draftSet.draft_set_id, {
         drafts: draftSet.drafts,
+        templateId: productionTemplateId,
         baseParams: {
-          frame_template: frameTemplate,
+          // 流程强制项：审核稿按行对应分镜；TTS 由每语言 Fish 覆盖
           split_mode: "line",
-          prompt_prefix: promptPrefix.trim(),
           tts_inference_mode: "fish",
-          bgm_volume: 0.2,
-          bgm_mode: "loop",
-          compose_runtime: "html_ffmpeg",
-          quality_profile: "basic",
-          allow_silent: false,
+          ...productionOverrides,
         },
         languageTtsOverrides: Object.fromEntries(
           selectedLanguages.map((language) => [
@@ -258,12 +448,39 @@ export function ScriptReviewWorkspace() {
       })
       setDraftSet(response.draft_set)
       setSubmittedBatch(response.batch)
-      setNotice(`已提交 ${response.batch.submitted_count} 个真实生成任务。`)
+      setNotice(
+        `已提交 ${response.batch.submitted_count} 个生成任务，可在「任务」页跟踪进度。`
+      )
+      void trackSubmittedTasks(response.batch)
     } catch (submitError) {
       setError(readableError(submitError))
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  async function trackSubmittedTasks(batch: GenerationBatch) {
+    const entries = batch.items
+      .filter((item) => item.task_id)
+      .map((item) => ({
+        taskId: item.task_id as string,
+        label: [item.input?.topic, item.input?.language]
+          .filter(Boolean)
+          .join(" · "),
+      }))
+    const results = await Promise.allSettled(
+      entries.map((entry) => getTask(entry.taskId))
+    )
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        taskCenter.trackTask(
+          result.value,
+          entries[index].label
+            ? `文案审核 · ${entries[index].label}`
+            : "文案审核出片"
+        )
+      }
+    })
   }
 
   function patchDraft(nextDraftIndex: number, patch: Partial<ScriptReviewDraft>) {
@@ -312,17 +529,34 @@ export function ScriptReviewWorkspace() {
   }
 
   return (
-    <main className="mx-auto grid max-w-[1240px] gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_420px] lg:p-6">
+    <main className="flex max-w-[960px] flex-col gap-5 p-4 lg:p-6">
+      <ReviewStepper
+        current={step}
+        hasDraft={Boolean(draftSet)}
+        onStepChange={setStep}
+      />
+
+      {step === 1 && (
       <section className="flex min-w-0 flex-col gap-5">
         <Card className="rounded-lg">
           <CardHeader className="border-b">
-            <CardTitle>文案审核后生成</CardTitle>
+            <CardTitle>多语言审核出片</CardTitle>
             <CardDescription>
               先生成多语言草稿，人工确认标题、全文和分镜，再提交真实视频任务。
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-col gap-4">
+              {sourceProfile && (
+                <div className="text-xs text-muted-foreground">
+                  默认值来自项目
+                  <SettingsTextLink to={settingsLink({ kind: "projects" })}>
+                    「{project?.name ?? "当前项目"}」
+                  </SettingsTextLink>
+                  的起草配置
+                  {defaultsModified && "，部分字段已修改"}
+                </div>
+              )}
               <label className="flex flex-col gap-1.5 text-sm">
                 <span className="font-medium">选题</span>
                 <Textarea
@@ -333,14 +567,38 @@ export function ScriptReviewWorkspace() {
                 />
               </label>
               <div className="grid gap-4 md:grid-cols-2">
-                <label className="flex flex-col gap-1.5 text-sm">
+                <div className="flex flex-col gap-1.5 text-sm">
                   <span className="font-medium">语言</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PRESET_LANGUAGES.map((language) => {
+                      const active = presetLanguages.includes(language)
+                      return (
+                        <Button
+                          key={language}
+                          onClick={() =>
+                            setPresetLanguages((current) =>
+                              current.includes(language)
+                                ? current.filter((item) => item !== language)
+                                : [...current, language]
+                            )
+                          }
+                          size="sm"
+                          type="button"
+                          variant={active ? "secondary" : "outline"}
+                        >
+                          {LANGUAGE_LABELS[language] ?? language}
+                        </Button>
+                      )
+                    })}
+                  </div>
                   <Input
-                    onChange={(event) => setLanguagesText(event.target.value)}
-                    placeholder="Chinese, English"
-                    value={languagesText}
+                    onChange={(event) =>
+                      setCustomLanguagesText(event.target.value)
+                    }
+                    placeholder="自定义语言，逗号分隔，例如：French, German"
+                    value={customLanguagesText}
                   />
-                </label>
+                </div>
                 <label className="flex flex-col gap-1.5 text-sm">
                   <span className="font-medium">脚本模型</span>
                   <Input
@@ -354,12 +612,20 @@ export function ScriptReviewWorkspace() {
                 <TemplateSelect
                   label="脚本 Prompt"
                   onChange={setScriptTemplateName}
-                  templates={templates?.script_templates ?? []}
+                  onPeek={() =>
+                    setPeek({ kind: "script", name: currentScriptTemplateName })
+                  }
+                  templates={(templates?.script_templates ?? []).filter(
+                    (template) => template.name !== BAZI_ENGLISH_TEMPLATE_NAME
+                  )}
                   value={currentScriptTemplateName}
                 />
                 <TemplateSelect
                   label="分镜 Prompt"
                   onChange={setSplitTemplateName}
+                  onPeek={() =>
+                    setPeek({ kind: "split", name: currentSplitTemplateName })
+                  }
                   templates={templates?.split_templates ?? []}
                   value={currentSplitTemplateName}
                 />
@@ -435,14 +701,122 @@ export function ScriptReviewWorkspace() {
           </CardContent>
         </Card>
 
-        <DraftEditor
-          draftSet={draftSet}
-          onPatchDraft={patchDraft}
-          onPatchLanguageDraft={patchLanguageDraft}
-          onToggleLanguage={toggleLanguage}
-        />
+        <Card className="rounded-lg">
+          <CardHeader className="border-b">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle>最近审核草稿</CardTitle>
+                <CardDescription>从后端持久化 draft set 读取。</CardDescription>
+              </div>
+              <Button
+                disabled={isRefreshingDrafts}
+                onClick={() => void refreshDraftSets()}
+                size="icon-sm"
+                variant="outline"
+              >
+                <RefreshCcw
+                  className={cn(isRefreshingDrafts && "animate-spin")}
+                />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {draftSets.length === 0 ? (
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                还没有审核草稿。
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {draftSets.slice(0, 8).map((item) => (
+                  <div
+                    className={cn(
+                      "rounded-lg border bg-background p-3 text-sm",
+                      draftSet?.draft_set_id === item.draft_set_id &&
+                        "border-primary bg-primary/5"
+                    )}
+                    key={item.draft_set_id}
+                  >
+                    <button
+                      className="w-full text-left transition-opacity hover:opacity-80"
+                      onClick={() => {
+                        setDraftSet(item)
+                        setStep(2)
+                      }}
+                      type="button"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-mono text-xs">
+                          {item.draft_set_id}
+                        </span>
+                        <Badge variant="secondary">{item.status}</Badge>
+                      </div>
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        {item.topics.length} 个选题，{item.languages.join(", ")}
+                      </div>
+                    </button>
+                    {item.status === "submitted" && (
+                      <div className="mt-2 flex items-center justify-between gap-2 border-t pt-2">
+                        <span className="text-xs text-muted-foreground">
+                          已出片 {item.submissions.length} 次
+                        </span>
+                        <Button
+                          onClick={() => {
+                            setDraftSet(item)
+                            setStep(3)
+                          }}
+                          size="sm"
+                          variant="outline"
+                        >
+                          再次出片
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </section>
+      )}
 
+      {step === 2 && (
+        <section className="flex min-w-0 flex-col gap-5">
+          <DraftEditor
+            draftSet={draftSet}
+            onPatchDraft={patchDraft}
+            onPatchLanguageDraft={patchLanguageDraft}
+            onToggleLanguage={toggleLanguage}
+          />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Button onClick={() => setStep(1)} variant="outline">
+              上一步
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                disabled={!draftSet || isSavingDrafts}
+                onClick={() => void saveDrafts()}
+                variant="outline"
+              >
+                {isSavingDrafts ? (
+                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                ) : (
+                  <Save data-icon="inline-start" />
+                )}
+                保存审核修改
+              </Button>
+              <Button
+                disabled={!draftSet || draftValidationErrors.length > 0}
+                onClick={() => setStep(3)}
+              >
+                下一步：确认与提交
+              </Button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {step === 3 && (
       <aside className="flex min-w-0 flex-col gap-5">
         <Card className="rounded-lg">
           <CardHeader className="border-b">
@@ -451,23 +825,30 @@ export function ScriptReviewWorkspace() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-col gap-4">
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">画面模板</span>
-                <Input
-                  onChange={(event) => setFrameTemplate(event.target.value)}
-                  value={frameTemplate}
+              {draftSet?.status === "submitted" && (
+                <InlineNotice
+                  message={`这批确认稿已出过 ${draftSet.submissions.length} 次片，可换模板再次提交。`}
                 />
-              </label>
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">图片提示词前缀</span>
-                <Textarea
-                  className="min-h-24 resize-y"
-                  onChange={(event) => setPromptPrefix(event.target.value)}
-                  placeholder="可选，用于约束画面风格"
-                  value={promptPrefix}
-                />
-              </label>
+              )}
+              <ProductionSubmitPanel
+                lockedSummary={
+                  isNonVideoTemplate
+                    ? `流程强制项：分镜按行拆分；${nonVideoOutputLabel}无配音。`
+                    : "流程强制项：分镜按行拆分；配音使用下方每语言 Fish 音色。"
+                }
+                onOverridesChange={setProductionOverrides}
+                onTemplateChange={setProductionTemplateId}
+                overrides={productionOverrides}
+                projectId={projectId ?? undefined}
+                requiredInput="script"
+                templateId={productionTemplateId}
+              />
 
+              {isNonVideoTemplate ? (
+                <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                  {nonVideoOutputLabel}没有配音，无需填写每语言音色。
+                </div>
+              ) : (
               <div className="flex flex-col gap-3">
                 <div className="text-sm font-medium">每语言 Fish TTS</div>
                 {selectedLanguages.length === 0 ? (
@@ -481,33 +862,68 @@ export function ScriptReviewWorkspace() {
                         <span className="text-sm font-medium">{language}</span>
                         <Badge variant="secondary">Fish</Badge>
                       </div>
-                      <Input
-                        onChange={(event) =>
-                          setTtsVoiceByLanguage((current) => ({
-                            ...current,
-                            [language]: event.target.value,
-                          }))
-                        }
-                        placeholder={`${language} reference_id`}
-                        value={ttsVoiceByLanguage[language] ?? ""}
-                      />
-                      <Input
-                        className="mt-2"
-                        min={0.5}
-                        max={2}
-                        onChange={(event) =>
-                          setTtsSpeedByLanguage((current) => ({
-                            ...current,
-                            [language]: Number(event.target.value) || 1,
-                          }))
-                        }
-                        step={0.1}
-                        type="number"
-                        value={ttsSpeedByLanguage[language] ?? 1}
-                      />
+                      <label className="flex flex-col gap-1.5 text-sm">
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          Fish reference_id
+                          {project?.tts_voice_by_language?.[language] &&
+                            (ttsVoiceByLanguage[language] ?? "") ===
+                              project.tts_voice_by_language[language] && (
+                              <SourceChip
+                                source="project"
+                                to={settingsLink({ kind: "projects" })}
+                              />
+                            )}
+                        </span>
+                        <Input
+                          onChange={(event) =>
+                            setTtsVoiceByLanguage((current) => ({
+                              ...current,
+                              [language]: event.target.value,
+                            }))
+                          }
+                          placeholder={`${language} reference_id`}
+                          value={ttsVoiceByLanguage[language] ?? ""}
+                        />
+                      </label>
+                      {!(ttsVoiceByLanguage[language] ?? "").trim() && (
+                        <div className="mt-1 text-xs text-destructive">
+                          该语言需要填写 Fish reference_id
+                        </div>
+                      )}
+                      <label className="mt-3 flex flex-col gap-1.5 text-sm">
+                        <span className="text-xs text-muted-foreground">
+                          语速 · {(ttsSpeedByLanguage[language] ?? 1).toFixed(1)}x
+                        </span>
+                        <Slider
+                          max={2}
+                          min={0.5}
+                          onValueChange={([value]) =>
+                            setTtsSpeedByLanguage((current) => ({
+                              ...current,
+                              [language]: value ?? 1,
+                            }))
+                          }
+                          step={0.1}
+                          value={[ttsSpeedByLanguage[language] ?? 1]}
+                        />
+                      </label>
                     </div>
                   ))
                 )}
+              </div>
+              )}
+
+              {draftValidationErrors.length > 0 && (
+                <InlineError
+                  title="草稿还有问题"
+                  message={draftValidationErrors.join("；")}
+                />
+              )}
+
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                将生成 {jobCount} 条
+                {isNonVideoTemplate ? nonVideoOutputLabel : "视频"}
+                （已审核选题 × 勾选语言）。
               </div>
 
               <div className="flex flex-col gap-2">
@@ -538,60 +954,104 @@ export function ScriptReviewWorkspace() {
 
         <BatchStatusCard batch={submittedBatch} />
 
-        <Card className="rounded-lg">
-          <CardHeader className="border-b">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle>最近审核草稿</CardTitle>
-                <CardDescription>从后端持久化 draft set 读取。</CardDescription>
-              </div>
-              <Button
-                disabled={isRefreshingDrafts}
-                onClick={() => void refreshDraftSets()}
-                size="icon-sm"
-                variant="outline"
-              >
-                <RefreshCcw
-                  className={cn(isRefreshingDrafts && "animate-spin")}
-                />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {draftSets.length === 0 ? (
-              <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                还没有审核草稿。
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {draftSets.slice(0, 8).map((item) => (
-                  <button
-                    className={cn(
-                      "rounded-lg border bg-background p-3 text-left text-sm hover:bg-muted/40",
-                      draftSet?.draft_set_id === item.draft_set_id &&
-                        "border-primary bg-primary/5"
-                    )}
-                    key={item.draft_set_id}
-                    onClick={() => setDraftSet(item)}
-                    type="button"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate font-mono text-xs">
-                        {item.draft_set_id}
-                      </span>
-                      <Badge variant="secondary">{item.status}</Badge>
-                    </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      {item.topics.length} 个选题，{item.languages.join(", ")}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <div className="flex items-center justify-between gap-3">
+          <Button onClick={() => setStep(2)} variant="outline">
+            上一步
+          </Button>
+          {submittedBatch && (
+            <Button onClick={() => navigate("/tasks")}>
+              前往任务中心
+            </Button>
+          )}
+        </div>
       </aside>
+      )}
+
+      <PromptPeekSheet
+        kind={peek?.kind ?? "script"}
+        name={peek?.name ?? ""}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPeek(null)
+          }
+        }}
+        open={peek != null}
+      />
     </main>
+  )
+}
+
+function ReviewStepper({
+  current,
+  hasDraft,
+  onStepChange,
+}: {
+  current: 1 | 2 | 3
+  hasDraft: boolean
+  onStepChange: (step: 1 | 2 | 3) => void
+}) {
+  const steps: Array<{ step: 1 | 2 | 3; label: string; enabled: boolean }> = [
+    { step: 1, label: "生成草稿", enabled: true },
+    { step: 2, label: "逐条审核", enabled: hasDraft },
+    { step: 3, label: "提交生成", enabled: hasDraft },
+  ]
+  return (
+    <nav
+      aria-label="审核流程步骤"
+      className="flex items-center gap-2 rounded-lg border bg-background p-2"
+    >
+      {steps.map((item, index) => (
+        <div className="flex flex-1 items-center gap-2" key={item.step}>
+          <button
+            aria-current={current === item.step ? "step" : undefined}
+            className={cn(
+              "flex flex-1 items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
+              current === item.step
+                ? "bg-primary text-primary-foreground"
+                : item.enabled
+                  ? "text-foreground hover:bg-muted"
+                  : "cursor-not-allowed text-muted-foreground/60"
+            )}
+            disabled={!item.enabled}
+            onClick={() => onStepChange(item.step)}
+            type="button"
+          >
+            <span
+              className={cn(
+                "flex size-5 shrink-0 items-center justify-center rounded-full border text-xs",
+                current === item.step
+                  ? "border-primary-foreground/40"
+                  : "border-border"
+              )}
+            >
+              {item.step}
+            </span>
+            <span className="truncate">{item.label}</span>
+          </button>
+          {index < steps.length - 1 && (
+            <span aria-hidden className="h-px w-4 shrink-0 bg-border" />
+          )}
+        </div>
+      ))}
+    </nav>
+  )
+}
+
+function SettingsTextLink({
+  to,
+  children,
+}: {
+  to: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      className="text-primary transition-colors hover:underline"
+      onClick={() => navigate(to)}
+      type="button"
+    >
+      {children}
+    </button>
   )
 }
 
@@ -600,29 +1060,44 @@ function TemplateSelect({
   templates,
   value,
   onChange,
+  onPeek,
 }: {
   label: string
   templates: Array<{ name: string; source: string }>
   value: string
   onChange: (value: string) => void
+  onPeek?: () => void
 }) {
   return (
     <label className="flex flex-col gap-1.5 text-sm">
       <span className="font-medium">{label}</span>
-      <Select onValueChange={onChange} value={value}>
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder="选择 Prompt 模板" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            {templates.map((template) => (
-              <SelectItem key={template.name} value={template.name}>
-                {template.name}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
+      <div className="flex items-center gap-1.5">
+        <Select onValueChange={onChange} value={value}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="选择 Prompt 模板" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {templates.map((template) => (
+                <SelectItem key={template.name} value={template.name}>
+                  {template.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        {onPeek && (
+          <Button
+            aria-label="查看提示词"
+            onClick={onPeek}
+            size="icon-sm"
+            type="button"
+            variant="ghost"
+          >
+            <Eye />
+          </Button>
+        )}
+      </div>
     </label>
   )
 }
@@ -643,12 +1118,16 @@ function DraftEditor({
   onToggleLanguage: (draftIndex: number, language: string) => void
 }) {
   const feedback = draftSet ? buildScriptReviewDraftFeedback(draftSet) : null
+  const provenance = draftSet ? draftSetProvenance(draftSet) : null
 
   return (
     <Card className="rounded-lg">
       <CardHeader className="border-b">
         <CardTitle>审核草稿</CardTitle>
         <CardDescription>确认每条视频要生成的语言、标题、全文和分镜。</CardDescription>
+        {provenance && (
+          <div className="mt-1 text-xs text-muted-foreground">由 {provenance} 生成</div>
+        )}
       </CardHeader>
       <CardContent>
         {!draftSet ? (
@@ -760,7 +1239,16 @@ function DraftEditor({
                             }
                             value={(languageDraft.narrations ?? []).join("\n")}
                           />
+                          <span className="text-xs text-muted-foreground">
+                            一行一个分镜（{(languageDraft.narrations ?? []).length} 个）
+                          </span>
                         </label>
+                        {selectedLanguages.has(language) &&
+                          (languageDraft.narrations ?? []).length === 0 && (
+                            <div className="mt-1 text-xs text-destructive">
+                              已勾选生成，但分镜文案为空
+                            </div>
+                          )}
                       </div>
                     ))}
                   </div>
@@ -824,28 +1312,6 @@ function BatchStatusCard({ batch }: { batch: GenerationBatch | null }) {
         )}
       </CardContent>
     </Card>
-  )
-}
-
-function InlineError({ title, message }: { title: string; message: string }) {
-  return (
-    <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-      <div className="flex items-start gap-2">
-        <AlertCircle className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <div className="font-medium">{title}</div>
-          <div className="mt-1 whitespace-pre-line leading-6">{message}</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function InlineNotice({ message }: { message: string }) {
-  return (
-    <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-      {message}
-    </div>
   )
 }
 
@@ -923,14 +1389,4 @@ function draftSetSelectedLanguages(draftSet: ScriptReviewDraftSet | null) {
 
 function isTerminalBatchStatus(status: string) {
   return status === "completed" || status === "failed" || status === "partial_failed"
-}
-
-function readableError(error: unknown) {
-  if (error instanceof ApiError) {
-    return error.message
-  }
-  if (error instanceof Error) {
-    return error.message
-  }
-  return String(error)
 }

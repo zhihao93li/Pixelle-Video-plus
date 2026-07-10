@@ -144,6 +144,8 @@ def test_generation_pipelines_endpoint_lists_registered_manifests():
         "standard",
         "custom",
         "asset_based",
+        "image_post",
+        "long_form",
         "i2v",
         "action_transfer",
         "digital_human",
@@ -183,37 +185,33 @@ def test_generation_templates_endpoint_lists_builtin_production_templates():
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["default_template"] == "petwoods_xhs_daily_v1"
-    assert [template["id"] for template in payload["templates"]] == [
+    assert payload["default_template"] == "pipeline_standard_base_v1"
+    ids = [template["id"] for template in payload["templates"]]
+    # 新的中性骨架排在最前，退役的 PetWoods 预设仍在（退役≠删除）
+    assert ids[0] == "pipeline_standard_base_v1"
+    assert ids[1] == "pipeline_asset_based_base_v1"
+    for retired in [
         "petwoods_xhs_daily_v1",
         "petwoods_xhs_static_subtitle_v1",
         "petwoods_xhs_topic_to_video_v1",
         "petwoods_xhs_quality_explainer_v1",
         "petwoods_xhs_asset_enhanced_v1",
         "petwoods_xhs_real_material_montage_v1",
-        "pixelle_i2v_basic_v1",
-        "pixelle_action_transfer_basic_v1",
-        "pixelle_digital_human_basic_v1",
-        "pixelle_script_review_v1",
-        "pixelle_batch_production_v1",
-    ]
-    assert payload["templates"][0]["display_name"] == "PetWoods 小红书日常短视频 v1"
-    assert payload["templates"][0]["user_selectable_providers"] == []
-    assert payload["templates"][0]["use_case"] == "daily"
-    assert payload["templates"][0]["migration_status"] == "ready"
-    assert payload["templates"][1]["use_case"] == "static_subtitle"
-    assert payload["templates"][1]["required_capabilities"] == [
-        "llm",
-        "tts",
-        "ffmpeg",
-        "persistence",
-    ]
-    assert payload["templates"][2]["input_requirements"] == ["topic"]
-    assert payload["templates"][3]["runtime_label"] == "高质量动效合成"
+    ]:
+        assert retired in ids
+
     templates_by_id = {template["id"]: template for template in payload["templates"]}
+    assert templates_by_id["pipeline_standard_base_v1"]["display_name"] == "图文口播视频"
+    assert templates_by_id["pipeline_standard_base_v1"]["use_case"] == "standard_base"
+    assert templates_by_id["pipeline_standard_base_v1"]["enabled"] is True
+    assert templates_by_id["pipeline_asset_based_base_v1"]["display_name"] == "素材增强视频"
+    assert templates_by_id["pipeline_asset_based_base_v1"]["requires_user_assets"] is True
+    # 退役模板 enabled=False 且 retired=True（展示时归入「已退役」）
+    assert templates_by_id["petwoods_xhs_daily_v1"]["enabled"] is False
+    assert templates_by_id["petwoods_xhs_daily_v1"]["retired"] is True
+    assert templates_by_id["pipeline_standard_base_v1"]["retired"] is False
+    assert templates_by_id["petwoods_xhs_real_material_montage_v1"]["enabled"] is False
     assert templates_by_id["petwoods_xhs_real_material_montage_v1"]["requires_user_assets"] is True
-    assert templates_by_id["petwoods_xhs_real_material_montage_v1"]["enabled"] is True
-    assert templates_by_id["petwoods_xhs_real_material_montage_v1"]["migration_status"] == "ready"
     assert templates_by_id["pixelle_i2v_basic_v1"]["pipeline_id"] == "i2v"
     assert templates_by_id["pixelle_action_transfer_basic_v1"]["pipeline_id"] == "action_transfer"
     assert templates_by_id["pixelle_digital_human_basic_v1"]["pipeline_id"] == "digital_human"
@@ -225,7 +223,7 @@ def test_generation_template_task_endpoint_compiles_template_and_submits_request
 
     try:
         response = TestClient(app).post(
-            "/api/generation/templates/petwoods_xhs_daily_v1/tasks",
+            "/api/generation/templates/pipeline_standard_base_v1/tasks",
             json={
                 "input": {"script": "Scene one."},
                 "metadata": {"experiment_id": "exp-1"},
@@ -242,7 +240,7 @@ def test_generation_template_task_endpoint_compiles_template_and_submits_request
     assert request.entry == "script"
     assert request.input == {"script": "Scene one."}
     assert request.params["compose_runtime"] == "html_ffmpeg"
-    assert request.metadata["production_template"]["id"] == "petwoods_xhs_daily_v1"
+    assert request.metadata["production_template"]["id"] == "pipeline_standard_base_v1"
 
 
 def test_special_generation_template_task_endpoint_compiles_workflow_request():
@@ -292,9 +290,9 @@ def test_generation_batch_endpoint_persists_batch_and_continues_item_failures(tm
         create_response = client.post(
             "/api/generation/batches",
             json={
-                "template_id": "petwoods_xhs_topic_to_video_v1",
+                "template_id": "pipeline_standard_base_v1",
                 "items": [
-                    {"input": {"topic": "Cat hydration"}},
+                    {"input": {"script": "Cats need clean water daily."}},
                     {"input": {}},
                 ],
                 "metadata": {"source": "test_batch"},
@@ -315,9 +313,11 @@ def test_generation_batch_endpoint_persists_batch_and_continues_item_failures(tm
     assert payload["items"][0]["task_id"] == "batch-task-1"
     assert payload["items"][0]["metadata"]["batch_index"] == 1
     assert payload["items"][1]["status"] == "failed"
-    assert "topic" in payload["items"][1]["error"]["message"]
-    assert fake_batch_service.requests[0].entry == "topic"
-    assert fake_batch_service.requests[0].input == {"topic": "Cat hydration"}
+    assert "script" in payload["items"][1]["error"]["message"]
+    assert fake_batch_service.requests[0].entry == "script"
+    assert fake_batch_service.requests[0].input == {
+        "script": "Cats need clean water daily."
+    }
     assert (tmp_path / f"{payload['batch_id']}.json").exists()
     assert get_response.status_code == 200
     assert get_response.json()["batch_id"] == payload["batch_id"]
@@ -340,8 +340,8 @@ def test_generation_batch_item_retry_resubmits_failed_item(tmp_path):
         create_response = client.post(
             "/api/generation/batches",
             json={
-                "template_id": "petwoods_xhs_topic_to_video_v1",
-                "items": [{"input": {"topic": "Cat hydration"}}],
+                "template_id": "pipeline_standard_base_v1",
+                "items": [{"input": {"script": "Cats need clean water daily."}}],
                 "metadata": {"source": "test_batch"},
             },
         )
@@ -362,7 +362,9 @@ def test_generation_batch_item_retry_resubmits_failed_item(tmp_path):
     assert payload["items"][0]["metadata"]["retry_count"] == 1
     assert payload["items"][0]["metadata"]["retry_of_task_id"] == "batch-task-1"
     assert len(fake_batch_service.requests) == 2
-    assert fake_batch_service.requests[1].input == {"topic": "Cat hydration"}
+    assert fake_batch_service.requests[1].input == {
+        "script": "Cats need clean water daily."
+    }
 
 
 def test_script_review_batch_item_retry_preserves_params(tmp_path):
@@ -422,7 +424,21 @@ def test_script_review_batch_item_retry_preserves_params(tmp_path):
     assert fake_batch_service.requests[0].params["tts_inference_mode"] == "fish"
 
 
-def test_script_review_draft_set_endpoint_generates_and_persists_drafts(tmp_path):
+def test_script_review_draft_set_endpoint_generates_and_persists_drafts(
+    tmp_path, monkeypatch
+):
+    import pixelle_video.content.drafting_profiles as drafting_profiles
+    import pixelle_video.content.projects as projects
+    from pathlib import Path as _Path
+
+    monkeypatch.setattr(
+        projects, "get_data_path", lambda *parts: str(tmp_path / _Path(*parts))
+    )
+    monkeypatch.setattr(
+        drafting_profiles,
+        "_profiles_path",
+        lambda: str(tmp_path / "drafting-profiles.json"),
+    )
     previous_dir = generation_router.GENERATION_SCRIPT_REVIEW_DIR
     generation_router.GENERATION_SCRIPT_REVIEW_DIR = tmp_path
     app.dependency_overrides[get_pixelle_video] = get_fake_script_review_pixelle_video
@@ -461,6 +477,8 @@ def test_script_review_draft_set_endpoint_generates_and_persists_drafts(tmp_path
     assert payload["draft_settings"]["language_script_models"] == {
         "English": "model-en"
     }
+    # 每个草稿集记录项目归属（迁移生成的默认项目）
+    assert payload["draft_settings"]["project_id"]
     assert payload["drafts"][0]["language_script_models"] == {
         "English": "model-en"
     }
@@ -525,7 +543,9 @@ def test_script_review_submit_endpoint_creates_real_generation_tasks(tmp_path):
     assert submit_response.status_code == 200
     payload = submit_response.json()
     assert payload["draft_set"]["status"] == "submitted"
-    assert payload["batch"]["template_id"] == "pixelle_script_review_v1"
+    # R1: 审核提交走生产模板体系，batch 记录真实使用的生产模板
+    # 骨架化后默认模板 = 标准骨架
+    assert payload["batch"]["template_id"] == "pipeline_standard_base_v1"
     assert payload["batch"]["submitted_count"] == 1
     assert payload["batch"]["items"][0]["task_id"] == "batch-task-1"
     request = fake_batch_service.requests[0]
@@ -534,9 +554,130 @@ def test_script_review_submit_endpoint_creates_real_generation_tasks(tmp_path):
     assert request.input == {
         "script": "Cats need clean water every day.\nBowls should be refreshed."
     }
-    assert request.params["review_language"] == "English"
+    # review_* 溯源信息进 metadata，不再作为生产参数
+    assert request.metadata["review_language"] == "English"
+    assert "review_language" not in request.params
+    # 表单级覆盖（白名单内）生效
     assert request.params["tts_voice"] == "voice-en"
+    # 模板 fixed_params 打底生效
+    assert request.params["compose_runtime"] == "html_ffmpeg"
+    assert request.params["mode"] == "fixed"
     assert request.metadata["draft_set_id"] == draft_set_id
+    assert request.metadata["production_template"]["id"] == "pipeline_standard_base_v1"
+
+
+def _submit_script_review(client, draft_set_id, extra_body=None):
+    body = {
+        "language_tts_overrides": {
+            "English": {
+                "tts_inference_mode": "fish",
+                "tts_voice": "voice-en",
+                "tts_speed": 1.0,
+            }
+        },
+        "metadata": {"source": "test_review_submit"},
+        **(extra_body or {}),
+    }
+    return client.post(
+        f"/api/generation/script-review/draft-sets/{draft_set_id}/tasks",
+        json=body,
+    )
+
+
+def _create_review_draft_set(client):
+    response = client.post(
+        "/api/generation/script-review/draft-sets",
+        json={
+            "topics": ["Cat hydration"],
+            "languages": ["English"],
+            "script_template_name": "Short Oral Script",
+            "split_template_name": "Copy-Safe Scene Split",
+        },
+    )
+    return response.json()["draft_set_id"]
+
+
+def test_script_review_submit_honors_template_id_and_rejects_invalid(tmp_path):
+    fake_batch_service = FakeBatchGenerationService()
+
+    async def get_fake_batch_generation_service():
+        return fake_batch_service
+
+    previous_review_dir = generation_router.GENERATION_SCRIPT_REVIEW_DIR
+    previous_batch_dir = generation_router.GENERATION_BATCH_DIR
+    generation_router.GENERATION_SCRIPT_REVIEW_DIR = tmp_path / "reviews"
+    generation_router.GENERATION_BATCH_DIR = tmp_path / "batches"
+    app.dependency_overrides[get_pixelle_video] = get_fake_script_review_pixelle_video
+    app.dependency_overrides[get_generation_service] = get_fake_batch_generation_service
+
+    try:
+        client = TestClient(app)
+        draft_set_id = _create_review_draft_set(client)
+
+        # 明确指定已启用模板：审核稿走该模板出片
+        submit_response = _submit_script_review(
+            client,
+            draft_set_id,
+            {"template_id": "pipeline_standard_base_v1"},
+        )
+        assert submit_response.status_code == 200
+        payload = submit_response.json()
+        assert payload["batch"]["template_id"] == "pipeline_standard_base_v1"
+        request = fake_batch_service.requests[0]
+        assert (
+            request.params["frame_template"] == "1080x1920/image_default.html"
+        )
+
+        # 不支持 script 输入或不存在的模板必须被拒绝
+        rejected = _submit_script_review(
+            client, draft_set_id, {"template_id": "pixelle_i2v_basic_v1"}
+        )
+        assert rejected.status_code == 400
+        unknown = _submit_script_review(
+            client, draft_set_id, {"template_id": "no_such_template"}
+        )
+        assert unknown.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+        generation_router.GENERATION_SCRIPT_REVIEW_DIR = previous_review_dir
+        generation_router.GENERATION_BATCH_DIR = previous_batch_dir
+
+
+def test_script_review_submit_uses_template_default_overrides(tmp_path, monkeypatch):
+    """验收口径：模板默认配置改一个参数，审核出片下一次生效。"""
+    from pixelle_video.generation import template_overrides
+
+    overrides_path = tmp_path / "production-template-overrides.json"
+    monkeypatch.setattr(
+        template_overrides, "_overrides_path", lambda: str(overrides_path)
+    )
+    template_overrides.save_overrides(
+        "pipeline_standard_base_v1", {"bgm_volume": 0.35}
+    )
+
+    fake_batch_service = FakeBatchGenerationService()
+
+    async def get_fake_batch_generation_service():
+        return fake_batch_service
+
+    previous_review_dir = generation_router.GENERATION_SCRIPT_REVIEW_DIR
+    previous_batch_dir = generation_router.GENERATION_BATCH_DIR
+    generation_router.GENERATION_SCRIPT_REVIEW_DIR = tmp_path / "reviews"
+    generation_router.GENERATION_BATCH_DIR = tmp_path / "batches"
+    app.dependency_overrides[get_pixelle_video] = get_fake_script_review_pixelle_video
+    app.dependency_overrides[get_generation_service] = get_fake_batch_generation_service
+
+    try:
+        client = TestClient(app)
+        draft_set_id = _create_review_draft_set(client)
+        submit_response = _submit_script_review(client, draft_set_id)
+        assert submit_response.status_code == 200
+        request = fake_batch_service.requests[0]
+        assert request.params["bgm_volume"] == 0.35
+    finally:
+        app.dependency_overrides.clear()
+        generation_router.GENERATION_SCRIPT_REVIEW_DIR = previous_review_dir
+        generation_router.GENERATION_BATCH_DIR = previous_batch_dir
 
 
 def test_generation_template_task_endpoint_rejects_missing_runtime_capability(monkeypatch):
@@ -545,19 +686,19 @@ def test_generation_template_task_endpoint_rejects_missing_runtime_capability(mo
     monkeypatch.setattr(
         generation_router,
         "detect_available_generation_capabilities",
-        lambda: {"llm", "tts", "media", "ffmpeg", "persistence"},
+        lambda: {"llm", "tts", "media", "persistence"},
     )
 
     try:
         response = TestClient(app).post(
-            "/api/generation/templates/petwoods_xhs_quality_explainer_v1/tasks",
+            "/api/generation/templates/pipeline_standard_base_v1/tasks",
             json={"input": {"script": "Scene one."}},
         )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 400
-    assert "hyperframes" in response.json()["detail"]
+    assert "ffmpeg" in response.json()["detail"]
     assert fake_generation_service.requests == []
 
 
@@ -632,3 +773,50 @@ def test_video_async_endpoint_uses_generation_service_and_preserves_split_mode()
     assert request.params["title"] == "Hydration script"
     assert request.params["media_width"] == 1024
     assert request.params["media_height"] == 1024
+
+
+def test_batch_retry_preserves_whitelisted_params():
+    """R1 遗漏回归：重试必须还原当次提交的白名单覆盖（如每语言 Fish 音色）。"""
+    request = generation_router._compile_batch_retry_request(
+        batch={"template_id": "pipeline_standard_base_v1"},
+        item={
+            "input": {"script": "重试用的文案。"},
+            "params": {
+                "tts_inference_mode": "fish",
+                "tts_voice": "voice-en",
+                "tts_speed": 1.1,
+                "split_mode": "line",
+                "not_whitelisted_key": "should-be-dropped",
+            },
+        },
+        metadata={"source": "retry-test"},
+    )
+    assert request.input == {"script": "重试用的文案。"}
+    assert request.params["tts_voice"] == "voice-en"
+    assert request.params["tts_inference_mode"] == "fish"
+    assert request.params["split_mode"] == "line"
+    assert "not_whitelisted_key" not in request.params
+    assert request.metadata["production_template"]["id"] == "pipeline_standard_base_v1"
+
+
+def test_batch_retry_keeps_legacy_script_review_branch():
+    """R1 之前持久化的占位模板批次仍按旧方式直拼，保证历史数据可重试。"""
+    request = generation_router._compile_batch_retry_request(
+        batch={"template_id": "pixelle_script_review_v1"},
+        item={
+            "input": {"script": "遗留批次文案。"},
+            "params": {"tts_voice": "voice-legacy"},
+        },
+        metadata={"source": "retry-test"},
+    )
+    assert request.pipeline_id == "standard"
+    assert request.params["tts_voice"] == "voice-legacy"
+
+
+def test_prompt_template_default_ignores_custom_file_ordering():
+    """安全默认回归：未显式指定 Prompt 时必须命中内置通用模板，
+    自定义 Prompt 文件（如 bazi_*.md）的存在与排序不得改变默认起草行为。"""
+    script_template = generation_router._resolve_prompt_template("script", None)
+    assert script_template.name == "Short Oral Script"
+    split_template = generation_router._resolve_prompt_template("split", None)
+    assert split_template.name == "Copy-Safe Scene Split"

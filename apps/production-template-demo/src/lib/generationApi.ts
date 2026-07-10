@@ -38,12 +38,15 @@ export type ProductionTemplate = {
   user_selectable_runtime: boolean
   user_selectable_providers: string[]
   enabled: boolean
+  /** 代码层退役标记：已退役的内置预设（只读、不可复活、归入「已退役」分组）。 */
+  retired: boolean
   migration_status: "ready" | "partial" | "legacy_only" | "planned"
   product_entry: string
   streamlit_source: string | null
   migration_notes: string
   allowed_user_params: string[]
   passthrough_input_fields: string[]
+  is_custom?: boolean
 }
 
 export type TemplateListResponse = {
@@ -92,8 +95,11 @@ export type GenerationResult = {
   pipeline_id: string
   entry: string
   status: "completed"
+  // 产物形态：video（默认）/ image_set（图文帖图集）/ text（长文）。旧数据无此字段 → 按 video 处理
+  artifact_type?: "video" | "image_set" | "text"
   artifacts: GenerationArtifact[]
-  primary_video: GenerationArtifact
+  // 图集产物没有主视频；读取前先判 artifact_type / 判空
+  primary_video: GenerationArtifact | null
   duration: number | null
   file_size: number | null
   storyboard_path: string | null
@@ -137,6 +143,7 @@ export type GenerationBatchCreateInput = {
   }>
   metadata?: Record<string, unknown>
   idempotencyKey?: string
+  projectId?: string
 }
 
 export type ScriptReviewPromptTemplate = {
@@ -170,6 +177,14 @@ export type ScriptReviewDraft = {
   [key: string]: unknown
 }
 
+/** 草稿集溯源字段（读取时收窄；其余字段仍为 unknown）。 */
+export type DraftSetSettings = {
+  drafting_profile_name?: string
+  script_model?: string
+  script_template_name?: string
+  project_id?: string
+}
+
 export type ScriptReviewDraftSet = {
   draft_set_id: string
   status: string
@@ -191,6 +206,8 @@ export type ScriptReviewDraftSetListResponse = {
 export type ScriptReviewCreateInput = {
   topics: string[]
   languages: string[]
+  projectId?: string
+  draftingProfileId?: string
   scriptTemplateName?: string
   splitTemplateName?: string
   scriptModel?: string
@@ -208,6 +225,7 @@ export type ScriptReviewUpdateInput = {
 
 export type ScriptReviewSubmitInput = {
   drafts?: ScriptReviewDraft[]
+  templateId?: string
   baseParams?: Record<string, unknown>
   languageTtsOverrides?: Record<string, Record<string, unknown>>
   metadata?: Record<string, unknown>
@@ -401,32 +419,6 @@ export type PublishTaskResponse = {
   record: PublishRecord
 }
 
-export type GenerationProject = {
-  id: string
-  name: string
-  product: string
-  channel: string
-  generation_settings?: {
-    default_production_template_id?: string
-    [key: string]: unknown
-  }
-  [key: string]: unknown
-}
-
-export type GenerationProjectsResponse = {
-  status: string
-  projects: GenerationProject[]
-}
-
-export type ProjectGenerationSettingsResponse = {
-  status: string
-  generation_settings: {
-    default_production_template_id?: string
-    [key: string]: unknown
-  }
-  [key: string]: unknown
-}
-
 export type AppSettingsConfig = {
   project_name?: string
   llm: {
@@ -601,14 +593,81 @@ export class ApiError extends Error {
   }
 }
 
-export async function listTemplates() {
-  return fetchJson<TemplateListResponse>("/generation/templates")
+export async function listTemplates(projectId?: string) {
+  const query = projectId ? `?project=${encodeURIComponent(projectId)}` : ""
+  return fetchJson<TemplateListResponse>(`/generation/templates${query}`)
+}
+
+export type TemplateGenerationConfig = {
+  template_id: string
+  overridable_keys: string[]
+  overrides: Record<string, unknown>
+  effective_params: Record<string, unknown>
+}
+
+export async function getTemplateGenerationConfig(templateId: string) {
+  return fetchJson<TemplateGenerationConfig>(
+    `/generation/templates/${templateId}/generation-config`
+  )
+}
+
+export async function updateTemplateGenerationConfig(
+  templateId: string,
+  overrides: Record<string, unknown>
+) {
+  return fetchJson<TemplateGenerationConfig>(
+    `/generation/templates/${templateId}/generation-config`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ overrides }),
+    }
+  )
+}
+
+export type CloneProductionTemplateInput = {
+  sourceTemplateId: string
+  id: string
+  displayName: string
+  description?: string
+  fixedParamsPatch?: Record<string, unknown>
+}
+
+export async function cloneProductionTemplate(input: CloneProductionTemplateInput) {
+  return fetchJson<ProductionTemplate>("/generation/templates", {
+    method: "POST",
+    body: JSON.stringify({
+      source_template_id: input.sourceTemplateId,
+      id: input.id,
+      display_name: input.displayName,
+      description: input.description ?? null,
+      fixed_params_patch: input.fixedParamsPatch ?? {},
+    }),
+  })
+}
+
+export async function deleteProductionTemplate(templateId: string) {
+  return fetchJson<{ deleted: boolean; id: string }>(
+    `/generation/templates/${templateId}`,
+    { method: "DELETE" }
+  )
+}
+
+/** 用户侧启用/停用模板（退役的内置模板不可启用；被项目默认引用的不可停用）。 */
+export async function setTemplateEnabled(templateId: string, enabled: boolean) {
+  return fetchJson<ProductionTemplate>(
+    `/generation/templates/${templateId}/enabled`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    }
+  )
 }
 
 export async function createGenerationTemplateTask(
   templateId: string,
   input: Record<string, unknown>,
-  metadata: Record<string, unknown> = { source: "react_p8_demo" }
+  metadata: Record<string, unknown> = { source: "react_p8_demo" },
+  projectId?: string
 ) {
   return fetchJson<GenerationSubmitResponse>(
     `/generation/templates/${templateId}/tasks`,
@@ -616,7 +675,7 @@ export async function createGenerationTemplateTask(
       method: "POST",
       body: JSON.stringify({
         input,
-        metadata,
+        metadata: projectId ? { ...metadata, project_id: projectId } : metadata,
       }),
     }
   )
@@ -631,6 +690,9 @@ export async function createDailyVideoTask(templateId: string, script: string) {
 }
 
 export async function createGenerationBatch(input: GenerationBatchCreateInput) {
+  const metadata = input.projectId
+    ? { ...(input.metadata ?? {}), project_id: input.projectId }
+    : (input.metadata ?? {})
   return fetchJson<GenerationBatch>("/generation/batches", {
     method: "POST",
     body: JSON.stringify({
@@ -640,7 +702,7 @@ export async function createGenerationBatch(input: GenerationBatchCreateInput) {
         metadata: item.metadata ?? {},
         idempotency_key: item.idempotencyKey ?? null,
       })),
-      metadata: input.metadata ?? {},
+      metadata,
       idempotency_key: input.idempotencyKey ?? null,
     }),
   })
@@ -673,6 +735,8 @@ export async function createScriptReviewDraftSet(input: ScriptReviewCreateInput)
     body: JSON.stringify({
       topics: input.topics,
       languages: input.languages,
+      project_id: input.projectId ?? null,
+      drafting_profile_id: input.draftingProfileId ?? null,
       script_template_name: input.scriptTemplateName || null,
       split_template_name: input.splitTemplateName || null,
       script_model: input.scriptModel || null,
@@ -685,9 +749,10 @@ export async function createScriptReviewDraftSet(input: ScriptReviewCreateInput)
   })
 }
 
-export async function listScriptReviewDraftSets() {
+export async function listScriptReviewDraftSets(projectId?: string) {
+  const query = projectId ? `?project=${encodeURIComponent(projectId)}` : ""
   return fetchJson<ScriptReviewDraftSetListResponse>(
-    "/generation/script-review/draft-sets"
+    `/generation/script-review/draft-sets${query}`
   )
 }
 
@@ -723,6 +788,7 @@ export async function submitScriptReviewDraftSetTasks(
       method: "POST",
       body: JSON.stringify({
         drafts: input.drafts ?? null,
+        template_id: input.templateId ?? null,
         base_params: input.baseParams ?? {},
         language_tts_overrides: input.languageTtsOverrides ?? {},
         metadata: input.metadata ?? {},
@@ -730,6 +796,170 @@ export async function submitScriptReviewDraftSetTasks(
       }),
     }
   )
+}
+
+// ---------------------------------------------------------------------------
+// ContentItem（内容工作台看板）
+// ---------------------------------------------------------------------------
+
+export type ContentVariantStatus = "pending" | "confirmed" | "rejected"
+
+export type ContentVariant = {
+  language: string
+  status: ContentVariantStatus
+  title: string
+  script: string
+  narrations: string[]
+}
+
+export type ContentEvent = {
+  type: string
+  actor: string
+  at: string
+  detail: Record<string, unknown>
+}
+
+export type ContentItemLinks = {
+  draft_set_id?: string | null
+  draft_index?: number
+  task_ids?: string[]
+  batch_ids?: string[]
+  publish_record_ids?: string[]
+  [key: string]: unknown
+}
+
+export type ContentItemMetrics = {
+  likes?: number
+  favorites?: number
+  comments?: number
+  note?: string
+  recorded_at?: string
+  [key: string]: unknown
+}
+
+export type ContentItem = {
+  item_id: string
+  project: string
+  channel: string
+  title: string
+  kind: "text" | "asset"
+  source: "manual" | "agent" | "derived"
+  status: string
+  languages: string[]
+  variants: Record<string, ContentVariant>
+  asset_paths: string[]
+  links: ContentItemLinks
+  metrics: ContentItemMetrics
+  automation: Record<string, unknown>
+  events: ContentEvent[]
+  created_at: string
+  updated_at: string
+}
+
+export type CreateContentItemsInput = {
+  titles: string[]
+  kind?: "text" | "asset"
+  languages?: string[]
+  source?: "manual" | "agent" | "derived"
+  initialStatus?: "idea" | "confirmed"
+  scripts?: string[]
+  assetPaths?: string[]
+  projectId?: string
+}
+
+export type PatchContentItemInput = {
+  title?: string
+  languages?: string[]
+  variants?: Record<string, Partial<ContentVariant>>
+  assetPaths?: string[]
+  metrics?: Record<string, unknown>
+  links?: Record<string, unknown>
+}
+
+export type ImportExistingResponse = {
+  created: number
+  skipped: number
+}
+
+export async function listContentItems(params?: {
+  status?: string
+  limit?: number
+  project?: string
+}) {
+  const search = new URLSearchParams()
+  if (params?.status) {
+    search.set("status", params.status)
+  }
+  if (params?.project) {
+    search.set("project", params.project)
+  }
+  if (params?.limit != null) {
+    search.set("limit", String(params.limit))
+  }
+  const query = search.toString()
+  return fetchJson<ContentItem[]>(`/content-items${query ? `?${query}` : ""}`)
+}
+
+export async function getContentItem(itemId: string) {
+  return fetchJson<ContentItem>(`/content-items/${itemId}`)
+}
+
+export async function createContentItems(input: CreateContentItemsInput) {
+  return fetchJson<ContentItem[]>("/content-items", {
+    method: "POST",
+    body: JSON.stringify({
+      titles: input.titles,
+      kind: input.kind ?? "text",
+      languages: input.languages ?? null,
+      source: input.source ?? "manual",
+      initial_status: input.initialStatus ?? "idea",
+      scripts: input.scripts ?? null,
+      asset_paths: input.assetPaths ?? null,
+      project_id: input.projectId ?? null,
+    }),
+  })
+}
+
+export async function patchContentItem(
+  itemId: string,
+  input: PatchContentItemInput
+) {
+  return fetchJson<ContentItem>(`/content-items/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      title: input.title ?? null,
+      languages: input.languages ?? null,
+      variants: input.variants ?? null,
+      asset_paths: input.assetPaths ?? null,
+      metrics: input.metrics ?? null,
+      links: input.links ?? null,
+    }),
+  })
+}
+
+export async function transitionContentItem(
+  itemId: string,
+  to: string,
+  detail: Record<string, unknown> = {},
+  actor: string = "user"
+) {
+  return fetchJson<ContentItem>(`/content-items/${itemId}/transition`, {
+    method: "POST",
+    body: JSON.stringify({ to, actor, detail }),
+  })
+}
+
+export async function deleteContentItem(itemId: string) {
+  return fetchJson<{ deleted: boolean; item_id: string }>(
+    `/content-items/${itemId}`,
+    { method: "DELETE" }
+  )
+}
+
+export async function importExistingContentItems() {
+  return fetchJson<ImportExistingResponse>("/content-items/import-existing", {
+    method: "POST",
+  })
 }
 
 export async function uploadGenerationAssets(files: File[]) {
@@ -887,25 +1117,6 @@ export async function publishTask(taskId: string, input: PublishTaskInput) {
       due_at: input.dueAt || null,
     }),
   })
-}
-
-export async function listGenerationProjects() {
-  return fetchJson<GenerationProjectsResponse>("/generation/projects")
-}
-
-export async function updateProjectGenerationSettings(
-  projectId: string,
-  defaultProductionTemplateId: string
-) {
-  return fetchJson<ProjectGenerationSettingsResponse>(
-    `/generation/projects/${projectId}/generation-settings`,
-    {
-      method: "PUT",
-      body: JSON.stringify({
-        default_production_template_id: defaultProductionTemplateId,
-      }),
-    }
-  )
 }
 
 export async function getSettingsConfig() {
@@ -1118,4 +1329,167 @@ function outputRelativePath(path: string) {
   }
 
   return null
+}
+
+
+// ---------------------------------------------------------------------------
+// 起草配方（DraftingProfile）与 Prompt 模板自助管理
+// ---------------------------------------------------------------------------
+
+export type DraftingProfile = {
+  profile_id: string
+  name: string
+  script_template_name: string
+  split_template_name: string
+  script_model: string
+  split_model: string
+  languages: string[]
+  language_script_models: Record<string, string>
+  project_id: string
+  created_at: string
+  updated_at: string
+}
+
+export type DraftingProfileListResponse = {
+  default_profile_id: string | null
+  profiles: DraftingProfile[]
+}
+
+export type DraftingProfileInput = {
+  name: string
+  script_template_name: string
+  split_template_name: string
+  script_model?: string
+  split_model?: string
+  languages?: string[]
+  language_script_models?: Record<string, string>
+}
+
+export async function listDraftingProfiles() {
+  return fetchJson<DraftingProfileListResponse>("/drafting/profiles")
+}
+
+export async function updateDraftingProfile(
+  profileId: string,
+  patch: Partial<DraftingProfileInput>
+) {
+  return fetchJson<DraftingProfile>(`/drafting/profiles/${profileId}`, {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  })
+}
+
+export type PromptTemplateWriteInput = {
+  kind: "script" | "split"
+  name: string
+  content: string
+}
+
+export async function createPromptTemplate(input: PromptTemplateWriteInput) {
+  return fetchJson<{ kind: string; name: string }>("/drafting/prompt-templates", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+}
+
+export async function updatePromptTemplate(input: PromptTemplateWriteInput) {
+  return fetchJson<{ kind: string; name: string }>("/drafting/prompt-templates", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })
+}
+
+export async function deletePromptTemplate(kind: string, name: string) {
+  const search = new URLSearchParams({ kind, name })
+  return fetchJson<{ deleted: boolean }>(
+    `/drafting/prompt-templates?${search.toString()}`,
+    { method: "DELETE" }
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 项目（品牌级内容线）
+// ---------------------------------------------------------------------------
+
+export type Project = {
+  project_id: string
+  name: string
+  description: string
+  status: "active" | "archived"
+  default_drafting_profile_id: string | null
+  default_production_template_id: string | null
+  languages: string[]
+  tts_voice_by_language: Record<string, string>
+  publish_platforms: string[]
+  created_at: string
+  updated_at: string
+}
+
+export type ProjectListResponse = {
+  default_project_id: string | null
+  projects: Project[]
+}
+
+export type ProjectInput = {
+  name: string
+  description?: string
+  defaultDraftingProfileId?: string | null
+  defaultProductionTemplateId?: string | null
+  languages?: string[]
+  ttsVoiceByLanguage?: Record<string, string>
+  publishPlatforms?: string[]
+  copyFromProjectId?: string
+}
+
+function projectBody(input: Partial<ProjectInput>) {
+  return {
+    name: input.name,
+    description: input.description,
+    default_drafting_profile_id: input.defaultDraftingProfileId,
+    default_production_template_id: input.defaultProductionTemplateId,
+    languages: input.languages,
+    tts_voice_by_language: input.ttsVoiceByLanguage,
+    publish_platforms: input.publishPlatforms,
+    copy_from_project_id: input.copyFromProjectId,
+  }
+}
+
+export async function listProjects() {
+  return fetchJson<ProjectListResponse>("/projects")
+}
+
+export async function createProject(input: ProjectInput) {
+  return fetchJson<Project>("/projects", {
+    method: "POST",
+    body: JSON.stringify(projectBody(input)),
+  })
+}
+
+export async function updateProject(
+  projectId: string,
+  patch: Partial<ProjectInput>
+) {
+  return fetchJson<Project>(`/projects/${projectId}`, {
+    method: "PUT",
+    body: JSON.stringify(projectBody(patch)),
+  })
+}
+
+export async function setDefaultProject(projectId: string) {
+  return fetchJson<ProjectListResponse>("/projects/default", {
+    method: "PUT",
+    body: JSON.stringify({ project_id: projectId }),
+  })
+}
+
+export async function archiveProject(projectId: string) {
+  return fetchJson<ProjectListResponse>(`/projects/${projectId}/archive`, {
+    method: "POST",
+  })
+}
+
+export async function restoreProject(projectId: string) {
+  return fetchJson<ProjectListResponse>(`/projects/${projectId}/restore`, {
+    method: "POST",
+  })
 }
