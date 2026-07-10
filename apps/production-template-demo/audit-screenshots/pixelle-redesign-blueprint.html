@@ -1,0 +1,922 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pixelle 全站改版蓝图</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #18312d;
+        --body: #334b47;
+        --muted: #6e807c;
+        --teal: #0e806d;
+        --teal-dark: #12312d;
+        --teal-soft: #e4f3ef;
+        --canvas: #f4f8f7;
+        --sidebar: #edf4f2;
+        --surface: #ffffff;
+        --line: #dce7e4;
+        --danger: #b13a3a;
+        --danger-soft: #fbeaea;
+        --warning: #a86116;
+        --warning-soft: #fff4e5;
+        --info: #315c8a;
+        --info-soft: #eaf2fa;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        background: var(--sidebar);
+      }
+
+      body {
+        margin: 0;
+        color: var(--body);
+        background: var(--sidebar);
+        font-family: Geist, Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+      }
+
+      .board {
+        width: 2120px;
+        margin: 64px auto;
+        padding: 72px;
+        background: var(--canvas);
+        border: 1px solid #d7e4e0;
+        border-radius: 24px;
+      }
+
+      .cover {
+        min-height: 540px;
+        padding: 60px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        color: #fff;
+        background: var(--teal-dark);
+        border-radius: 20px;
+      }
+
+      .cover-top,
+      .tag-row,
+      .section-kicker,
+      .compare-label,
+      .footer-meta {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .cover-top {
+        justify-content: space-between;
+      }
+
+      .eyebrow,
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        width: fit-content;
+        padding: 6px 13px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 650;
+        letter-spacing: 0.06em;
+      }
+
+      .eyebrow {
+        color: #cfe7e1;
+        background: #2b4c46;
+      }
+
+      .pill {
+        color: var(--teal);
+        background: var(--teal-soft);
+      }
+
+      .pill.danger {
+        color: var(--danger);
+        background: var(--danger-soft);
+      }
+
+      .pill.warning {
+        color: var(--warning);
+        background: var(--warning-soft);
+      }
+
+      .pill.info {
+        color: var(--info);
+        background: var(--info-soft);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        max-width: 1500px;
+        font-size: 56px;
+        line-height: 1.12;
+        letter-spacing: -0.035em;
+        font-weight: 680;
+      }
+
+      .cover-subtitle {
+        max-width: 1320px;
+        margin-top: 22px;
+        color: #d2e4df;
+        font-size: 22px;
+        line-height: 1.55;
+      }
+
+      .cover-thesis {
+        display: grid;
+        grid-template-columns: 180px 1fr;
+        gap: 28px;
+        padding-top: 32px;
+        border-top: 1px solid #40605a;
+      }
+
+      .cover-thesis strong {
+        color: #90c9bc;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .cover-thesis p {
+        max-width: 1460px;
+        font-size: 25px;
+        line-height: 1.48;
+        font-weight: 560;
+      }
+
+      .section {
+        margin-top: 72px;
+      }
+
+      .section-header {
+        display: grid;
+        grid-template-columns: 56px 1fr;
+        gap: 20px;
+        align-items: start;
+        margin-bottom: 26px;
+      }
+
+      .section-number {
+        display: grid;
+        place-items: center;
+        width: 46px;
+        height: 34px;
+        color: var(--teal);
+        background: var(--teal-soft);
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .section-title h2 {
+        color: var(--ink);
+        font-size: 26px;
+        line-height: 1.25;
+        letter-spacing: -0.015em;
+      }
+
+      .section-title p {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .grid-2,
+      .grid-3,
+      .grid-4,
+      .grid-5 {
+        display: grid;
+        gap: 26px;
+      }
+
+      .grid-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .grid-4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .grid-5 {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+
+      .card {
+        padding: 30px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+
+      .card.dark {
+        color: #d2e4df;
+        background: var(--teal-dark);
+        border-color: var(--teal-dark);
+      }
+
+      .card.warning-card {
+        color: #775431;
+        background: var(--warning-soft);
+        border-color: #eacfa7;
+      }
+
+      .card.danger-card {
+        background: var(--danger-soft);
+        border-color: #edc8c8;
+      }
+
+      .card.info-card {
+        background: var(--info-soft);
+        border-color: #c5daee;
+      }
+
+      .card h3 {
+        margin-top: 18px;
+        color: var(--ink);
+        font-size: 24px;
+        line-height: 1.3;
+        letter-spacing: -0.015em;
+      }
+
+      .card.dark h3 {
+        color: #fff;
+      }
+
+      .card.warning-card h3 {
+        color: #543616;
+      }
+
+      .card > p {
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 15px;
+      }
+
+      .card.dark > p {
+        color: #d2e4df;
+      }
+
+      .card.warning-card > p {
+        color: #775431;
+      }
+
+      .bullets {
+        display: grid;
+        gap: 16px;
+        margin-top: 22px;
+      }
+
+      .bullet {
+        display: grid;
+        grid-template-columns: 9px 1fr;
+        gap: 12px;
+        align-items: start;
+      }
+
+      .bullet::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        margin-top: 7px;
+        background: var(--accent, var(--teal));
+        border-radius: 999px;
+      }
+
+      .bullet strong {
+        display: block;
+        color: var(--ink);
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .bullet span {
+        display: block;
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .compare-card {
+        padding: 20px;
+      }
+
+      .compare-label {
+        justify-content: space-between;
+        margin-bottom: 14px;
+      }
+
+      .compare-label span:last-child {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .shot {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #e8efed;
+      }
+
+      .shot.mobile {
+        max-width: 390px;
+        margin: 0 auto;
+      }
+
+      .mobile-grid {
+        display: grid;
+        grid-template-columns: 0.84fr 1.16fr;
+        gap: 26px;
+      }
+
+      .mobile-shots {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+      }
+
+      .mobile-shots .card {
+        padding: 16px;
+      }
+
+      .mobile-shots .pill {
+        margin-bottom: 12px;
+      }
+
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 20px;
+      }
+
+      .swatch {
+        min-height: 96px;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        color: var(--swatch-fg, var(--ink));
+        background: var(--swatch-bg);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+
+      .swatch strong {
+        font-size: 12px;
+      }
+
+      .swatch span {
+        font-size: 11px;
+        opacity: 0.82;
+      }
+
+      .principle {
+        min-height: 184px;
+        padding: 24px;
+      }
+
+      .principle .index {
+        color: var(--teal);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .principle h3 {
+        margin-top: 10px;
+        font-size: 18px;
+      }
+
+      .principle p {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .phase {
+        min-height: 330px;
+      }
+
+      .phase h3 {
+        font-size: 22px;
+      }
+
+      .phase .modules {
+        margin-top: 18px;
+        color: var(--body);
+        font-weight: 650;
+        white-space: pre-line;
+      }
+
+      .phase.dark .modules {
+        color: #d2e4df;
+      }
+
+      .architecture-banner {
+        padding: 28px 32px;
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        gap: 28px;
+        align-items: center;
+        color: #d2e4df;
+        background: var(--teal-dark);
+        border-radius: 12px;
+      }
+
+      .architecture-banner strong {
+        color: #90c9bc;
+        font-size: 13px;
+      }
+
+      .architecture-banner p {
+        color: #fff;
+        font-size: 19px;
+        font-weight: 560;
+      }
+
+      .done-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .done-item {
+        min-height: 112px;
+        padding: 20px;
+        display: grid;
+        grid-template-columns: 22px 1fr;
+        gap: 13px;
+        background: var(--canvas);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+
+      .check {
+        width: 20px;
+        height: 20px;
+        margin-top: 2px;
+        background: var(--teal);
+        border-radius: 999px;
+      }
+
+      .done-item strong {
+        display: block;
+        color: var(--ink);
+        font-size: 14px;
+      }
+
+      .done-item p {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .evidence-board {
+        width: 2120px;
+        margin: 0 auto 64px;
+        padding: 72px;
+        background: #f8fbfa;
+        border: 1px solid #d7e4e0;
+        border-radius: 24px;
+      }
+
+      .evidence-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 42px 54px;
+      }
+
+      .evidence-card {
+        overflow: hidden;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+
+      .evidence-card img {
+        display: block;
+        width: 100%;
+        height: auto;
+        background: var(--sidebar);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .evidence-card.mobile img {
+        width: 390px;
+        margin: 24px auto 0;
+        border: 1px solid var(--line);
+        border-radius: 10px 10px 0 0;
+      }
+
+      .evidence-copy {
+        padding: 22px 24px 24px;
+      }
+
+      .evidence-copy .step {
+        color: var(--teal);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+      }
+
+      .evidence-copy h3 {
+        margin-top: 6px;
+        color: var(--ink);
+        font-size: 18px;
+      }
+
+      .evidence-copy p {
+        margin-top: 7px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .evidence-copy .status {
+        display: inline-flex;
+        margin-top: 14px;
+        padding: 5px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .status.healthy {
+        color: var(--teal);
+        background: var(--teal-soft);
+      }
+
+      .status.needs-work {
+        color: var(--warning);
+        background: var(--warning-soft);
+      }
+
+      .status.unhealthy {
+        color: var(--danger);
+        background: var(--danger-soft);
+      }
+
+      .footer {
+        margin-top: 56px;
+        padding-top: 30px;
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        color: var(--muted);
+        border-top: 1px solid var(--line);
+        font-size: 12px;
+      }
+
+      @media (max-width: 980px) {
+        .board,
+        .evidence-board {
+          width: auto;
+          margin: 20px;
+          padding: 24px;
+          border-radius: 16px;
+        }
+
+        .cover {
+          min-height: 560px;
+          padding: 32px;
+        }
+
+        h1 {
+          font-size: 42px;
+        }
+
+        .cover-thesis,
+        .section-header,
+        .architecture-banner {
+          grid-template-columns: 1fr;
+        }
+
+        .grid-2,
+        .grid-3,
+        .grid-4,
+        .grid-5,
+        .mobile-grid,
+        .mobile-shots,
+        .done-list,
+        .evidence-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article class="board" id="blueprint">
+        <header class="cover">
+          <div>
+            <div class="cover-top">
+              <div class="tag-row">
+                <span class="eyebrow">PRODUCT BLUEPRINT</span>
+                <span class="eyebrow">DESKTOP + MOBILE</span>
+              </div>
+              <span class="eyebrow">2026 · 07 · 10</span>
+            </div>
+            <div style="margin-top: 92px">
+              <h1>Pixelle 全站改版蓝图</h1>
+              <p class="cover-subtitle">把选定高保真 Demo 的设计语言迁入正式产品，而不是继续维护第二套页面。</p>
+            </div>
+          </div>
+          <div class="cover-thesis">
+            <strong>核心判断</strong>
+            <p>统一壳层、创作工作台语法与状态契约；双栏只服务需要边编辑边观察结果的场景。</p>
+          </div>
+        </header>
+
+        <section class="section">
+          <div class="section-header">
+            <span class="section-number">01</span>
+            <div class="section-title">
+              <h2>改版北极星</h2>
+              <p>要迁移的是产品调性与组件语法，不是把 Demo 结构复制到所有页面。</p>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="card dark">
+              <span class="eyebrow">DESIGN DECISION</span>
+              <h3>一个产品壳层，三类页面骨架</h3>
+              <p>编辑型工作台采用流体分栏；列表与看板保持对象密度；设置与详情使用限宽纵向结构。三者共享导航、页头、状态与控件系统。</p>
+            </div>
+            <div class="card warning-card">
+              <span class="pill warning">明确放弃</span>
+              <h3>不新增一条平行 Demo 产品线</h3>
+              <p>正式 ProductionStudio 保留 topic、assets、图集、长文、批量等完整能力；新视觉只替换视图与壳层，不复制一套简化业务逻辑。</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <span class="section-number">02</span>
+            <div class="section-title">
+              <h2>现状 → 目标</h2>
+              <p>桌面与移动端都保留任务上下文，只减少视觉噪音和布局跳转。</p>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="card compare-card">
+              <div class="compare-label"><span class="pill danger">CURRENT · 正式生成页</span><span>参数先行，主动作过深</span></div>
+              <img class="shot" src="07-current-generation.png" alt="当前正式生成页" />
+            </div>
+            <div class="card compare-card">
+              <div class="compare-label"><span class="pill">TARGET · 选定高保真方案</span><span>编辑与预览同屏</span></div>
+              <img class="shot" src="01-selected-demo.png" alt="选定高保真生成页" />
+            </div>
+          </div>
+          <div class="mobile-grid" style="margin-top: 26px">
+            <div class="card">
+              <span class="pill">移动原则</span>
+              <h3>移动端不是桌面压缩版</h3>
+              <div class="bullets">
+                <div class="bullet"><div><strong>顶部只保留上下文与主动作</strong><span>一级导航固定到底部，并避让 safe area。</span></div></div>
+                <div class="bullet"><div><strong>输入与结果改为顺序流</strong><span>先完成输入，再展开分镜、进度与成片。</span></div></div>
+                <div class="bullet"><div><strong>触控目标至少 44px</strong><span>不依赖 hover 暴露关键操作。</span></div></div>
+              </div>
+            </div>
+            <div class="mobile-shots">
+              <div class="card"><span class="pill danger">CURRENT</span><img class="shot mobile" src="13-mobile-current-generation.png" alt="当前移动生成页" /></div>
+              <div class="card"><span class="pill">TARGET</span><img class="shot mobile" src="14-mobile-selected-demo.png" alt="目标移动生成页" /></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <span class="section-number">03</span>
+            <div class="section-title">
+              <h2>页面改版优先级</h2>
+              <p>先打通主链路，再处理对象页与专项流程。</p>
+            </div>
+          </div>
+          <div class="grid-3">
+            <div class="card">
+              <span class="pill danger">P0 · 主链路</span>
+              <p>统一壳层与生成主流程，直接决定整站是否像同一个产品。</p>
+              <div class="bullets" style="--accent: var(--danger)">
+                <div class="bullet"><div><strong>AppShellV2</strong><span>唯一侧栏、68px 上下文页头、移动底栏。</span></div></div>
+                <div class="bullet"><div><strong>正式生成页</strong><span>将 Demo 视觉迁入 ProductionStudio。</span></div></div>
+                <div class="bullet"><div><strong>创作入口</strong><span>减少一屏多个实心 CTA。</span></div></div>
+                <div class="bullet"><div><strong>作品库</strong><span>强化成片预览与全宽媒体工作区。</span></div></div>
+                <div class="bullet"><div><strong>工作台</strong><span>固定列宽横滚，移动端转阶段视图。</span></div></div>
+              </div>
+            </div>
+            <div class="card">
+              <span class="pill warning">P1 · 联动页面</span>
+              <p>承接主链路的任务、详情、配方和设置必须同步收敛。</p>
+              <div class="bullets" style="--accent: var(--warning)">
+                <div class="bullet"><div><strong>任务中心</strong><span>从一级导航降为顶栏活动入口。</span></div></div>
+                <div class="bullet"><div><strong>内容详情</strong><span>统一对象页头与状态动作。</span></div></div>
+                <div class="bullet"><div><strong>配方详情</strong><span>卡片堆叠改成轻量配置流。</span></div></div>
+                <div class="bullet"><div><strong>项目详情</strong><span>项目上下文与设置统一。</span></div></div>
+                <div class="bullet"><div><strong>设置</strong><span>用户、项目、技术诊断重新分层。</span></div></div>
+              </div>
+            </div>
+            <div class="card">
+              <span class="pill info">P2 · 后续收口</span>
+              <p>先继承新壳层与 token，再在后续迭代重排内容。</p>
+              <div class="bullets" style="--accent: var(--info)">
+                <div class="bullet"><div><strong>专项管线</strong><span>保留独立线性任务模型。</span></div></div>
+                <div class="bullet"><div><strong>脚本审核</strong><span>去重标题并统一反馈。</span></div></div>
+                <div class="bullet"><div><strong>模板状态</strong><span>保持运维定位，不抢主导航。</span></div></div>
+                <div class="bullet"><div><strong>帮助</strong><span>更新为新信息架构。</span></div></div>
+                <div class="bullet"><div><strong>Streamlit</strong><span>冻结新功能，保留 legacy/debug。</span></div></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <span class="section-number">04</span>
+            <div class="section-title">
+              <h2>目标设计语言</h2>
+              <p>以冷白、细边框、清晰层级建立专业创作工具气质。</p>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="card">
+              <h3 style="margin-top: 0">颜色与表面</h3>
+              <div class="swatches">
+                <div class="swatch" style="--swatch-bg: var(--canvas)"><strong>Canvas</strong><span>#F4F8F7</span></div>
+                <div class="swatch" style="--swatch-bg: var(--surface)"><strong>Surface</strong><span>#FFFFFF</span></div>
+                <div class="swatch" style="--swatch-bg: var(--sidebar)"><strong>Sidebar</strong><span>#EDF4F2</span></div>
+                <div class="swatch" style="--swatch-bg: var(--teal); --swatch-fg: white"><strong>Primary</strong><span>#0E806D</span></div>
+                <div class="swatch" style="--swatch-bg: var(--teal-soft)"><strong>Primary soft</strong><span>#E4F3EF</span></div>
+              </div>
+            </div>
+            <div class="card">
+              <h3 style="margin-top: 0">排版与密度</h3>
+              <div class="bullets">
+                <div class="bullet"><div><strong>页题 20–24px</strong><span>区题 14–16px；正文 14px；辅助说明 12px。</span></div></div>
+                <div class="bullet"><div><strong>面板圆角 10px</strong><span>12–16px 仅留给抽屉、弹层等 overlay。</span></div></div>
+                <div class="bullet"><div><strong>控件 40px 默认高度</strong><span>32px 仅用于桌面表格；移动端触控区 ≥44px。</span></div></div>
+                <div class="bullet"><div><strong>阴影只用于 overlay</strong><span>页面容器依靠发丝线、留白与层级。</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="grid-5" style="margin-top: 26px">
+            <div class="card principle"><span class="index">01</span><h3>一个实心主动作</h3><p>teal 只用于主 CTA、当前态与链接。</p></div>
+            <div class="card principle"><span class="index">02</span><h3>状态不改布局</h3><p>预览 → 进度 → 结果始终在同一右栏。</p></div>
+            <div class="card principle"><span class="index">03</span><h3>编辑才用双栏</h3><p>列表、设置、普通详情不套工作台结构。</p></div>
+            <div class="card principle"><span class="index">04</span><h3>反馈有语义</h3><p>success / warning / info / danger 使用语义 token。</p></div>
+            <div class="card principle"><span class="index">05</span><h3>动效克制</h3><p>150–200ms，并支持 prefers-reduced-motion。</p></div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <span class="section-number">05</span>
+            <div class="section-title">
+              <h2>代码迁移顺序</h2>
+              <p>视觉统一建立在正确的壳层与状态契约之上。</p>
+            </div>
+          </div>
+          <div class="grid-4">
+            <div class="card phase dark">
+              <span class="eyebrow">PHASE 1</span>
+              <h3>统一骨架</h3>
+              <p class="modules">AppShellV2<br />ContextHeader<br />PageFrame / WorkspacePanel</p>
+              <p>先合并 /demo/studio 与正式生成页，保留完整业务能力。</p>
+            </div>
+            <div class="card phase">
+              <span class="pill">PHASE 2</span>
+              <h3>打通主链路</h3>
+              <p class="modules">Create<br />ProductionStudio<br />Library / Board / Tasks</p>
+              <p>项目切换、任务终态、作品与发布状态必须一致。</p>
+            </div>
+            <div class="card phase">
+              <span class="pill">PHASE 3</span>
+              <h3>对象页收口</h3>
+              <p class="modules">Settings<br />Recipe / Project<br />Content detail</p>
+              <p>统一对象页头、URL 状态与渐进披露。</p>
+            </div>
+            <div class="card phase">
+              <span class="pill">PHASE 4</span>
+              <h3>专项与旧入口</h3>
+              <p class="modules">Special pipeline<br />Script review<br />Streamlit legacy</p>
+              <p>继承新系统后再逐步冻结、迁移和下线。</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <span class="section-number">06</span>
+            <div class="section-title">
+              <h2>上线前架构闸门</h2>
+              <p>这些不是“顺便优化”，而是避免新 UI 把旧问题包装得更漂亮。</p>
+            </div>
+          </div>
+          <div class="architecture-banner">
+            <strong>ROOT CAUSE FIRST</strong>
+            <p>先修项目作用域、状态事实源与任务恢复，再扩散视觉方案。</p>
+          </div>
+          <div class="grid-2" style="margin-top: 26px">
+            <div class="card danger-card">
+              <span class="pill danger">P0 · MUST FIX</span>
+              <div class="bullets" style="--accent: var(--danger)">
+                <div class="bullet"><div><strong>项目作用域</strong><span>task、batch、history 统一携带 project_id。</span></div></div>
+                <div class="bullet"><div><strong>内容 / 生成 / 发布状态</strong><span>终态由后端领域动作推进，并支持幂等。</span></div></div>
+                <div class="bullet"><div><strong>任务恢复</strong><span>服务重启与 404 进入 unavailable / expired，而非永久生成中。</span></div></div>
+                <div class="bullet"><div><strong>真实分镜预览</strong><span>禁止任意文案都展示固定猫图；明确预估或提供 preflight。</span></div></div>
+              </div>
+            </div>
+            <div class="card info-card">
+              <span class="pill info">P1 · MAINTAINABILITY</span>
+              <div class="bullets" style="--accent: var(--info)">
+                <div class="bullet"><div><strong>API contract</strong><span>OpenAPI 生成 TS client，按 domain 拆分 generationApi。</span></div></div>
+                <div class="bullet"><div><strong>路由 manifest</strong><span>统一 path、title、nav、layout、projectScoped 与 lazy load。</span></div></div>
+                <div class="bullet"><div><strong>可访问反馈</strong><span>InlineAlert 使用 alert/status 与 aria-live。</span></div></div>
+                <div class="bullet"><div><strong>验收系统</strong><span>补路由、项目切换、状态一致性、重启恢复与视觉回归测试。</span></div></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <span class="section-number">07</span>
+            <div class="section-title">
+              <h2>完成定义</h2>
+              <p>不是“页面看起来统一”，而是关键链路行为、状态与响应式都可验证。</p>
+            </div>
+          </div>
+          <div class="card">
+            <div class="done-list">
+              <div class="done-item"><span class="check"></span><div><strong>唯一壳层</strong><p>所有正式路由使用 AppShellV2，Demo 路由删除或重定向。</p></div></div>
+              <div class="done-item"><span class="check"></span><div><strong>完整模式</strong><p>文案、选题、素材、图集、长文、批量能力无回退。</p></div></div>
+              <div class="done-item"><span class="check"></span><div><strong>一致状态</strong><p>生成、任务、作品库、发布可从同一事实源恢复。</p></div></div>
+              <div class="done-item"><span class="check"></span><div><strong>桌面 / 移动</strong><p>1440 与 390 视口主任务无遮挡、溢出和关键动作缺失。</p></div></div>
+              <div class="done-item"><span class="check"></span><div><strong>链接语义</strong><p>导航支持复制地址、返回与新标签页。</p></div></div>
+              <div class="done-item"><span class="check"></span><div><strong>视觉回归</strong><p>关键页面同视口对比通过，token 与设计规范同步。</p></div></div>
+            </div>
+          </div>
+        </section>
+
+        <footer class="footer">
+          <span>Source: 当前本地代码、当前项目数据、14 张桌面与移动端截图</span>
+          <span>Scope: 视觉、交互、信息架构、状态契约与迁移顺序</span>
+        </footer>
+      </article>
+
+      <section class="evidence-board" id="evidence">
+        <div class="section-header">
+          <span class="section-number">08</span>
+          <div class="section-title">
+            <h2>现状证据库 · 14 个关键视图</h2>
+            <p>以同一环境与真实项目数据截取；未触发生成、发布、删除或设置保存。</p>
+          </div>
+        </div>
+        <div class="evidence-grid">
+          <article class="evidence-card"><img src="01-selected-demo.png" alt="选定设计基准" /><div class="evidence-copy"><span class="step">STEP 01</span><h3>选定设计基准</h3><p>编辑与分镜同屏，主动作清晰，是全站调性的视觉锚点。</p><span class="status healthy">健康 · 目标态</span></div></article>
+          <article class="evidence-card"><img src="02-workbench.png" alt="工作台" /><div class="evidence-copy"><span class="step">STEP 02</span><h3>工作台</h3><p>看板结构完整；空状态偏弱，中等视口不应硬压 6 列。</p><span class="status needs-work">需调整</span></div></article>
+          <article class="evidence-card"><img src="03-create-gallery.png" alt="创作入口" /><div class="evidence-copy"><span class="step">STEP 03</span><h3>创作入口</h3><p>能力齐全，但实心主按钮过多、卡片同质，缺少推荐层级。</p><span class="status needs-work">P0</span></div></article>
+          <article class="evidence-card"><img src="04-tasks.png" alt="任务中心" /><div class="evidence-copy"><span class="step">STEP 04</span><h3>任务中心</h3><p>功能可用，信息密度偏薄，更适合作为顶栏活动中心。</p><span class="status needs-work">P1</span></div></article>
+          <article class="evidence-card"><img src="05-library.png" alt="作品库" /><div class="evidence-copy"><span class="step">STEP 05</span><h3>作品库</h3><p>双栏骨架正确，但成片预览尺寸小，视觉焦点不足。</p><span class="status needs-work">P0</span></div></article>
+          <article class="evidence-card"><img src="06-settings.png" alt="设置" /><div class="evidence-copy"><span class="step">STEP 06</span><h3>设置</h3><p>能力完整，用户、项目与技术诊断的层级仍然混杂。</p><span class="status needs-work">P1</span></div></article>
+          <article class="evidence-card"><img src="07-current-generation.png" alt="正式生成页" /><div class="evidence-copy"><span class="step">STEP 07</span><h3>正式生成页</h3><p>能力最完整，但参数先行、主动作过深，是首要迁移目标。</p><span class="status unhealthy">P0 · 首要改造</span></div></article>
+          <article class="evidence-card"><img src="08-recipe-detail.png" alt="配方详情" /><div class="evidence-copy"><span class="step">STEP 08</span><h3>配方详情</h3><p>可用，但技术字段与重复“更换”动作造成明显噪声。</p><span class="status needs-work">P1</span></div></article>
+          <article class="evidence-card"><img src="09-project-detail.png" alt="项目详情" /><div class="evidence-copy"><span class="step">STEP 09</span><h3>项目详情</h3><p>存在多个保存点，技术 ID 暴露增加用户认知负担。</p><span class="status needs-work">P1</span></div></article>
+          <article class="evidence-card"><img src="10-script-review.png" alt="脚本审核" /><div class="evidence-copy"><span class="step">STEP 10</span><h3>脚本审核</h3><p>线性流程正确；需去除迁移/技术文案并继承新壳。</p><span class="status needs-work">P2</span></div></article>
+          <article class="evidence-card"><img src="11-special-pipeline.png" alt="专项生成流" /><div class="evidence-copy"><span class="step">STEP 11</span><h3>专项生成流</h3><p>与正式生成页共享布局的潜力高，先继承新骨架。</p><span class="status needs-work">P2</span></div></article>
+          <article class="evidence-card"><img src="12-content-detail.png" alt="内容详情" /><div class="evidence-copy"><span class="step">STEP 12</span><h3>内容详情</h3><p>项目作用域、产物状态与技术 ID 需要统一治理。</p><span class="status needs-work">P1</span></div></article>
+          <article class="evidence-card mobile"><img src="13-mobile-current-generation.png" alt="当前移动生成页" /><div class="evidence-copy"><span class="step">STEP 13</span><h3>当前移动生成页</h3><p>页题竖排、导航挤压、主动作深，不适合真实移动操作。</p><span class="status unhealthy">不健康</span></div></article>
+          <article class="evidence-card mobile"><img src="14-mobile-selected-demo.png" alt="目标移动生成页" /><div class="evidence-copy"><span class="step">STEP 14</span><h3>目标移动生成页</h3><p>顶部任务栏 + 底部主导航，信息层级与触控路径更清晰。</p><span class="status healthy">健康 · 目标态</span></div></article>
+        </div>
+        <footer class="footer">
+          <span>Evidence boundary: 截图支持视觉、布局与部分语义审计，不等于完整 WCAG 合规证明。</span>
+          <span>Pixelle · Product Design Audit</span>
+        </footer>
+      </section>
+    </main>
+  </body>
+</html>

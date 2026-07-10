@@ -15,6 +15,7 @@ import { WorkbenchBoard } from "@/components/WorkbenchBoard"
 import { ContentItemDetailPage } from "@/components/ContentItemDetailPage"
 import { ProjectDetailPage } from "@/components/ProjectDetailPage"
 import { RecipeDetailPage } from "@/components/RecipeDetailPage"
+import { HighFidelityGenerationDemo } from "@/components/HighFidelityGenerationDemo"
 import { navigate, parsePath, usePath } from "@/lib/router"
 
 const SPECIAL_MODES: SpecialPipelineMode[] = [
@@ -30,6 +31,10 @@ function isSpecialMode(value: string): value is SpecialPipelineMode {
 export function App() {
   const path = usePath()
   const { segments, query } = parsePath(path)
+
+  if (segments[0] === "demo" && segments[1] === "studio") {
+    return <HighFidelityGenerationDemo />
+  }
 
   let title = "快速生产"
   let content = <CreateGallery />

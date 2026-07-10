@@ -14,6 +14,7 @@ import {
 import { Slider } from "@/components/ui/slider"
 import { AdvancedGroup } from "@/components/shared/AdvancedGroup"
 import { Fact, InlineError, TechDetails } from "@/components/shared/feedback"
+import { FrameTemplatePicker } from "@/components/shared/FrameTemplatePicker"
 import { RecipeSelect } from "@/components/shared/RecipeSelect"
 import { SourceChip } from "@/components/shared/SourceChip"
 import {
@@ -468,32 +469,21 @@ export function ProductionSubmitPanel({
                 仅影响本次提交；留空表示沿用模板默认。要长期生效请改模板默认配置。
               </p>
               <div className="grid gap-4 lg:grid-cols-2">
-                <label className="flex flex-col gap-1.5 text-sm">
+                {/* 画面模板图选（批次三）：网格首卡=「使用模板默认」，选中回传空串→撤销覆盖 */}
+                <div className="flex flex-col gap-1.5 text-sm lg:col-span-2">
                   <span className="text-xs text-muted-foreground">
                     {OVERRIDE_LABELS[0].label}
                   </span>
-                  <Select
-                    onValueChange={(value) =>
-                      patchOverride(
-                        "frame_template",
-                        value === "__default__" ? null : value
-                      )
+                  <FrameTemplatePicker
+                    allowDefault
+                    defaultLabel="使用模板默认"
+                    onChange={(key) =>
+                      patchOverride("frame_template", key === "" ? null : key)
                     }
-                    value={String(overrides.frame_template ?? "__default__")}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__default__">使用模板默认</SelectItem>
-                      {frameTemplates.map((item) => (
-                        <SelectItem key={item.key} value={item.key}>
-                          {item.key}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
+                    templates={frameTemplates}
+                    value={String(overrides.frame_template || "")}
+                  />
+                </div>
 
                 <label className="flex flex-col gap-1.5 text-sm">
                   <span className="text-xs text-muted-foreground">

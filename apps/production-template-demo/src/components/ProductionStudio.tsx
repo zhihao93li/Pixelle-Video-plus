@@ -63,6 +63,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AdvancedGroup } from "@/components/shared/AdvancedGroup"
 import { FileDropzone } from "@/components/shared/FileDropzone"
+import { FrameTemplatePicker } from "@/components/shared/FrameTemplatePicker"
+import { PIPELINE_PARTS } from "@/lib/pipelineParts"
 import {
   artifactKindLabel,
   isNonVideoPipeline,
@@ -94,7 +96,6 @@ import { useTaskCenter } from "@/lib/taskCenter"
 import { useCurrentProject } from "@/lib/currentProject"
 import { useLocalStorageState } from "@/lib/useLocalStorageState"
 import {
-  apiResourceUrl,
   artifactFileUrl,
   cancelGenerationTask,
   createGenerationBatch,
@@ -224,6 +225,73 @@ const defaultAssetAdvancedSettings: AssetAdvancedSettings = {
   ttsSpeed: 1.2,
 }
 
+/**
+ * 产线步骤查号（批次三 PRD 附录 B：以 PIPELINE_PARTS 为唯一事实源）。
+ * 返回 group 覆盖参数在该管线零件表中的序号串（如 "3·4"），不在产线上返回 null。
+ */
+function pipelineStepBadge(pipelineId: string, keys: string[]): string | null {
+  const parts = PIPELINE_PARTS[pipelineId] || PIPELINE_PARTS.standard
+  const nums = [
+    ...new Set(
+      keys
+        .map((key) => parts.findIndex((part) => part.controlKey === key))
+        .filter((index) => index >= 0)
+        .map((index) => index + 1)
+    ),
+  ].sort((a, b) => a - b)
+  return nums.length > 0 ? nums.join("·") : null
+}
+
+function pipelinePartLabel(
+  pipelineId: string,
+  key: string,
+  fallback: string
+): string {
+  const parts = PIPELINE_PARTS[pipelineId] || PIPELINE_PARTS.standard
+  return parts.find((part) => part.controlKey === key)?.label || fallback
+}
+
+/** 来源标注 v1（脏值比较）：跟踪的覆盖字段，中文名与配方页零件表对齐。 */
+const OVERRIDE_TRACKED: Array<{
+  key: keyof StandardAdvancedSettings
+  label: string
+}> = [
+  { key: "splitMode", label: "分镜切法" },
+  { key: "ttsInferenceMode", label: "配音引擎" },
+  { key: "ttsVoice", label: "音色" },
+  { key: "ttsWorkflow", label: "配音 workflow" },
+  { key: "ttsSpeed", label: "语速" },
+  { key: "frameTemplate", label: "画面模板" },
+  { key: "mediaWorkflow", label: "每镜画面 workflow" },
+  { key: "promptPrefix", label: "生图提示词前缀" },
+  { key: "imagePromptVisualContext", label: "生图视觉风格说明" },
+  { key: "imagePromptGenerationRules", label: "生图规则说明" },
+  { key: "bgmPath", label: "背景音乐文件" },
+  { key: "bgmVolume", label: "背景音乐音量" },
+  { key: "bgmMode", label: "背景音乐播放方式" },
+]
+
+function overriddenAdvancedLabels(
+  settings: StandardAdvancedSettings
+): string[] {
+  return OVERRIDE_TRACKED.filter(
+    ({ key }) => settings[key] !== defaultAdvancedSettings[key]
+  ).map(({ label }) => label)
+}
+
+/** 字段来源标注：改过→「本次」，没改→灰字「配方默认」。 */
+function SourceTag({ dirty }: { dirty: boolean }) {
+  return dirty ? (
+    <Badge className="ml-1.5 text-primary" variant="secondary">
+      本次
+    </Badge>
+  ) : (
+    <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+      · 配方默认
+    </span>
+  )
+}
+
 export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   const [loadState, setLoadState] = useState<LoadState>("loading")
   const [reloadToken, setReloadToken] = useState(0)
@@ -296,6 +364,14 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
     () => parseFixedScriptItems(batchText),
     [batchText]
   )
+  // 提交前总结：本次覆盖了哪些配方默认（来源标注 v1，脏值比较）
+  const overriddenLabels = overriddenAdvancedLabels(advancedSettings)
+  const overrideSummary =
+    overriddenLabels.length > 0
+      ? `本次覆盖 ${overriddenLabels.length} 项（${overriddenLabels
+          .slice(0, 3)
+          .join("、")}${overriddenLabels.length > 3 ? " 等" : ""}）`
+      : "全部沿用配方默认"
   const batchMeasureWord = nonVideoArtifact === "text" ? "篇" : "条"
   const batchOutputNoun =
     nonVideoArtifact === "text"
@@ -693,6 +769,8 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                       onBgmUploaded={addBgmResource}
                       onAdvancedSettingsChange={setAdvancedSettings}
                       onTextChange={setTopic}
+                      pipelineId={template?.pipeline_id}
+                      recipeId={template?.id}
                       resources={resources}
                       resourcesError={resourcesError}
                       sampleText={sampleTopic}
@@ -707,6 +785,8 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                       batchText={batchText}
                       inputKind="script"
                       isNonVideo={isNonVideo}
+                      pipelineId={template?.pipeline_id}
+                      recipeId={template?.id}
                       onBatchTextChange={setBatchText}
                       onBgmUploaded={addBgmResource}
                       onAdvancedSettingsChange={setAdvancedSettings}
@@ -729,6 +809,12 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                   )}
 
                   <div className="mt-5 flex flex-col items-end gap-1.5">
+                    {/* 按下之前明确知道自己改了什么（批次三：来源标注总结） */}
+                    {!templateNeedsAssets && (
+                      <div className="text-xs text-muted-foreground">
+                        {overrideSummary}
+                      </div>
+                    )}
                     {inBatch ? (
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
@@ -931,6 +1017,8 @@ function StandardInput({
   batchMode = false,
   batchText = "",
   batchItems = [],
+  pipelineId = "standard",
+  recipeId = "",
   onBatchTextChange,
   onRemoveBatchItem,
   onTextChange,
@@ -948,6 +1036,10 @@ function StandardInput({
   batchMode?: boolean
   batchText?: string
   batchItems?: ParsedScriptItem[]
+  /** 产线步骤编号与组显隐的事实源（PIPELINE_PARTS 查号）。 */
+  pipelineId?: string
+  /** 「改默认去配方」深链目标。 */
+  recipeId?: string
   onBatchTextChange?: (value: string) => void
   onRemoveBatchItem?: (index: number) => void
   onTextChange: (value: string) => void
@@ -973,6 +1065,29 @@ function StandardInput({
       : artifactKind === "image_set"
         ? "用 --- 单独一行分隔多条；每条首行作标题。图文线按行分页，注意换行即分页。"
         : "用 --- 单独一行分隔多条；每条首行作标题。"
+  // 产线同构（批次三）：组编号/标题/显隐全部从 PIPELINE_PARTS 查出，不硬编码管线名
+  const pipelineParts = PIPELINE_PARTS[pipelineId] || PIPELINE_PARTS.standard
+  const showScriptStep = pipelineParts[0]?.label === "写稿"
+  const scriptStepNote =
+    inputKind === "topic"
+      ? "AI 将按你的内容方向写稿，再走后续产线"
+      : batchMode
+        ? "本次跳过——每条粘贴的文案即最终口播稿"
+        : "本次跳过——你直接提供了文案"
+  const splitStep = pipelineStepBadge(pipelineId, ["split_mode"])
+  const splitLabel = pipelinePartLabel(pipelineId, "split_mode", "分镜")
+  const voiceStep = pipelineStepBadge(pipelineId, [
+    "tts_inference_mode",
+    "tts_voice",
+  ])
+  const visualStep = pipelineStepBadge(pipelineId, [
+    "media_workflow",
+    "frame_template",
+  ])
+  const visualLabel = pipelinePartLabel(pipelineId, "media_workflow", "每镜画面")
+  const composeStep = pipelineStepBadge(pipelineId, ["compose_runtime"])
+  const dirty = (key: keyof StandardAdvancedSettings) =>
+    advancedSettings[key] !== defaultAdvancedSettings[key]
   const expertMode = useExpertMode()
   const [ttsPreview, setTtsPreview] = useState<TtsPreviewResponse | null>(null)
   const [ttsPreviewError, setTtsPreviewError] = useState<string | null>(null)
@@ -1265,28 +1380,58 @@ function StandardInput({
         <InlineError title="资源读取失败" message={resourcesError} />
       )}
 
+      {/* 批量态标题取每条首行；标题是主料，不进产线分组 */}
+      {!batchMode && (
+        <Field>
+          <FieldLabel htmlFor="advanced-title">标题</FieldLabel>
+          <Input
+            id="advanced-title"
+            onChange={(event) => patchAdvanced({ title: event.target.value })}
+            placeholder="可选，留空自动取首行"
+            value={advancedSettings.title}
+          />
+        </Field>
+      )}
+
       <div className="flex flex-col gap-3">
+        {/* 产线同构（批次三）：分组编号与配方详情页产线图一一对应 */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+          <span className="text-sm font-medium">高级设置 · 按产线步骤</span>
+          <span className="text-xs text-muted-foreground">
+            只影响本次 ·{" "}
+            <button
+              className="text-primary hover:underline"
+              onClick={() => navigate(`/create/recipes/${recipeId}`)}
+              type="button"
+            >
+              要长期生效去配方改默认
+            </button>
+          </span>
+        </div>
+
+        {showScriptStep && (
+          <div className="flex items-center gap-2 rounded-lg border bg-background px-4 py-3">
+            <span className="shrink-0 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+              1
+            </span>
+            <span className="text-sm font-medium">写稿</span>
+            <span className="truncate text-xs text-muted-foreground">
+              {scriptStepNote}
+            </span>
+          </div>
+        )}
+
+        {(splitStep || inputKind === "topic") && (
         <AdvancedGroup
-          description="标题、分镜与提示词规则"
-          id="content"
-          title="内容结构"
+          defaultOpen
+          description={
+            inputKind === "topic" ? "分镜数量" : "文案怎么切成分镜"
+          }
+          id="storyboard"
+          step={splitStep || "2"}
+          title={splitLabel}
         >
           <div className="grid gap-4 lg:grid-cols-2">
-            {/* 批量态标题取每条首行，隐藏共享标题字段 */}
-            {!batchMode && (
-              <Field>
-                <FieldLabel htmlFor="advanced-title">
-                  {isNonVideo ? "标题" : "视频标题"}
-                </FieldLabel>
-                <Input
-                  id="advanced-title"
-                  onChange={(event) => patchAdvanced({ title: event.target.value })}
-                  placeholder="可选"
-                  value={advancedSettings.title}
-                />
-              </Field>
-            )}
-
             {inputKind === "topic" ? (
               <Field>
                 <FieldLabel htmlFor="advanced-scenes">分镜数量</FieldLabel>
@@ -1303,7 +1448,10 @@ function StandardInput({
               </Field>
             ) : (
               <Field>
-                <FieldLabel>文案拆分方式</FieldLabel>
+                <FieldLabel>
+                  文案拆分方式
+                  <SourceTag dirty={dirty("splitMode")} />
+                </FieldLabel>
                 <ToggleGroup
                   onValueChange={(value) => {
                     if (value) {
@@ -1324,74 +1472,30 @@ function StandardInput({
               </Field>
             )}
           </div>
-
-          <Field>
-            <FieldLabel htmlFor="advanced-prompt-rules">
-              画面提示词生成规则
-            </FieldLabel>
-            <Textarea
-              className="min-h-20 resize-y"
-              id="advanced-prompt-rules"
-              onChange={(event) =>
-                patchAdvanced({
-                  imagePromptGenerationRules: event.target.value,
-                })
-              }
-              placeholder="可选，用于约束每个分镜画面提示词的生成。"
-              value={advancedSettings.imagePromptGenerationRules}
-            />
-          </Field>
         </AdvancedGroup>
+        )}
 
-        {/* 长文（text）无画面；图集/视频保留画面风格 */}
-        {artifactKind !== "text" && (
+        {/* 长文（text）无画面 */}
+        {artifactKind !== "text" && visualStep && (
         <AdvancedGroup
-          description="画面模板、参数与帧图预览"
+          defaultOpen
+          description="模板看图挑款、参数与帧图预览"
           id="visual"
-          title="画面风格"
+          step={visualStep}
+          title={visualLabel}
         >
           <div className="grid gap-4 lg:grid-cols-2">
-            <Field>
-              <FieldLabel>画面模板</FieldLabel>
-              <Select
-                onValueChange={(value) =>
-                  patchAdvanced({ frameTemplate: value })
-                }
+            {/* 图选网格（批次三）：预览图直接当选择器，点图即选 */}
+            <Field className="lg:col-span-2">
+              <FieldLabel>
+                画面模板
+                <SourceTag dirty={dirty("frameTemplate")} />
+              </FieldLabel>
+              <FrameTemplatePicker
+                onChange={(key) => patchAdvanced({ frameTemplate: key })}
+                templates={resources.frameTemplates}
                 value={advancedSettings.frameTemplate}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="选择画面模板" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1080x1920/image_default.html">
-                    1080x1920/image_default.html
-                  </SelectItem>
-                  {resources.frameTemplates
-                    .filter(
-                      (item) => item.key !== "1080x1920/image_default.html"
-                    )
-                    .map((item) => (
-                      <SelectItem key={item.key} value={item.key}>
-                        {item.key}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-              {/* 静态预览图（原版 docs/images 图库）：选择即见；「生成预览」留给带自定义参数的真渲染 */}
-              {(() => {
-                const previewSrc = apiResourceUrl(
-                  resources.frameTemplates.find(
-                    (item) => item.key === advancedSettings.frameTemplate
-                  )?.preview_url
-                )
-                return previewSrc ? (
-                  <img
-                    alt="画面模板样式预览"
-                    className="mt-2 max-h-64 w-auto self-start rounded-md border"
-                    src={previewSrc}
-                  />
-                ) : null
-              })()}
+              />
             </Field>
 
             {expertMode && (
@@ -1564,38 +1668,60 @@ function StandardInput({
             )}
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor="advanced-prompt-prefix">
-                画面提示词前缀
-              </FieldLabel>
-              <Textarea
-                className="min-h-20 resize-y"
-                id="advanced-prompt-prefix"
-                onChange={(event) =>
-                  patchAdvanced({ promptPrefix: event.target.value })
-                }
-                placeholder="可选，例如：温暖自然光、真实宠物生活方式、竖屏构图"
-                value={advancedSettings.promptPrefix}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="advanced-visual-context">
-                画面视觉上下文
-              </FieldLabel>
-              <Textarea
-                className="min-h-20 resize-y"
-                id="advanced-visual-context"
-                onChange={(event) =>
-                  patchAdvanced({
-                    imagePromptVisualContext: event.target.value,
-                  })
-                }
-                placeholder="可选，例如品牌视觉、宠物品种、场景约束。"
-                value={advancedSettings.imagePromptVisualContext}
-              />
-            </Field>
-          </div>
+          {/* 生图提示词三项：专家行（批准 mock），标签与配方页零件表一致 */}
+          {expertMode && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="advanced-prompt-prefix">
+                  生图提示词前缀
+                  <SourceTag dirty={dirty("promptPrefix")} />
+                </FieldLabel>
+                <Textarea
+                  className="min-h-20 resize-y"
+                  id="advanced-prompt-prefix"
+                  onChange={(event) =>
+                    patchAdvanced({ promptPrefix: event.target.value })
+                  }
+                  placeholder="可选，例如：温暖自然光、真实宠物生活方式、竖屏构图"
+                  value={advancedSettings.promptPrefix}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="advanced-visual-context">
+                  生图视觉风格说明
+                  <SourceTag dirty={dirty("imagePromptVisualContext")} />
+                </FieldLabel>
+                <Textarea
+                  className="min-h-20 resize-y"
+                  id="advanced-visual-context"
+                  onChange={(event) =>
+                    patchAdvanced({
+                      imagePromptVisualContext: event.target.value,
+                    })
+                  }
+                  placeholder="可选，例如品牌视觉、宠物品种、场景约束。"
+                  value={advancedSettings.imagePromptVisualContext}
+                />
+              </Field>
+              <Field className="lg:col-span-2">
+                <FieldLabel htmlFor="advanced-prompt-rules">
+                  生图规则说明
+                  <SourceTag dirty={dirty("imagePromptGenerationRules")} />
+                </FieldLabel>
+                <Textarea
+                  className="min-h-20 resize-y"
+                  id="advanced-prompt-rules"
+                  onChange={(event) =>
+                    patchAdvanced({
+                      imagePromptGenerationRules: event.target.value,
+                    })
+                  }
+                  placeholder="可选，用于约束每个分镜画面提示词的生成。"
+                  value={advancedSettings.imagePromptGenerationRules}
+                />
+              </Field>
+            </div>
+          )}
 
           {expertMode && (
             <div className="rounded-lg border bg-muted/30 p-4">
@@ -1704,17 +1830,22 @@ function StandardInput({
         </AdvancedGroup>
         )}
 
-        {/* 图文/长文无配音；仅视频保留声音与音乐 */}
-        {!isNonVideo && (
+        {/* 图文/长文无配音 */}
+        {!isNonVideo && voiceStep && (
         <AdvancedGroup
-          description="声音试听、语速与背景音乐"
+          defaultOpen
+          description="引擎、音色、语速与试听"
           id="audio"
-          title="声音与音乐"
+          step={voiceStep}
+          title="配音"
         >
           <div className="grid gap-4 lg:grid-cols-2">
             {/* 配音引擎决定音色 ID 的取值方式，常驻显示（2026-07-08 用户反馈，移出专家门控） */}
             <Field>
-              <FieldLabel>配音引擎</FieldLabel>
+              <FieldLabel>
+                配音引擎
+                <SourceTag dirty={dirty("ttsInferenceMode")} />
+              </FieldLabel>
               <Select
                 onValueChange={(value) =>
                   patchAdvanced({
@@ -1737,7 +1868,8 @@ function StandardInput({
 
             <Field>
               <FieldLabel htmlFor="advanced-tts-voice">
-                声音或 Reference ID
+                音色
+                <SourceTag dirty={dirty("ttsVoice")} />
               </FieldLabel>
               <Input
                 id="advanced-tts-voice"
@@ -1746,6 +1878,9 @@ function StandardInput({
                 }
                 value={advancedSettings.ttsVoice}
               />
+              <FieldDescription>
+                本机 TTS 填系统音色名；Fish Audio 填你的 reference_id。
+              </FieldDescription>
             </Field>
 
             {expertMode && (
@@ -1778,6 +1913,7 @@ function StandardInput({
             <Field>
               <FieldLabel htmlFor="advanced-tts-speed">
                 语速 · {advancedSettings.ttsSpeed.toFixed(1)}x
+                <SourceTag dirty={dirty("ttsSpeed")} />
               </FieldLabel>
               <Slider
                 id="advanced-tts-speed"
@@ -1880,9 +2016,24 @@ function StandardInput({
             )}
           </div>
 
+        </AdvancedGroup>
+        )}
+
+        {/* 合成组（批次三）：BGM 属于合成阶段；合成引擎是配方级参数，如实指路 */}
+        {!isNonVideo && composeStep && (
+        <AdvancedGroup
+          defaultOpen
+          description="背景音乐与合成引擎"
+          id="compose"
+          step={composeStep}
+          title="合成"
+        >
           <div className="grid gap-4 lg:grid-cols-2">
             <Field>
-              <FieldLabel>背景音乐</FieldLabel>
+              <FieldLabel>
+                背景音乐
+                <SourceTag dirty={dirty("bgmPath")} />
+              </FieldLabel>
               <Select
                 onValueChange={(value) =>
                   patchAdvanced({ bgmPath: value === "__none__" ? "" : value })
@@ -1912,7 +2063,8 @@ function StandardInput({
 
             <Field>
               <FieldLabel htmlFor="advanced-bgm-volume">
-                BGM 音量 · {Math.round(advancedSettings.bgmVolume * 100)}%
+                背景音乐音量 · {Math.round(advancedSettings.bgmVolume * 100)}%
+                <SourceTag dirty={dirty("bgmVolume")} />
               </FieldLabel>
               <Slider
                 id="advanced-bgm-volume"
@@ -1927,7 +2079,10 @@ function StandardInput({
             </Field>
 
             <Field>
-              <FieldLabel>BGM 模式</FieldLabel>
+              <FieldLabel>
+                背景音乐播放方式
+                <SourceTag dirty={dirty("bgmMode")} />
+              </FieldLabel>
               <ToggleGroup
                 onValueChange={(value) => {
                   if (value) {
@@ -1952,6 +2107,18 @@ function StandardInput({
               <audio className="mt-3 w-full" controls src={bgmPreviewUrl} />
             </div>
           )}
+
+          <p className="text-xs text-muted-foreground">
+            合成引擎由配方决定（标准合成 / 动效合成），
+            <button
+              className="text-primary hover:underline"
+              onClick={() => navigate(`/create/recipes/${recipeId}`)}
+              type="button"
+            >
+              在配方里查看或更换
+            </button>
+            。
+          </p>
         </AdvancedGroup>
         )}
       </div>

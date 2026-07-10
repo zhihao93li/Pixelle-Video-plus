@@ -12,12 +12,15 @@ export function AdvancedGroup({
   id,
   title,
   description,
+  step,
   defaultOpen = false,
   children,
 }: {
   id: string
   title: string
   description?: string
+  /** 产线步骤编号胶囊（与配方详情页产线图对齐，批次三 PRD）。 */
+  step?: string | null
   defaultOpen?: boolean
   children: React.ReactNode
 }) {
@@ -39,6 +42,11 @@ export function AdvancedGroup({
             open && "rotate-90"
           )}
         />
+        {step && (
+          <span className="shrink-0 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+            {step}
+          </span>
+        )}
         <span className="text-sm font-medium">{title}</span>
         {description && (
           <span className="hidden truncate text-xs text-muted-foreground sm:inline">

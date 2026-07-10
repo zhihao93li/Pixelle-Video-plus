@@ -17,13 +17,16 @@ import { InlineError } from "@/components/shared/feedback"
 import { readableError } from "@/lib/format"
 import { navigate } from "@/lib/router"
 import { settingsLink } from "@/lib/settingsLinks"
+import { FrameTemplatePicker } from "@/components/shared/FrameTemplatePicker"
 import {
   cloneProductionTemplate,
   getTemplateGenerationConfig,
   listProjects,
+  listResourceTemplates,
   listTemplates,
   updateTemplateGenerationConfig,
   type ProductionTemplate,
+  type ResourceTemplate,
 } from "@/lib/generationApi"
 import {
   humanizePartValue,
@@ -60,6 +63,22 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [editValue, setEditValue] = useState("")
   const [isSaving, setIsSaving] = useState(false)
+  // 画面模板图选（批次三）：拉不到列表时静默回落纯文本编辑
+  const [frameTemplates, setFrameTemplates] = useState<ResourceTemplate[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    void listResourceTemplates()
+      .then((response) => {
+        if (!cancelled) {
+          setFrameTemplates(response.templates)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // 找模板 + 项目引用（哪些项目拿它作默认）
   useEffect(() => {
@@ -125,10 +144,11 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
   }, [templateId])
 
   const steps = template ? (PIPELINE_PARTS[template.pipeline_id] ?? []) : []
-  // 兜底完整性：白名单里可换、但产线图没画的参数，自动列进「更多可调参数」。
-  const coveredKeys = new Set(
-    steps.map((step) => step.controlKey).filter(Boolean)
-  )
+  // 兜底完整性：白名单里可换、但产线图（主控 key + 附属参数）没画的，自动列进「更多可调参数」。
+  const coveredKeys = new Set([
+    ...steps.map((step) => step.controlKey).filter(Boolean),
+    ...steps.flatMap((step) => step.subKeys || []),
+  ])
   const extraKeys = overridableKeys.filter((key) => !coveredKeys.has(key))
 
   function startEdit(key: string) {
@@ -171,6 +191,8 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
     const options = PART_EDIT_OPTIONS[key]
     const hint = PART_EDIT_HINTS[key]
     const isLongText = PART_LONG_TEXT_KEYS.has(key)
+    // 画面模板走图选网格（批次三）；资源拉不到时回落文本框
+    const isFramePicker = key === "frame_template" && frameTemplates.length > 0
     return (
       <div className="mt-2 flex flex-col gap-1.5">
         {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
@@ -178,6 +200,13 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
           <Textarea
             className="min-h-40 font-mono text-xs"
             onChange={(event) => setEditValue(event.target.value)}
+            value={editValue}
+          />
+        )}
+        {isFramePicker && (
+          <FrameTemplatePicker
+            onChange={setEditValue}
+            templates={frameTemplates}
             value={editValue}
           />
         )}
@@ -195,7 +224,7 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
                 ))}
               </SelectContent>
             </Select>
-          ) : isLongText ? null : (
+          ) : isLongText || isFramePicker ? null : (
             <Input
               className="h-8 w-52"
               onChange={(event) => setEditValue(event.target.value)}
@@ -376,6 +405,55 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
                         )}
                       </div>
                       {isEditing && renderEditor(step.controlKey as string)}
+                      {/* 附属参数（批次三后续）：归属这一步的白名单参数折在步骤卡下，兜底区只留无家可归的 */}
+                      {(() => {
+                        const subKeys = (step.subKeys || []).filter((key) =>
+                          overridableKeys.includes(key)
+                        )
+                        if (subKeys.length === 0) {
+                          return null
+                        }
+                        return (
+                          <div className="mt-3 flex flex-col gap-2 border-t pt-3">
+                            {subKeys.map((key) => {
+                              const isSubEditing = editingKey === key
+                              const subCurrent = humanizePartValue(
+                                effectiveParams[key],
+                                "未设置"
+                              )
+                              return (
+                                <div key={key}>
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2 text-sm">
+                                        {PART_KEY_LABELS[key] || key}
+                                        {key in overrides && (
+                                          <Badge variant="secondary">
+                                            已自定义
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <div className="mt-0.5 text-xs text-muted-foreground">
+                                        当前：{subCurrent}
+                                      </div>
+                                    </div>
+                                    {!isSubEditing && (
+                                      <Button
+                                        onClick={() => startEdit(key)}
+                                        size="sm"
+                                        variant="ghost"
+                                      >
+                                        更换
+                                      </Button>
+                                    )}
+                                  </div>
+                                  {isSubEditing && renderEditor(key)}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })()}
                     </div>
                   )
                 })}
