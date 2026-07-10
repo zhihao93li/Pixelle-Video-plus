@@ -1,23 +1,17 @@
 import { useEffect, useMemo, useState } from "react"
-import {
-  CheckCircle2,
-  Eye,
-  Loader2,
-  RefreshCcw,
-  Save,
-  Send,
-  Wand2,
-} from "lucide-react"
+import { Eye, FileText, Loader2, Save, Send, Wand2 } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -29,18 +23,36 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Slider } from "@/components/ui/slider"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { AdvancedGroup } from "@/components/shared/AdvancedGroup"
+import { AsyncState } from "@/components/shared/AsyncState"
+import { BatchStatusCard } from "@/components/shared/BatchStatusCard"
+import { EmptyState } from "@/components/shared/EmptyState"
 import { InlineError, InlineNotice } from "@/components/shared/feedback"
+import { PageFrame } from "@/components/shared/PageFrame"
 import {
   ProductionSubmitPanel,
   type ProductionOverrides,
 } from "@/components/shared/ProductionSubmitPanel"
 import { PromptPeekSheet } from "@/components/shared/PromptPeekSheet"
 import { SourceChip } from "@/components/shared/SourceChip"
-import { navigate } from "@/lib/router"
+import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
+import { WorkspacePanel } from "@/components/shared/WorkspacePanel"
+import { DraftReviewEditor } from "@/components/script-review/DraftReviewEditor"
+import {
+  RecentDraftsRecovery,
+  type DraftRecoveryState,
+} from "@/components/script-review/RecentDraftsRecovery"
+import {
+  ReviewFlowStepper,
+  StepActionBar,
+  type ReviewStep,
+} from "@/components/script-review/ReviewFlow"
+import { routeHref } from "@/lib/router"
 import { settingsLink } from "@/lib/settingsLinks"
 import { useCurrentProject } from "@/lib/currentProject"
 import { useTaskCenter } from "@/lib/taskCenter"
-import { draftSetProvenance, readableError } from "@/lib/format"
+import { readableError } from "@/lib/format"
 import {
   getGenerationBatch,
   getSettingsConfig,
@@ -50,6 +62,7 @@ import {
   listScriptReviewTemplates,
   listTemplates,
   createScriptReviewDraftSet,
+  retryGenerationBatchItem,
   submitScriptReviewDraftSetTasks,
   updateScriptReviewDraftSet,
   type DraftingProfile,
@@ -60,12 +73,8 @@ import {
   type ScriptReviewLanguageDraft,
   type ScriptReviewTemplateListResponse,
 } from "@/lib/generationApi"
-import {
-  isNonVideoPipeline,
-  templateArtifactType,
-} from "@/lib/artifactKind"
+import { isNonVideoPipeline, templateArtifactType } from "@/lib/artifactKind"
 import { buildScriptReviewDraftFeedback } from "@/lib/scriptReviewDraftFeedback"
-import { cn } from "@/lib/utils"
 import { LANGUAGE_LABELS, PRESET_LANGUAGES } from "@/lib/languages"
 
 const BAZI_TEMPLATE_NAME = "Bazi Storyboard Oral Script"
@@ -89,7 +98,9 @@ function validateDraftContent(draft: ScriptReviewDraft): string[] {
 }
 
 function dedupeLanguages(values: string[]) {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+  return Array.from(
+    new Set(values.map((value) => value.trim()).filter(Boolean))
+  )
 }
 
 const BAZI_LANGUAGE_SCRIPT_MODEL_DEFAULTS: Record<string, string> = {
@@ -98,20 +109,22 @@ const BAZI_LANGUAGE_SCRIPT_MODEL_DEFAULTS: Record<string, string> = {
 }
 export function ScriptReviewWorkspace() {
   const { projectId, project } = useCurrentProject()
-  const [sourceProfile, setSourceProfile] = useState<DraftingProfile | null>(null)
-  const [peek, setPeek] = useState<{ kind: "script" | "split"; name: string } | null>(
+  const [sourceProfile, setSourceProfile] = useState<DraftingProfile | null>(
     null
   )
+  const [peek, setPeek] = useState<{
+    kind: "script" | "split"
+    name: string
+  } | null>(null)
   const [templates, setTemplates] =
     useState<ScriptReviewTemplateListResponse | null>(null)
   const [draftSets, setDraftSets] = useState<ScriptReviewDraftSet[]>([])
   const [draftSet, setDraftSet] = useState<ScriptReviewDraftSet | null>(null)
   const [topicsText, setTopicsText] = useState("")
-  const [step, setStep] = useState<1 | 2 | 3>(1)
-  const [presetLanguages, setPresetLanguages] = useState<string[]>([
-    "Chinese",
-    "English",
-  ])
+  const [step, setStep] = useState<ReviewStep>(1)
+  const [presetLanguages, setPresetLanguages] = useState<string[]>(() =>
+    project?.languages?.length ? [...project.languages] : ["Chinese", "English"]
+  )
   const [customLanguagesText, setCustomLanguagesText] = useState("")
   const [scriptTemplateName, setScriptTemplateName] = useState("")
   const [splitTemplateName, setSplitTemplateName] = useState("")
@@ -126,17 +139,79 @@ export function ScriptReviewWorkspace() {
   >([])
   const [productionOverrides, setProductionOverrides] =
     useState<ProductionOverrides>({})
-  const [ttsVoiceByLanguage, setTtsVoiceByLanguage] = useState<Record<string, string>>({})
-  const [ttsSpeedByLanguage, setTtsSpeedByLanguage] = useState<Record<string, number>>({})
-  const [submittedBatch, setSubmittedBatch] = useState<GenerationBatch | null>(null)
+  const [ttsVoiceByLanguage, setTtsVoiceByLanguage] = useState<
+    Record<string, string>
+  >(() => ({ ...(project?.tts_voice_by_language ?? {}) }))
+  const [ttsSpeedByLanguage, setTtsSpeedByLanguage] = useState<
+    Record<string, number>
+  >({})
+  const [submittedBatch, setSubmittedBatch] = useState<GenerationBatch | null>(
+    null
+  )
   const [isInitialLoading, setIsInitialLoading] = useState(true)
+  const [isProductionCatalogLoading, setIsProductionCatalogLoading] =
+    useState(true)
   const [isRefreshingDrafts, setIsRefreshingDrafts] = useState(false)
   const [isCreatingDrafts, setIsCreatingDrafts] = useState(false)
   const [isSavingDrafts, setIsSavingDrafts] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [retryingBatchItemIndex, setRetryingBatchItemIndex] = useState<
+    number | null
+  >(null)
+  const [batchPollingError, setBatchPollingError] = useState<string | null>(
+    null
+  )
+  const [templateReloadToken, setTemplateReloadToken] = useState(0)
+  const [productionCatalogReloadToken, setProductionCatalogReloadToken] =
+    useState(0)
+  const [templateError, setTemplateError] = useState<string | null>(null)
+  const [draftListError, setDraftListError] = useState<string | null>(null)
+  const [draftListState, setDraftListState] =
+    useState<DraftRecoveryState>("loading")
+  const [productionCatalogError, setProductionCatalogError] = useState<
+    string | null
+  >(null)
+  const [settingsTtsReferenceId, setSettingsTtsReferenceId] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [activeProjectId, setActiveProjectId] = useState(projectId)
   const taskCenter = useTaskCenter()
+
+  if (activeProjectId !== projectId) {
+    setActiveProjectId(projectId)
+    setSourceProfile(null)
+    setDraftSets([])
+    setDraftSet(null)
+    setDraftListError(null)
+    setDraftListState("loading")
+    setTopicsText("")
+    setStep(1)
+    setPresetLanguages(project?.languages?.length ? [...project.languages] : [])
+    setCustomLanguagesText("")
+    setScriptTemplateName("")
+    setSplitTemplateName("")
+    setScriptModel("")
+    setSplitModel("")
+    setLanguageScriptModels({})
+    setProductionTemplateId("")
+    setProductionTemplates([])
+    setProductionCatalogError(null)
+    setIsProductionCatalogLoading(true)
+    setProductionOverrides({})
+    setTtsVoiceByLanguage(
+      Object.keys(project?.tts_voice_by_language ?? {}).length > 0
+        ? { ...(project?.tts_voice_by_language ?? {}) }
+        : settingsTtsReferenceId
+          ? { Chinese: settingsTtsReferenceId }
+          : {}
+    )
+    setTtsSpeedByLanguage({})
+    setSubmittedBatch(null)
+    setRetryingBatchItemIndex(null)
+    setBatchPollingError(null)
+    setError(null)
+    setNotice(null)
+  }
 
   const topics = useMemo(() => parseLines(topicsText), [topicsText])
   const languages = useMemo(
@@ -167,6 +242,8 @@ export function ScriptReviewWorkspace() {
     languages.length > 0 &&
     Boolean(currentScriptTemplateName) &&
     Boolean(currentSplitTemplateName) &&
+    !isInitialLoading &&
+    !templateError &&
     !isCreatingDrafts
   const draftValidationErrors = useMemo(
     () => (draftSet?.drafts ?? []).flatMap(validateDraftContent),
@@ -183,15 +260,21 @@ export function ScriptReviewWorkspace() {
     [draftSet]
   )
   // 非视频模板（图文帖 / 长文）无配音；提交时不要求每语言音色，也不显示音色区
-  const selectedTemplatePipeline = productionTemplates.find(
+  const selectedProductionTemplate = productionTemplates.find(
     (template) => template.id === productionTemplateId
-  )?.pipeline_id
+  )
+  const selectedTemplatePipeline = selectedProductionTemplate?.pipeline_id
   const isNonVideoTemplate = isNonVideoPipeline(selectedTemplatePipeline)
   const nonVideoOutputLabel =
-    templateArtifactType(selectedTemplatePipeline) === "text" ? "长文" : "图文帖"
+    templateArtifactType(selectedTemplatePipeline) === "text"
+      ? "长文"
+      : "图文帖"
   const canSubmit =
     Boolean(draftSet) &&
     Boolean(productionTemplateId) &&
+    Boolean(selectedProductionTemplate) &&
+    !isProductionCatalogLoading &&
+    !productionCatalogError &&
     jobCount > 0 &&
     draftValidationErrors.length === 0 &&
     selectedLanguages.length > 0 &&
@@ -201,20 +284,30 @@ export function ScriptReviewWorkspace() {
       )) &&
     !isSubmitting
 
-  // 生产模板列表（仅用来判断选中模板是不是图文帖，决定是否显示音色区）
+  // 生产模板列表仅用于确认产物类型与本步校验；真实提交仍由 draft-set API 完成。
   useEffect(() => {
     let cancelled = false
-    void listTemplates()
+    void listTemplates(projectId ?? undefined)
       .then((response) => {
         if (!cancelled) {
           setProductionTemplates(response.templates)
+          setProductionCatalogError(null)
         }
       })
-      .catch(() => {})
+      .catch((loadError) => {
+        if (!cancelled) {
+          setProductionCatalogError(readableError(loadError))
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsProductionCatalogLoading(false)
+        }
+      })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [productionCatalogReloadToken, projectId])
 
   useEffect(() => {
     let cancelled = false
@@ -225,10 +318,11 @@ export function ScriptReviewWorkspace() {
           return
         }
         setTemplates(templateResponse)
+        setTemplateError(null)
       })
       .catch((loadError) => {
         if (!cancelled) {
-          setError(readableError(loadError))
+          setTemplateError(readableError(loadError))
         }
       })
       .finally(() => {
@@ -237,30 +331,31 @@ export function ScriptReviewWorkspace() {
         }
       })
 
-    void Promise.allSettled([getSettingsConfig()]).then(
-      ([settingsResult]) => {
+    void Promise.allSettled([getSettingsConfig()]).then(([settingsResult]) => {
       if (cancelled) {
         return
       }
       if (settingsResult.status === "fulfilled") {
         const defaultReferenceId = (
-          settingsResult.value.config?.comfyui?.tts?.fish_audio
-            ?.reference_id ?? ""
+          settingsResult.value.config?.comfyui?.tts?.fish_audio?.reference_id ??
+          ""
         ).trim()
         if (defaultReferenceId) {
+          setSettingsTtsReferenceId(defaultReferenceId)
           // 与旧版一致：中文默认带入设置里的 Fish reference_id
           setTtsVoiceByLanguage((current) =>
-            current.Chinese ? current : { ...current, Chinese: defaultReferenceId }
+            Object.keys(current).length > 0
+              ? current
+              : { Chinese: defaultReferenceId }
           )
         }
       }
-      }
-    )
+    })
 
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [templateReloadToken])
 
   // 项目作用域：草稿集列表随项目切换刷新；首步默认配方/语言/每语言音色取项目默认。
   useEffect(() => {
@@ -272,11 +367,16 @@ export function ScriptReviewWorkspace() {
           return
         }
         setDraftSets(response.draft_sets)
-        // 切换项目时重置选中草稿，避免看到别的项目的草稿
-        setDraftSet(response.draft_sets[0] ?? null)
+        setDraftListError(null)
+        setDraftListState("ready")
+        // 最近草稿只作为恢复入口，不默认抢占当前流程。
+        setDraftSet(null)
       })
-      .catch(() => {
-        // 列表读取失败不阻塞页面
+      .catch((loadError) => {
+        if (!cancelled) {
+          setDraftListError(readableError(loadError))
+          setDraftListState("error")
+        }
       })
 
     void listDraftingProfiles()
@@ -286,11 +386,16 @@ export function ScriptReviewWorkspace() {
         }
         // 起草配置与项目 1:1：取当前项目的配置
         const profile =
-          response.profiles.find((item) => item.project_id === projectId) ?? null
+          response.profiles.find((item) => item.project_id === projectId) ??
+          null
         setSourceProfile(profile)
         if (profile) {
-          setScriptTemplateName((current) => current || profile.script_template_name)
-          setSplitTemplateName((current) => current || profile.split_template_name)
+          setScriptTemplateName(
+            (current) => current || profile.script_template_name
+          )
+          setSplitTemplateName(
+            (current) => current || profile.split_template_name
+          )
           setScriptModel((current) => current || profile.script_model)
           setSplitModel((current) => current || profile.split_model)
           if (Object.keys(profile.language_script_models).length > 0) {
@@ -300,17 +405,6 @@ export function ScriptReviewWorkspace() {
             }))
           }
         }
-        // 语言归项目管
-        if (project?.languages?.length) {
-          setPresetLanguages(project.languages)
-        }
-        // 每语言音色预填项目默认（项目 > 设置全局）
-        if (project && Object.keys(project.tts_voice_by_language).length > 0) {
-          setTtsVoiceByLanguage((current) => ({
-            ...current,
-            ...project.tts_voice_by_language,
-          }))
-        }
       })
       .catch(() => {
         // 配方读取失败不阻塞页面
@@ -319,7 +413,6 @@ export function ScriptReviewWorkspace() {
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
 
   useEffect(() => {
@@ -328,24 +421,47 @@ export function ScriptReviewWorkspace() {
     }
     const timer = window.setInterval(() => {
       void getGenerationBatch(submittedBatch.batch_id)
-        .then(setSubmittedBatch)
-        .catch((pollError) => setError(readableError(pollError)))
+        .then((response) => {
+          setSubmittedBatch(response)
+          setBatchPollingError(null)
+        })
+        .catch((pollError) => setBatchPollingError(readableError(pollError)))
     }, 2000)
     return () => window.clearInterval(timer)
   }, [submittedBatch])
 
   async function refreshDraftSets() {
     setIsRefreshingDrafts(true)
-    setError(null)
+    setDraftListError(null)
     try {
       const response = await listScriptReviewDraftSets(projectId ?? undefined)
       setDraftSets(response.draft_sets)
-      setDraftSet((current) => current ?? response.draft_sets[0] ?? null)
+      setDraftSet((current) =>
+        current
+          ? (response.draft_sets.find(
+              (candidate) => candidate.draft_set_id === current.draft_set_id
+            ) ?? null)
+          : null
+      )
+      setDraftListState("ready")
     } catch (refreshError) {
-      setError(readableError(refreshError))
+      setDraftListError(readableError(refreshError))
+      setDraftListState(draftSets.length > 0 ? "stale" : "error")
     } finally {
       setIsRefreshingDrafts(false)
     }
+  }
+
+  function retryTemplateLoad() {
+    setIsInitialLoading(true)
+    setTemplateError(null)
+    setTemplateReloadToken((token) => token + 1)
+  }
+
+  function retryProductionCatalogLoad() {
+    setIsProductionCatalogLoading(true)
+    setProductionCatalogError(null)
+    setProductionCatalogReloadToken((token) => token + 1)
   }
 
   async function createDrafts() {
@@ -380,7 +496,9 @@ export function ScriptReviewWorkspace() {
       setStep(2)
       setDraftSets((current) => [
         response,
-        ...current.filter((item) => item.draft_set_id !== response.draft_set_id),
+        ...current.filter(
+          (item) => item.draft_set_id !== response.draft_set_id
+        ),
       ])
       const feedback = buildScriptReviewDraftFeedback(response)
       setNotice(feedback.notice)
@@ -407,7 +525,9 @@ export function ScriptReviewWorkspace() {
       setDraftSet(response)
       setDraftSets((current) => [
         response,
-        ...current.filter((item) => item.draft_set_id !== response.draft_set_id),
+        ...current.filter(
+          (item) => item.draft_set_id !== response.draft_set_id
+        ),
       ])
       setNotice("审核修改已保存。")
     } catch (saveError) {
@@ -424,38 +544,84 @@ export function ScriptReviewWorkspace() {
     setIsSubmitting(true)
     setError(null)
     setNotice(null)
+    setBatchPollingError(null)
     try {
-      const response = await submitScriptReviewDraftSetTasks(draftSet.draft_set_id, {
-        drafts: draftSet.drafts,
-        templateId: productionTemplateId,
-        baseParams: {
-          // 流程强制项：审核稿按行对应分镜；TTS 由每语言 Fish 覆盖
-          split_mode: "line",
-          tts_inference_mode: "fish",
-          ...productionOverrides,
-        },
-        languageTtsOverrides: Object.fromEntries(
-          selectedLanguages.map((language) => [
-            language,
-            {
-              tts_inference_mode: "fish",
-              tts_voice: (ttsVoiceByLanguage[language] || "").trim(),
-              tts_speed: ttsSpeedByLanguage[language] ?? 1,
-            },
-          ])
-        ),
-        metadata: { source: "react_script_review_submit" },
-      })
+      const response = await submitScriptReviewDraftSetTasks(
+        draftSet.draft_set_id,
+        {
+          drafts: draftSet.drafts,
+          templateId: productionTemplateId,
+          baseParams: {
+            // 流程强制项：审核稿按行对应分镜；TTS 由每语言 Fish 覆盖
+            split_mode: "line",
+            tts_inference_mode: "fish",
+            ...productionOverrides,
+          },
+          languageTtsOverrides: Object.fromEntries(
+            selectedLanguages.map((language) => [
+              language,
+              {
+                tts_inference_mode: "fish",
+                tts_voice: (ttsVoiceByLanguage[language] || "").trim(),
+                tts_speed: ttsSpeedByLanguage[language] ?? 1,
+              },
+            ])
+          ),
+          metadata: { source: "react_script_review_submit" },
+        }
+      )
       setDraftSet(response.draft_set)
       setSubmittedBatch(response.batch)
-      setNotice(
-        `已提交 ${response.batch.submitted_count} 个生成任务，可在「任务」页跟踪进度。`
-      )
+      if (
+        response.batch.submitted_count <= 0 ||
+        response.batch.status === "failed"
+      ) {
+        setError(
+          "后端已返回批次，但没有确认创建成功的生成任务。请查看下方真实批次状态，当前不视为提交成功。"
+        )
+      } else if (response.batch.failed_count > 0) {
+        setError(
+          `批次已创建 ${response.batch.submitted_count} 个任务，其中 ${response.batch.failed_count} 个失败。请在下方查看失败项并重试。`
+        )
+      } else {
+        setNotice(
+          `已创建 ${response.batch.submitted_count} 个生成任务，可在「任务」页跟踪进度。`
+        )
+      }
       void trackSubmittedTasks(response.batch)
     } catch (submitError) {
       setError(readableError(submitError))
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  async function retryBatchItem(itemIndex: number) {
+    if (!submittedBatch) {
+      return
+    }
+    setRetryingBatchItemIndex(itemIndex)
+    setError(null)
+    setNotice(null)
+    setBatchPollingError(null)
+    try {
+      const response = await retryGenerationBatchItem(
+        submittedBatch.batch_id,
+        itemIndex
+      )
+      setSubmittedBatch(response)
+      const retriedItem = response.items.find(
+        (item) => item.index === itemIndex
+      )
+      if (!retriedItem || retriedItem.status === "failed") {
+        setError("重试请求已返回，但该任务仍未进入可跟踪状态。")
+      } else {
+        setNotice(`已重试批次中的第 ${itemIndex} 条任务。`)
+      }
+    } catch (retryError) {
+      setError(readableError(retryError))
+    } finally {
+      setRetryingBatchItemIndex(null)
     }
   }
 
@@ -483,7 +649,22 @@ export function ScriptReviewWorkspace() {
     })
   }
 
-  function patchDraft(nextDraftIndex: number, patch: Partial<ScriptReviewDraft>) {
+  async function refreshSubmittedBatch() {
+    if (!submittedBatch) {
+      return
+    }
+    setBatchPollingError(null)
+    try {
+      setSubmittedBatch(await getGenerationBatch(submittedBatch.batch_id))
+    } catch (refreshError) {
+      setBatchPollingError(readableError(refreshError))
+    }
+  }
+
+  function patchDraft(
+    nextDraftIndex: number,
+    patch: Partial<ScriptReviewDraft>
+  ) {
     if (!draftSet) {
       return
     }
@@ -528,274 +709,375 @@ export function ScriptReviewWorkspace() {
     patchDraft(draftIndex, { selected_languages: Array.from(selected) })
   }
 
+  function changeStep(nextStep: ReviewStep) {
+    setError(null)
+    setNotice(null)
+    setStep(nextStep)
+  }
+
+  function openRecoveredDraft(
+    recoveredDraftSet: ScriptReviewDraftSet,
+    nextStep: 2 | 3
+  ) {
+    setDraftSet(recoveredDraftSet)
+    setSubmittedBatch(null)
+    setBatchPollingError(null)
+    setError(null)
+    setNotice(null)
+    setStep(nextStep)
+  }
+
   return (
-    <main className="flex max-w-[960px] flex-col gap-5 p-4 lg:p-6">
-      <ReviewStepper
-        current={step}
-        hasDraft={Boolean(draftSet)}
-        onStepChange={setStep}
+    <PageFrame width="narrow">
+      <WorkspaceHeader
+        description="先确定选题与语言，再逐条审核真实草稿，最后提交到统一生产批次。"
+        title="多语言审核出片"
       />
 
-      {step === 1 && (
-      <section className="flex min-w-0 flex-col gap-5">
-        <Card className="rounded-lg">
-          <CardHeader className="border-b">
-            <CardTitle>多语言审核出片</CardTitle>
-            <CardDescription>
-              先生成多语言草稿，人工确认标题、全文和分镜，再提交真实视频任务。
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-4">
-              {sourceProfile && (
-                <div className="text-xs text-muted-foreground">
-                  默认值来自项目
-                  <SettingsTextLink to={settingsLink({ kind: "projects" })}>
-                    「{project?.name ?? "当前项目"}」
-                  </SettingsTextLink>
-                  的起草配置
-                  {defaultsModified && "，部分字段已修改"}
-                </div>
-              )}
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">选题</span>
-                <Textarea
-                  className="min-h-28 resize-y"
-                  onChange={(event) => setTopicsText(event.target.value)}
-                  placeholder={"一行一个选题\n猫咪夏天饮水少怎么办"}
-                  value={topicsText}
+      <ReviewFlowStepper
+        current={step}
+        hasDraft={Boolean(draftSet)}
+        onStepChange={changeStep}
+      />
+
+      {step === 1 ? (
+        <section
+          aria-label="选择选题与语言"
+          className="flex min-w-0 flex-col gap-4"
+        >
+          {isInitialLoading && !templates ? (
+            <AsyncState
+              description="正在读取脚本与分镜 Prompt，最近草稿仍可单独恢复。"
+              state="loading"
+              title="正在准备审核流程"
+            />
+          ) : null}
+
+          {!isInitialLoading && templateError && !templates ? (
+            <AsyncState
+              action={
+                <Button
+                  onClick={retryTemplateLoad}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  重试
+                </Button>
+              }
+              description={templateError}
+              state="error"
+              title="无法读取审核模板"
+            />
+          ) : null}
+
+          {templates ? (
+            <>
+              {isInitialLoading ? (
+                <AsyncState
+                  description="保留当前表单，正在重新读取审核模板。"
+                  state="loading"
+                  title="正在更新审核模板"
                 />
-              </label>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="flex flex-col gap-1.5 text-sm">
-                  <span className="font-medium">语言</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {PRESET_LANGUAGES.map((language) => {
-                      const active = presetLanguages.includes(language)
-                      return (
-                        <Button
+              ) : null}
+
+              {templateError ? (
+                <AsyncState
+                  action={
+                    <Button
+                      onClick={retryTemplateLoad}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      重新读取
+                    </Button>
+                  }
+                  description={templateError}
+                  state="stale"
+                  title="审核模板可能不是最新状态"
+                />
+              ) : null}
+
+              <WorkspacePanel
+                description="默认只需填写本批选题并确认语言；模型和 Prompt 沿用当前项目配置。"
+                title="选择内容范围"
+              >
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor="script-review-topics">选题</FieldLabel>
+                    <Textarea
+                      autoComplete="off"
+                      className="min-h-32 resize-y"
+                      id="script-review-topics"
+                      name="script-review-topics"
+                      onChange={(event) => setTopicsText(event.target.value)}
+                      placeholder={"一行一个选题\n猫咪夏天饮水少怎么办"}
+                      value={topicsText}
+                    />
+                    <FieldDescription>
+                      一行一个选题，当前识别 {topics.length} 个。
+                    </FieldDescription>
+                  </Field>
+
+                  <Field data-invalid={languages.length === 0 || undefined}>
+                    <FieldLabel>语言</FieldLabel>
+                    <ToggleGroup
+                      aria-label="选择草稿语言"
+                      className="w-full flex-wrap justify-start"
+                      onValueChange={setPresetLanguages}
+                      type="multiple"
+                      value={presetLanguages}
+                      variant="outline"
+                    >
+                      {PRESET_LANGUAGES.map((language) => (
+                        <ToggleGroupItem
+                          className="min-h-11 px-3 sm:min-h-8"
                           key={language}
-                          onClick={() =>
-                            setPresetLanguages((current) =>
-                              current.includes(language)
-                                ? current.filter((item) => item !== language)
-                                : [...current, language]
-                            )
-                          }
-                          size="sm"
-                          type="button"
-                          variant={active ? "secondary" : "outline"}
+                          value={language}
                         >
                           {LANGUAGE_LABELS[language] ?? language}
-                        </Button>
-                      )
-                    })}
-                  </div>
-                  <Input
-                    onChange={(event) =>
-                      setCustomLanguagesText(event.target.value)
-                    }
-                    placeholder="自定义语言，逗号分隔，例如：French, German"
-                    value={customLanguagesText}
-                  />
-                </div>
-                <label className="flex flex-col gap-1.5 text-sm">
-                  <span className="font-medium">脚本模型</span>
-                  <Input
-                    onChange={(event) => setScriptModel(event.target.value)}
-                    placeholder="留空使用当前默认模型"
-                    value={scriptModel}
-                  />
-                </label>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <TemplateSelect
-                  label="脚本 Prompt"
-                  onChange={setScriptTemplateName}
-                  onPeek={() =>
-                    setPeek({ kind: "script", name: currentScriptTemplateName })
-                  }
-                  templates={(templates?.script_templates ?? []).filter(
-                    (template) => template.name !== BAZI_ENGLISH_TEMPLATE_NAME
-                  )}
-                  value={currentScriptTemplateName}
-                />
-                <TemplateSelect
-                  label="分镜 Prompt"
-                  onChange={setSplitTemplateName}
-                  onPeek={() =>
-                    setPeek({ kind: "split", name: currentSplitTemplateName })
-                  }
-                  templates={templates?.split_templates ?? []}
-                  value={currentSplitTemplateName}
-                />
-              </div>
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">分镜模型</span>
-                <Input
-                  onChange={(event) => setSplitModel(event.target.value)}
-                  placeholder="留空使用当前默认模型"
-                  value={splitModel}
-                />
-              </label>
+                        </ToggleGroupItem>
+                      ))}
+                    </ToggleGroup>
+                    {languages.length === 0 ? (
+                      <FieldError>至少选择或填写一种语言。</FieldError>
+                    ) : null}
+                  </Field>
 
-              {languages.length > 0 && (
-                <div className="rounded-lg border bg-muted/30 p-4">
-                  <div className="text-sm font-medium">每语言脚本模型</div>
-                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    旧 Streamlit 支持按语言覆盖脚本模型；留空时使用脚本模型或模板默认值。
-                  </p>
-                  {currentScriptTemplateName === BAZI_TEMPLATE_NAME && (
-                    <div className="mt-3 rounded-lg bg-background p-3 text-xs leading-5 text-muted-foreground">
-                      Bazi 模板会沿用旧版映射：Chinese 使用 Doubao，English 使用 Gemini，并自动使用英文脚本 Prompt。
-                    </div>
-                  )}
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    {languages.map((language) => (
-                      <label
-                        className="flex flex-col gap-1.5 text-sm"
-                        key={language}
-                      >
-                        <span className="font-medium">{language}</span>
+                  <Field>
+                    <FieldLabel htmlFor="script-review-custom-languages">
+                      其他语言
+                    </FieldLabel>
+                    <Input
+                      autoComplete="off"
+                      id="script-review-custom-languages"
+                      name="script-review-custom-languages"
+                      onChange={(event) =>
+                        setCustomLanguagesText(event.target.value)
+                      }
+                      placeholder="逗号分隔，例如 French, German"
+                      value={customLanguagesText}
+                    />
+                    <FieldDescription>
+                      当前将生成 {languages.length} 种语言的审核草稿。
+                    </FieldDescription>
+                  </Field>
+
+                  <AdvancedGroup
+                    description="沿用项目默认即可，只有本批需要覆盖时再修改"
+                    id="script-review-drafting-options"
+                    title="起草模型与 Prompt"
+                  >
+                    {sourceProfile ? (
+                      <p className="text-sm leading-6 text-muted-foreground">
+                        默认值来自项目
+                        <SettingsTextLink
+                          to={settingsLink({ kind: "projects" })}
+                        >
+                          「{project?.name ?? "当前项目"}」
+                        </SettingsTextLink>
+                        的起草配置
+                        {defaultsModified ? "，本批已有覆盖" : "。"}
+                      </p>
+                    ) : null}
+
+                    <FieldGroup className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <TemplateSelect
+                        label="脚本 Prompt"
+                        onChange={setScriptTemplateName}
+                        onPeek={() =>
+                          setPeek({
+                            kind: "script",
+                            name: currentScriptTemplateName,
+                          })
+                        }
+                        templates={(templates.script_templates ?? []).filter(
+                          (template) =>
+                            template.name !== BAZI_ENGLISH_TEMPLATE_NAME
+                        )}
+                        value={currentScriptTemplateName}
+                      />
+                      <Field>
+                        <FieldLabel htmlFor="script-review-script-model">
+                          脚本模型
+                        </FieldLabel>
                         <Input
+                          autoComplete="off"
+                          id="script-review-script-model"
+                          name="script-review-script-model"
                           onChange={(event) =>
-                            setLanguageScriptModels((current) => ({
-                              ...current,
-                              [language]: event.target.value,
-                            }))
+                            setScriptModel(event.target.value)
                           }
-                          placeholder={
-                            defaultLanguageScriptModel(
-                              language,
-                              currentScriptTemplateName,
-                              scriptModel
-                            ) || "使用脚本模型"
-                          }
-                          value={languageScriptModels[language] ?? ""}
+                          placeholder="留空使用项目默认模型"
+                          value={scriptModel}
                         />
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
+                      </Field>
+                      <TemplateSelect
+                        label="分镜 Prompt"
+                        onChange={setSplitTemplateName}
+                        onPeek={() =>
+                          setPeek({
+                            kind: "split",
+                            name: currentSplitTemplateName,
+                          })
+                        }
+                        templates={templates.split_templates ?? []}
+                        value={currentSplitTemplateName}
+                      />
+                      <Field>
+                        <FieldLabel htmlFor="script-review-split-model">
+                          分镜模型
+                        </FieldLabel>
+                        <Input
+                          autoComplete="off"
+                          id="script-review-split-model"
+                          name="script-review-split-model"
+                          onChange={(event) =>
+                            setSplitModel(event.target.value)
+                          }
+                          placeholder="留空使用项目默认模型"
+                          value={splitModel}
+                        />
+                      </Field>
+                    </FieldGroup>
 
-              {error && <InlineError title="操作失败" message={error} />}
-              {notice && <InlineNotice message={notice} />}
+                    {currentScriptTemplateName === BAZI_TEMPLATE_NAME ? (
+                      <Alert variant="info">
+                        <AlertTitle>Bazi 语言映射</AlertTitle>
+                        <AlertDescription>
+                          Chinese 使用 Doubao，English 使用
+                          Gemini，并自动使用英文脚本 Prompt。
+                        </AlertDescription>
+                      </Alert>
+                    ) : null}
 
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm text-muted-foreground">
-                  {isInitialLoading
-                    ? "正在读取审核模板"
-                    : `已识别 ${topics.length} 个选题，${languages.length} 种语言`}
-                </div>
-                <Button disabled={!canCreateDrafts} onClick={() => void createDrafts()}>
+                    {languages.length > 0 ? (
+                      <FieldSet>
+                        <FieldLegend variant="label">
+                          每语言脚本模型
+                        </FieldLegend>
+                        <FieldDescription>
+                          留空时使用脚本模型或模板默认值。
+                        </FieldDescription>
+                        <FieldGroup className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          {languages.map((language, languageIndex) => {
+                            const modelId = `script-review-model-${languageIndex}`
+                            return (
+                              <Field key={language}>
+                                <FieldLabel htmlFor={modelId}>
+                                  {LANGUAGE_LABELS[language] ?? language}
+                                </FieldLabel>
+                                <Input
+                                  autoComplete="off"
+                                  id={modelId}
+                                  name={modelId}
+                                  onChange={(event) =>
+                                    setLanguageScriptModels((current) => ({
+                                      ...current,
+                                      [language]: event.target.value,
+                                    }))
+                                  }
+                                  placeholder={
+                                    defaultLanguageScriptModel(
+                                      language,
+                                      currentScriptTemplateName,
+                                      scriptModel
+                                    ) || "使用脚本模型"
+                                  }
+                                  value={languageScriptModels[language] ?? ""}
+                                />
+                              </Field>
+                            )
+                          })}
+                        </FieldGroup>
+                      </FieldSet>
+                    ) : null}
+                  </AdvancedGroup>
+                </FieldGroup>
+              </WorkspacePanel>
+
+              {error ? (
+                <InlineError message={error} title="草稿生成失败" />
+              ) : null}
+              {notice ? <InlineNotice message={notice} /> : null}
+            </>
+          ) : null}
+
+          <RecentDraftsRecovery
+            draftSets={draftSets}
+            error={draftListError}
+            isRefreshing={isRefreshingDrafts}
+            onOpenDraft={openRecoveredDraft}
+            onRefresh={() => void refreshDraftSets()}
+            selectedDraftSetId={draftSet?.draft_set_id}
+            state={draftListState}
+          />
+
+          {templates ? (
+            <StepActionBar
+              primaryAction={
+                <Button
+                  className="min-h-11 w-full sm:min-h-8 sm:w-auto"
+                  disabled={!canCreateDrafts}
+                  onClick={() => void createDrafts()}
+                  type="button"
+                >
                   {isCreatingDrafts ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
                   ) : (
                     <Wand2 data-icon="inline-start" />
                   )}
                   生成审核草稿
                 </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+              }
+              summary={`${topics.length} 个选题 · ${languages.length} 种语言`}
+            />
+          ) : null}
+        </section>
+      ) : null}
 
-        <Card className="rounded-lg">
-          <CardHeader className="border-b">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle>最近审核草稿</CardTitle>
-                <CardDescription>从后端持久化 draft set 读取。</CardDescription>
-              </div>
-              <Button
-                disabled={isRefreshingDrafts}
-                onClick={() => void refreshDraftSets()}
-                size="icon-sm"
-                variant="outline"
-              >
-                <RefreshCcw
-                  className={cn(isRefreshingDrafts && "animate-spin")}
-                />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {draftSets.length === 0 ? (
-              <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                还没有审核草稿。
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {draftSets.slice(0, 8).map((item) => (
-                  <div
-                    className={cn(
-                      "rounded-lg border bg-background p-3 text-sm",
-                      draftSet?.draft_set_id === item.draft_set_id &&
-                        "border-primary bg-primary/5"
-                    )}
-                    key={item.draft_set_id}
-                  >
-                    <button
-                      className="w-full text-left transition-opacity hover:opacity-80"
-                      onClick={() => {
-                        setDraftSet(item)
-                        setStep(2)
-                      }}
-                      type="button"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate font-mono text-xs">
-                          {item.draft_set_id}
-                        </span>
-                        <Badge variant="secondary">{item.status}</Badge>
-                      </div>
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        {item.topics.length} 个选题，{item.languages.join(", ")}
-                      </div>
-                    </button>
-                    {item.status === "submitted" && (
-                      <div className="mt-2 flex items-center justify-between gap-2 border-t pt-2">
-                        <span className="text-xs text-muted-foreground">
-                          已出片 {item.submissions.length} 次
-                        </span>
-                        <Button
-                          onClick={() => {
-                            setDraftSet(item)
-                            setStep(3)
-                          }}
-                          size="sm"
-                          variant="outline"
-                        >
-                          再次出片
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </section>
-      )}
-
-      {step === 2 && (
-        <section className="flex min-w-0 flex-col gap-5">
-          <DraftEditor
+      {step === 2 ? (
+        <section
+          aria-label="逐条审核草稿"
+          className="flex min-w-0 flex-col gap-4"
+        >
+          <DraftReviewEditor
             draftSet={draftSet}
             onPatchDraft={patchDraft}
             onPatchLanguageDraft={patchLanguageDraft}
             onToggleLanguage={toggleLanguage}
           />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <Button onClick={() => setStep(1)} variant="outline">
-              上一步
-            </Button>
-            <div className="flex items-center gap-2">
+
+          {error ? <InlineError message={error} title="审核保存失败" /> : null}
+          {notice ? <InlineNotice message={notice} /> : null}
+
+          <StepActionBar
+            backLabel="返回选题"
+            onBack={() => changeStep(1)}
+            primaryAction={
               <Button
+                className="min-h-11 w-full sm:min-h-8 sm:w-auto"
+                disabled={
+                  !draftSet ||
+                  jobCount === 0 ||
+                  draftValidationErrors.length > 0
+                }
+                onClick={() => changeStep(3)}
+                type="button"
+              >
+                下一步：确认提交
+              </Button>
+            }
+            secondaryAction={
+              <Button
+                className="min-h-11 w-full sm:min-h-8 sm:w-auto"
                 disabled={!draftSet || isSavingDrafts}
                 onClick={() => void saveDrafts()}
+                type="button"
                 variant="outline"
               >
                 {isSavingDrafts ? (
@@ -803,169 +1085,308 @@ export function ScriptReviewWorkspace() {
                 ) : (
                   <Save data-icon="inline-start" />
                 )}
-                保存审核修改
+                保存修改
               </Button>
-              <Button
-                disabled={!draftSet || draftValidationErrors.length > 0}
-                onClick={() => setStep(3)}
-              >
-                下一步：确认与提交
-              </Button>
-            </div>
-          </div>
+            }
+            summary={`${jobCount} 条内容待提交`}
+          />
         </section>
-      )}
+      ) : null}
 
-      {step === 3 && (
-      <aside className="flex min-w-0 flex-col gap-5">
-        <Card className="rounded-lg">
-          <CardHeader className="border-b">
-            <CardTitle>确认与提交</CardTitle>
-            <CardDescription>提交后进入统一 generation batch 和 History。</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-4">
-              {draftSet?.status === "submitted" && (
-                <InlineNotice
-                  message={`这批确认稿已出过 ${draftSet.submissions.length} 次片，可换模板再次提交。`}
-                />
-              )}
-              <ProductionSubmitPanel
-                lockedSummary={
-                  isNonVideoTemplate
-                    ? `流程强制项：分镜按行拆分；${nonVideoOutputLabel}无配音。`
-                    : "流程强制项：分镜按行拆分；配音使用下方每语言 Fish 音色。"
-                }
-                onOverridesChange={setProductionOverrides}
-                onTemplateChange={setProductionTemplateId}
-                overrides={productionOverrides}
-                projectId={projectId ?? undefined}
-                requiredInput="script"
-                templateId={productionTemplateId}
-              />
-
-              {isNonVideoTemplate ? (
-                <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                  {nonVideoOutputLabel}没有配音，无需填写每语言音色。
-                </div>
-              ) : (
-              <div className="flex flex-col gap-3">
-                <div className="text-sm font-medium">每语言 Fish TTS</div>
-                {selectedLanguages.length === 0 ? (
-                  <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                    先在草稿里选择至少一种语言。
-                  </div>
-                ) : (
-                  selectedLanguages.map((language) => (
-                    <div className="rounded-lg border bg-background p-3" key={language}>
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium">{language}</span>
-                        <Badge variant="secondary">Fish</Badge>
-                      </div>
-                      <label className="flex flex-col gap-1.5 text-sm">
-                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          Fish reference_id
-                          {project?.tts_voice_by_language?.[language] &&
-                            (ttsVoiceByLanguage[language] ?? "") ===
-                              project.tts_voice_by_language[language] && (
-                              <SourceChip
-                                source="project"
-                                to={settingsLink({ kind: "projects" })}
-                              />
-                            )}
-                        </span>
-                        <Input
-                          onChange={(event) =>
-                            setTtsVoiceByLanguage((current) => ({
-                              ...current,
-                              [language]: event.target.value,
-                            }))
-                          }
-                          placeholder={`${language} reference_id`}
-                          value={ttsVoiceByLanguage[language] ?? ""}
-                        />
-                      </label>
-                      {!(ttsVoiceByLanguage[language] ?? "").trim() && (
-                        <div className="mt-1 text-xs text-destructive">
-                          该语言需要填写 Fish reference_id
-                        </div>
-                      )}
-                      <label className="mt-3 flex flex-col gap-1.5 text-sm">
-                        <span className="text-xs text-muted-foreground">
-                          语速 · {(ttsSpeedByLanguage[language] ?? 1).toFixed(1)}x
-                        </span>
-                        <Slider
-                          max={2}
-                          min={0.5}
-                          onValueChange={([value]) =>
-                            setTtsSpeedByLanguage((current) => ({
-                              ...current,
-                              [language]: value ?? 1,
-                            }))
-                          }
-                          step={0.1}
-                          value={[ttsSpeedByLanguage[language] ?? 1]}
-                        />
-                      </label>
-                    </div>
-                  ))
-                )}
-              </div>
-              )}
-
-              {draftValidationErrors.length > 0 && (
-                <InlineError
-                  title="草稿还有问题"
-                  message={draftValidationErrors.join("；")}
-                />
-              )}
-
-              <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                将生成 {jobCount} 条
-                {isNonVideoTemplate ? nonVideoOutputLabel : "视频"}
-                （已审核选题 × 勾选语言）。
-              </div>
-
-              <div className="flex flex-col gap-2">
+      {step === 3 ? (
+        <section
+          aria-label="确认并提交生产"
+          className="flex min-w-0 flex-col gap-4"
+        >
+          {!draftSet ? (
+            <EmptyState
+              actions={
                 <Button
-                  disabled={!draftSet || isSavingDrafts}
-                  onClick={() => void saveDrafts()}
+                  onClick={() => changeStep(1)}
+                  size="sm"
+                  type="button"
                   variant="outline"
                 >
-                  {isSavingDrafts ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
-                  ) : (
-                    <Save data-icon="inline-start" />
-                  )}
-                  保存审核修改
+                  返回选择选题
                 </Button>
-                <Button disabled={!canSubmit} onClick={() => void submitReviewedDrafts()}>
-                  {isSubmitting ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
+              }
+              description="先生成或恢复一个真实审核草稿，才能配置生产任务。"
+              icon={FileText}
+              title="没有可提交的审核草稿"
+            />
+          ) : (
+            <>
+              <WorkspacePanel
+                description="选择生产模板并核对本批参数；提交后会创建真实 generation batch。"
+                title="确认生产设置"
+              >
+                <div className="flex flex-col gap-4">
+                  {draftSet.status === "submitted" ? (
+                    <InlineNotice
+                      message={`这批确认稿已提交过 ${draftSet.submissions.length} 次，可更换模板再次出片。`}
+                    />
+                  ) : null}
+
+                  {isProductionCatalogLoading ? (
+                    <AsyncState
+                      className="max-w-none"
+                      description="正在确认所选模板的产物类型与提交约束。"
+                      state="loading"
+                      title="正在读取生产模板"
+                    />
+                  ) : null}
+
+                  {productionCatalogError ? (
+                    <AsyncState
+                      action={
+                        <Button
+                          onClick={retryProductionCatalogLoad}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          重试
+                        </Button>
+                      }
+                      className="max-w-none"
+                      description={productionCatalogError}
+                      state={productionTemplates.length > 0 ? "stale" : "error"}
+                      title={
+                        productionTemplates.length > 0
+                          ? "生产模板合同可能已过期"
+                          : "无法确认生产模板合同"
+                      }
+                    />
+                  ) : null}
+
+                  <ProductionSubmitPanel
+                    lockedSummary={
+                      isNonVideoTemplate
+                        ? `流程强制项：分镜按行拆分；${nonVideoOutputLabel}无配音。`
+                        : "流程强制项：分镜按行拆分；配音使用下方每语言 Fish 音色。"
+                    }
+                    onOverridesChange={setProductionOverrides}
+                    onTemplateChange={setProductionTemplateId}
+                    overrides={productionOverrides}
+                    projectId={projectId ?? undefined}
+                    requiredInput="script"
+                    templateId={productionTemplateId}
+                  />
+
+                  {isNonVideoTemplate ? (
+                    <Alert variant="info">
+                      <AlertTitle>{nonVideoOutputLabel}无需配音</AlertTitle>
+                      <AlertDescription>
+                        当前模板不会创建 TTS 任务，因此无需填写每语言音色。
+                      </AlertDescription>
+                    </Alert>
                   ) : (
-                    <Send data-icon="inline-start" />
+                    <FieldSet>
+                      <FieldLegend variant="label">每语言 Fish TTS</FieldLegend>
+                      <FieldDescription>
+                        每种参与生产的语言都必须绑定真实 Fish reference_id。
+                      </FieldDescription>
+                      {selectedLanguages.length === 0 ? (
+                        <EmptyState
+                          className="min-h-40"
+                          description="返回审核步骤，为至少一种语言打开“生成”。"
+                          headingLevel={3}
+                          title="还没有参与生产的语言"
+                        />
+                      ) : (
+                        <FieldGroup>
+                          {selectedLanguages.map((language, languageIndex) => {
+                            const voiceId = `script-review-voice-${languageIndex}`
+                            const speedId = `script-review-speed-${languageIndex}`
+                            const voiceMissing = !(
+                              ttsVoiceByLanguage[language] ?? ""
+                            ).trim()
+
+                            return (
+                              <div
+                                className="grid min-w-0 gap-4 border-b pb-4 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(12rem,0.65fr)]"
+                                key={language}
+                              >
+                                <Field data-invalid={voiceMissing || undefined}>
+                                  <FieldLabel htmlFor={voiceId}>
+                                    <span>
+                                      {LANGUAGE_LABELS[language] ?? language} ·
+                                      Fish reference_id
+                                    </span>
+                                    {project?.tts_voice_by_language?.[
+                                      language
+                                    ] &&
+                                    (ttsVoiceByLanguage[language] ?? "") ===
+                                      project.tts_voice_by_language[
+                                        language
+                                      ] ? (
+                                      <SourceChip
+                                        source="project"
+                                        to={settingsLink({ kind: "projects" })}
+                                      />
+                                    ) : null}
+                                  </FieldLabel>
+                                  <Input
+                                    aria-invalid={voiceMissing || undefined}
+                                    autoComplete="off"
+                                    id={voiceId}
+                                    name={voiceId}
+                                    onChange={(event) =>
+                                      setTtsVoiceByLanguage((current) => ({
+                                        ...current,
+                                        [language]: event.target.value,
+                                      }))
+                                    }
+                                    placeholder={`${language} reference_id`}
+                                    value={ttsVoiceByLanguage[language] ?? ""}
+                                  />
+                                  {voiceMissing ? (
+                                    <FieldError>
+                                      该语言需要填写真实 Fish reference_id。
+                                    </FieldError>
+                                  ) : null}
+                                </Field>
+                                <Field>
+                                  <FieldLabel htmlFor={speedId}>
+                                    语速 ·{" "}
+                                    {(
+                                      ttsSpeedByLanguage[language] ?? 1
+                                    ).toFixed(1)}
+                                    x
+                                  </FieldLabel>
+                                  <Slider
+                                    aria-label={`${language} 语速`}
+                                    id={speedId}
+                                    max={2}
+                                    min={0.5}
+                                    onValueChange={([value]) =>
+                                      setTtsSpeedByLanguage((current) => ({
+                                        ...current,
+                                        [language]: value ?? 1,
+                                      }))
+                                    }
+                                    step={0.1}
+                                    value={[ttsSpeedByLanguage[language] ?? 1]}
+                                  />
+                                </Field>
+                              </div>
+                            )
+                          })}
+                        </FieldGroup>
+                      )}
+                    </FieldSet>
                   )}
-                  提交生成视频
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
-        <BatchStatusCard batch={submittedBatch} />
+                  {draftValidationErrors.length > 0 ? (
+                    <InlineError
+                      message={draftValidationErrors.join("；")}
+                      title="草稿还不能提交"
+                    />
+                  ) : null}
 
-        <div className="flex items-center justify-between gap-3">
-          <Button onClick={() => setStep(2)} variant="outline">
-            上一步
-          </Button>
-          {submittedBatch && (
-            <Button onClick={() => navigate("/tasks")}>
-              前往任务中心
-            </Button>
+                  <Alert>
+                    <AlertTitle>
+                      将创建 {jobCount} 条
+                      {isNonVideoTemplate ? nonVideoOutputLabel : "视频"}任务
+                    </AlertTitle>
+                    <AlertDescription>
+                      数量来自参与生成的选题与已选择语言；实际结果以下方真实批次为准。
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              </WorkspacePanel>
+
+              {error ? (
+                <InlineError message={error} title="生产操作未完成" />
+              ) : null}
+              {notice ? <InlineNotice message={notice} /> : null}
+
+              {batchPollingError ? (
+                <AsyncState
+                  action={
+                    <Button
+                      onClick={() => void refreshSubmittedBatch()}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      重新读取
+                    </Button>
+                  }
+                  className="max-w-none"
+                  description={batchPollingError}
+                  state="stale"
+                  title="批次状态可能不是最新结果"
+                />
+              ) : null}
+
+              <BatchStatusCard
+                artifactLabel={
+                  selectedTemplatePipeline
+                    ? isNonVideoTemplate
+                      ? nonVideoOutputLabel
+                      : "视频"
+                    : null
+                }
+                batch={submittedBatch}
+                onRetryItem={(itemIndex) => void retryBatchItem(itemIndex)}
+                retryingItemIndex={retryingBatchItemIndex}
+              />
+
+              {submittedBatch ? (
+                <div className="flex justify-end">
+                  <Button asChild size="sm" variant="outline">
+                    <a href={routeHref("/tasks")}>前往任务中心</a>
+                  </Button>
+                </div>
+              ) : null}
+
+              <StepActionBar
+                backLabel="返回审核"
+                onBack={() => changeStep(2)}
+                primaryAction={
+                  <Button
+                    className="min-h-11 w-full sm:min-h-8 sm:w-auto"
+                    disabled={!canSubmit}
+                    onClick={() => void submitReviewedDrafts()}
+                    type="button"
+                  >
+                    {isSubmitting ? (
+                      <Loader2
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
+                    ) : (
+                      <Send data-icon="inline-start" />
+                    )}
+                    提交{isNonVideoTemplate ? nonVideoOutputLabel : "生成视频"}
+                  </Button>
+                }
+                secondaryAction={
+                  <Button
+                    className="min-h-11 w-full sm:min-h-8 sm:w-auto"
+                    disabled={!draftSet || isSavingDrafts}
+                    onClick={() => void saveDrafts()}
+                    type="button"
+                    variant="outline"
+                  >
+                    {isSavingDrafts ? (
+                      <Loader2
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
+                    ) : (
+                      <Save data-icon="inline-start" />
+                    )}
+                    保存审核稿
+                  </Button>
+                }
+                summary={`${jobCount} 条内容 · ${selectedLanguages.length} 种语言`}
+              />
+            </>
           )}
-        </div>
-      </aside>
-      )}
+        </section>
+      ) : null}
 
       <PromptPeekSheet
         kind={peek?.kind ?? "script"}
@@ -977,63 +1398,7 @@ export function ScriptReviewWorkspace() {
         }}
         open={peek != null}
       />
-    </main>
-  )
-}
-
-function ReviewStepper({
-  current,
-  hasDraft,
-  onStepChange,
-}: {
-  current: 1 | 2 | 3
-  hasDraft: boolean
-  onStepChange: (step: 1 | 2 | 3) => void
-}) {
-  const steps: Array<{ step: 1 | 2 | 3; label: string; enabled: boolean }> = [
-    { step: 1, label: "生成草稿", enabled: true },
-    { step: 2, label: "逐条审核", enabled: hasDraft },
-    { step: 3, label: "提交生成", enabled: hasDraft },
-  ]
-  return (
-    <nav
-      aria-label="审核流程步骤"
-      className="flex items-center gap-2 rounded-lg border bg-background p-2"
-    >
-      {steps.map((item, index) => (
-        <div className="flex flex-1 items-center gap-2" key={item.step}>
-          <button
-            aria-current={current === item.step ? "step" : undefined}
-            className={cn(
-              "flex flex-1 items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
-              current === item.step
-                ? "bg-primary text-primary-foreground"
-                : item.enabled
-                  ? "text-foreground hover:bg-muted"
-                  : "cursor-not-allowed text-muted-foreground/60"
-            )}
-            disabled={!item.enabled}
-            onClick={() => onStepChange(item.step)}
-            type="button"
-          >
-            <span
-              className={cn(
-                "flex size-5 shrink-0 items-center justify-center rounded-full border text-xs",
-                current === item.step
-                  ? "border-primary-foreground/40"
-                  : "border-border"
-              )}
-            >
-              {item.step}
-            </span>
-            <span className="truncate">{item.label}</span>
-          </button>
-          {index < steps.length - 1 && (
-            <span aria-hidden className="h-px w-4 shrink-0 bg-border" />
-          )}
-        </div>
-      ))}
-    </nav>
+    </PageFrame>
   )
 }
 
@@ -1045,13 +1410,12 @@ function SettingsTextLink({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <a
       className="text-primary transition-colors hover:underline"
-      onClick={() => navigate(to)}
-      type="button"
+      href={routeHref(to)}
     >
       {children}
-    </button>
+    </a>
   )
 }
 
@@ -1068,12 +1432,22 @@ function TemplateSelect({
   onChange: (value: string) => void
   onPeek?: () => void
 }) {
+  const selectId =
+    label === "脚本 Prompt"
+      ? "script-review-script-template"
+      : "script-review-split-template"
+  const isEmpty = templates.length === 0
+
   return (
-    <label className="flex flex-col gap-1.5 text-sm">
-      <span className="font-medium">{label}</span>
+    <Field data-invalid={isEmpty || undefined}>
+      <FieldLabel htmlFor={selectId}>{label}</FieldLabel>
       <div className="flex items-center gap-1.5">
-        <Select onValueChange={onChange} value={value}>
-          <SelectTrigger className="w-full">
+        <Select disabled={isEmpty} onValueChange={onChange} value={value}>
+          <SelectTrigger
+            aria-invalid={isEmpty || undefined}
+            className="w-full"
+            id={selectId}
+          >
             <SelectValue placeholder="选择 Prompt 模板" />
           </SelectTrigger>
           <SelectContent>
@@ -1089,6 +1463,8 @@ function TemplateSelect({
         {onPeek && (
           <Button
             aria-label="查看提示词"
+            className="min-h-11 min-w-11 sm:min-h-7 sm:min-w-7"
+            disabled={!value}
             onClick={onPeek}
             size="icon-sm"
             type="button"
@@ -1098,220 +1474,8 @@ function TemplateSelect({
           </Button>
         )}
       </div>
-    </label>
-  )
-}
-
-function DraftEditor({
-  draftSet,
-  onPatchDraft,
-  onPatchLanguageDraft,
-  onToggleLanguage,
-}: {
-  draftSet: ScriptReviewDraftSet | null
-  onPatchDraft: (draftIndex: number, patch: Partial<ScriptReviewDraft>) => void
-  onPatchLanguageDraft: (
-    draftIndex: number,
-    language: string,
-    patch: Partial<ScriptReviewLanguageDraft>
-  ) => void
-  onToggleLanguage: (draftIndex: number, language: string) => void
-}) {
-  const feedback = draftSet ? buildScriptReviewDraftFeedback(draftSet) : null
-  const provenance = draftSet ? draftSetProvenance(draftSet) : null
-
-  return (
-    <Card className="rounded-lg">
-      <CardHeader className="border-b">
-        <CardTitle>审核草稿</CardTitle>
-        <CardDescription>确认每条视频要生成的语言、标题、全文和分镜。</CardDescription>
-        {provenance && (
-          <div className="mt-1 text-xs text-muted-foreground">由 {provenance} 生成</div>
-        )}
-      </CardHeader>
-      <CardContent>
-        {!draftSet ? (
-          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-            先生成或选择一个审核草稿。
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">{draftSet.status}</Badge>
-              <Badge variant="outline">{draftSet.drafts.length} 组草稿</Badge>
-              <span className="font-mono text-xs text-muted-foreground">
-                {draftSet.draft_set_id}
-              </span>
-            </div>
-            {feedback?.errorMessage && (
-              <InlineError
-                title={feedback.errorTitle ?? "草稿生成失败"}
-                message={feedback.errorMessage}
-              />
-            )}
-            {draftSet.drafts.map((draft, draftIndex) => {
-              const languageDrafts = draft.language_drafts ?? {}
-              const selectedLanguages = new Set(draft.selected_languages ?? [])
-              return (
-                <div className="rounded-lg border bg-background p-4" key={draftIndex}>
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="font-medium">{draft.topic}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {Object.keys(languageDrafts).length} 种语言
-                      </div>
-                    </div>
-                    <Button
-                      onClick={() =>
-                        onPatchDraft(draftIndex, {
-                          selected_for_generation:
-                            !draft.selected_for_generation,
-                        })
-                      }
-                      size="sm"
-                      variant={
-                        draft.selected_for_generation === false
-                          ? "outline"
-                          : "secondary"
-                      }
-                    >
-                      {draft.selected_for_generation === false
-                        ? "跳过"
-                        : "参与生成"}
-                    </Button>
-                  </div>
-                  <div className="flex flex-col gap-4">
-                    {Object.entries(languageDrafts).map(([language, languageDraft]) => (
-                      <div
-                        className="rounded-lg border bg-muted/20 p-3"
-                        key={language}
-                      >
-                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline">{language}</Badge>
-                            {selectedLanguages.has(language) && (
-                              <CheckCircle2 data-icon="inline-start" />
-                            )}
-                          </div>
-                          <Button
-                            onClick={() => onToggleLanguage(draftIndex, language)}
-                            size="sm"
-                            variant={
-                              selectedLanguages.has(language)
-                                ? "secondary"
-                                : "outline"
-                            }
-                          >
-                            {selectedLanguages.has(language) ? "生成" : "不生成"}
-                          </Button>
-                        </div>
-                        <label className="flex flex-col gap-1.5 text-sm">
-                          <span className="font-medium">标题</span>
-                          <Input
-                            onChange={(event) =>
-                              onPatchLanguageDraft(draftIndex, language, {
-                                title: event.target.value,
-                              })
-                            }
-                            value={languageDraft.title ?? ""}
-                          />
-                        </label>
-                        <label className="mt-3 flex flex-col gap-1.5 text-sm">
-                          <span className="font-medium">完整文案</span>
-                          <Textarea
-                            className="min-h-32 resize-y"
-                            onChange={(event) =>
-                              onPatchLanguageDraft(draftIndex, language, {
-                                script: event.target.value,
-                              })
-                            }
-                            value={languageDraft.script ?? ""}
-                          />
-                        </label>
-                        <label className="mt-3 flex flex-col gap-1.5 text-sm">
-                          <span className="font-medium">分镜文案</span>
-                          <Textarea
-                            className="min-h-32 resize-y"
-                            onChange={(event) =>
-                              onPatchLanguageDraft(draftIndex, language, {
-                                narrations: parseLines(event.target.value),
-                              })
-                            }
-                            value={(languageDraft.narrations ?? []).join("\n")}
-                          />
-                          <span className="text-xs text-muted-foreground">
-                            一行一个分镜（{(languageDraft.narrations ?? []).length} 个）
-                          </span>
-                        </label>
-                        {selectedLanguages.has(language) &&
-                          (languageDraft.narrations ?? []).length === 0 && (
-                            <div className="mt-1 text-xs text-destructive">
-                              已勾选生成，但分镜文案为空
-                            </div>
-                          )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function BatchStatusCard({ batch }: { batch: GenerationBatch | null }) {
-  return (
-    <Card className="rounded-lg">
-      <CardHeader className="border-b">
-        <CardTitle>提交批次</CardTitle>
-        <CardDescription>显示真实 generation task 状态。</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {!batch ? (
-          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-            审核通过并提交后会显示批次。
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={batch.status === "failed" ? "destructive" : "secondary"}>
-                {batch.status}
-              </Badge>
-              <Badge variant="outline">{batch.submitted_count} 个任务</Badge>
-              <Badge variant="outline">失败 {batch.failed_count}</Badge>
-            </div>
-            <div className="font-mono text-xs text-muted-foreground">
-              {batch.batch_id}
-            </div>
-            <div className="flex flex-col gap-2">
-              {batch.items.map((item) => (
-                <div className="rounded-lg border bg-background p-3" key={item.index}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {item.task_id || "未创建 task"}
-                    </span>
-                    <Badge variant="secondary">{item.status}</Badge>
-                  </div>
-                  {item.progress && (
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      {item.progress.stage} · {item.progress.percentage}%
-                    </div>
-                  )}
-                  {item.error && (
-                    <div className="mt-2 rounded-lg bg-destructive/10 p-2 text-xs text-destructive">
-                      {item.error.layer}: {item.error.message}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      {isEmpty ? <FieldError>没有可用的 {label}。</FieldError> : null}
+    </Field>
   )
 }
 
@@ -1351,11 +1515,10 @@ function effectiveLanguageScriptModels(
     languages
       .map((language) => [
         language,
-        (overrides[language] || defaultLanguageScriptModel(
-          language,
-          scriptTemplateName,
-          scriptModel
-        )).trim(),
+        (
+          overrides[language] ||
+          defaultLanguageScriptModel(language, scriptTemplateName, scriptModel)
+        ).trim(),
       ])
       .filter(([, model]) => model)
   )
@@ -1388,5 +1551,7 @@ function draftSetSelectedLanguages(draftSet: ScriptReviewDraftSet | null) {
 }
 
 function isTerminalBatchStatus(status: string) {
-  return status === "completed" || status === "failed" || status === "partial_failed"
+  return (
+    status === "completed" || status === "failed" || status === "partial_failed"
+  )
 }
