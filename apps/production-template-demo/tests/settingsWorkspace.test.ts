@@ -90,6 +90,7 @@ test("safe markdown parses supported block structures without HTML", () => {
 test("safe markdown rejects executable and control-character URLs", () => {
   assert.equal(safeMarkdownUrl("javascript:alert(1)", "link"), null)
   assert.equal(safeMarkdownUrl("data:image/svg+xml,<svg />", "image"), null)
+  assert.equal(safeMarkdownUrl("//example.com/tracker.png", "image"), null)
   assert.equal(safeMarkdownUrl("https://example.com/\u0000x", "link"), null)
   assert.equal(
     safeMarkdownUrl("https://example.com/help", "link"),

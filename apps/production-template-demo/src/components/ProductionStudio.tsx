@@ -1557,7 +1557,7 @@ function StandardInput({
           <FieldLabel htmlFor={inputId}>{title}</FieldLabel>
           <Textarea
             aria-invalid={!trimmedText && text.length > 0}
-            className="min-h-52 resize-y text-base leading-7"
+            className="min-h-64 resize-y text-base leading-7 lg:min-h-[22rem]"
             id={inputId}
             onChange={(event) => updateText(event.target.value)}
             placeholder={
@@ -1666,7 +1666,6 @@ function StandardInput({
 
         {(splitStep || inputKind === "topic") && (
         <AdvancedGroup
-          defaultOpen
           description={
             inputKind === "topic" ? "分镜数量" : "文案怎么切成分镜"
           }

@@ -22,10 +22,7 @@ export async function preparePage(page: Page, theme: TestTheme = "light") {
   await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
   await page.addInitScript(
     ({ selectedTheme }) => {
-      window.localStorage.setItem(
-        "pixelle-production-demo-theme",
-        selectedTheme
-      )
+      window.localStorage.setItem("pixelle-theme", selectedTheme)
       window.localStorage.setItem("pixelle.currentProjectId", "project-1")
       window.localStorage.setItem("pixelle-task-center-v1", "[]")
     },

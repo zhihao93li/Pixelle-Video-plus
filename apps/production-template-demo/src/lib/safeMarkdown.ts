@@ -86,7 +86,7 @@ export function safeMarkdownUrl(
   const trimmed = value.trim()
   if (!trimmed || hasControlCharacter(trimmed)) return null
   if (
-    trimmed.startsWith("/") ||
+    /^\/(?!\/)/.test(trimmed) ||
     trimmed.startsWith("./") ||
     trimmed.startsWith("../") ||
     trimmed.startsWith("#")

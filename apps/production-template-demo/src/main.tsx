@@ -9,10 +9,7 @@ import { TaskCenterProvider } from "@/lib/taskCenter.tsx"
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ThemeProvider
-      defaultTheme="light"
-      storageKey="pixelle-production-demo-theme"
-    >
+    <ThemeProvider defaultTheme="light" storageKey="pixelle-theme">
       <ToastProvider>
         <TaskCenterProvider>
           <App />

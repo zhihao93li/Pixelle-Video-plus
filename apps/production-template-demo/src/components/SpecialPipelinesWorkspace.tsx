@@ -560,7 +560,7 @@ function SpecialWorkspace({
           </>
         }
         description={productionDescription(template)}
-        headingLevel={1}
+        headingLevel={2}
         title={
           <span className="flex flex-wrap items-center gap-2">
             {template.display_name}
@@ -1713,7 +1713,7 @@ function SpecialStateShell({
       <BackLink />
       <WorkspaceHeader
         description="使用专用素材和生产配方生成视频。"
-        headingLevel={1}
+        headingLevel={2}
         title={SPECIAL_MODE_COPY[mode].label}
       />
       {children}
