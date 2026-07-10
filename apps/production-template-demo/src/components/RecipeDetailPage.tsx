@@ -1,6 +1,22 @@
-import { useEffect, useState } from "react"
-import { ArrowLeft, ArrowRight, Loader2, Lock, RotateCcw } from "lucide-react"
+import { useEffect, useState, type FormEvent } from "react"
+import {
+  ArrowLeft,
+  ArrowRight,
+  Copy,
+  Loader2,
+  Lock,
+  RotateCcw,
+  Settings2,
+  SlidersHorizontal,
+} from "lucide-react"
 
+import { AsyncState } from "@/components/shared/AsyncState"
+import { EmptyState } from "@/components/shared/EmptyState"
+import { FrameTemplatePicker } from "@/components/shared/FrameTemplatePicker"
+import { InlineError } from "@/components/shared/feedback"
+import { PageFrame } from "@/components/shared/PageFrame"
+import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
+import { WorkspacePanel } from "@/components/shared/WorkspacePanel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,11 +29,8 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/toast"
-import { InlineError } from "@/components/shared/feedback"
+import { useExpertMode } from "@/lib/expertMode"
 import { readableError } from "@/lib/format"
-import { navigate } from "@/lib/router"
-import { settingsLink } from "@/lib/settingsLinks"
-import { FrameTemplatePicker } from "@/components/shared/FrameTemplatePicker"
 import {
   cloneProductionTemplate,
   getTemplateGenerationConfig,
@@ -37,23 +50,61 @@ import {
   PART_NUMBER_KEYS,
   PIPELINE_PARTS,
 } from "@/lib/pipelineParts"
-import { pipelineChipLabel, templateRoute } from "@/lib/templatePresentation"
+import {
+  productionArtifactSummary,
+  productionDescription,
+  productionInputSummary,
+  productionLineSummary,
+  productionStartRoute,
+  productionSubmissionSummary,
+} from "@/lib/productionSurface"
+import { navigate, routeHref } from "@/lib/router"
+import { settingsLink } from "@/lib/settingsLinks"
+import { cn } from "@/lib/utils"
 
 /**
- * 配方详情页（/create/recipes/:id）：产线零件抽屉的继任者
- * （DESIGN.md §2.5：>2 分区 + 大量输入必须页面）。就地换零件全部能力平移，
- * 每个模板参数只有这一个编辑入口；设置页模板面板只做库存管理。
+ * 配方详情页只管理“以后用这份配方时”的默认值。单次生产覆盖仍留在制作页，
+ * 项目级写稿设置仍留在项目设置，避免三层配置在同一页争夺控制权。
  */
+
+const EXPERT_ONLY_KEYS = new Set([
+  "bgm_path",
+  "compose_runtime",
+  "image_prompt_generation_rules",
+  "image_prompt_visual_context",
+  "llm_model",
+  "media_workflow",
+  "prompt_prefix",
+  "source",
+  "tts_inference_mode",
+  "tts_workflow",
+  "workflow_key",
+])
+
+function friendlyCopy(value: string) {
+  return value
+    .replaceAll("workflow", "生成流程")
+    .replaceAll("Workflow", "生成流程")
+    .replaceAll("算力", "执行位置")
+    .replaceAll("RunningHub 云端", "云端执行")
+    .replaceAll("本机 ComfyUI", "本地执行")
+}
 
 export function RecipeDetailPage({ templateId }: { templateId: string }) {
   const toast = useToast()
+  const expertMode = useExpertMode()
   const [template, setTemplate] = useState<ProductionTemplate | null>(null)
   const [projectUsers, setProjectUsers] = useState<string[]>([])
+  const [resolvedTemplateId, setResolvedTemplateId] = useState<string | null>(
+    null
+  )
   const [notFound, setNotFound] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [pageReloadToken, setPageReloadToken] = useState(0)
 
   const [isLoading, setIsLoading] = useState(false)
   const [configError, setConfigError] = useState<string | null>(null)
+  const [configReloadToken, setConfigReloadToken] = useState(0)
   const [overridableKeys, setOverridableKeys] = useState<string[]>([])
   const [effectiveParams, setEffectiveParams] = useState<
     Record<string, unknown>
@@ -62,8 +113,8 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
   const [hasLoaded, setHasLoaded] = useState(false)
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [editValue, setEditValue] = useState("")
+  const [editError, setEditError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
-  // 画面模板图选（批次三）：拉不到列表时静默回落纯文本编辑
   const [frameTemplates, setFrameTemplates] = useState<ResourceTemplate[]>([])
 
   useEffect(() => {
@@ -74,13 +125,14 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
           setFrameTemplates(response.templates)
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        // 预览资源不可用时仍可用文本方式编辑，不阻断配方主流程。
+      })
     return () => {
       cancelled = true
     }
   }, [])
 
-  // 找模板 + 项目引用（哪些项目拿它作默认）
   useEffect(() => {
     let cancelled = false
     void Promise.all([listTemplates(), listProjects()])
@@ -91,33 +143,39 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
         const found =
           templateResponse.templates.find((item) => item.id === templateId) ??
           null
+        setResolvedTemplateId(templateId)
         setTemplate(found)
         setNotFound(!found)
+        setLoadError(null)
         setProjectUsers(
           projectResponse.projects
             .filter(
-              (project) =>
-                project.default_production_template_id === templateId
+              (project) => project.default_production_template_id === templateId
             )
             .map((project) => project.name)
         )
       })
       .catch((error: unknown) => {
         if (!cancelled) {
+          setResolvedTemplateId(templateId)
+          setTemplate(null)
+          setNotFound(false)
           setLoadError(readableError(error))
         }
       })
     return () => {
       cancelled = true
     }
-  }, [templateId])
+  }, [pageReloadToken, templateId])
 
-  // 配方默认配置（overridable_keys / effective_params / overrides）
   useEffect(() => {
     let cancelled = false
     async function load() {
       setIsLoading(true)
+      setHasLoaded(false)
       setConfigError(null)
+      setEditingKey(null)
+      setEditError(null)
       try {
         const config = await getTemplateGenerationConfig(templateId)
         if (!cancelled) {
@@ -140,48 +198,85 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
     return () => {
       cancelled = true
     }
-    // 注意：isLoading 不能进依赖——会触发 cleanup 取消进行中的请求，转圈永不结束。
-  }, [templateId])
+  }, [configReloadToken, templateId])
 
   const steps = template ? (PIPELINE_PARTS[template.pipeline_id] ?? []) : []
-  // 兜底完整性：白名单里可换、但产线图（主控 key + 附属参数）没画的，自动列进「更多可调参数」。
   const coveredKeys = new Set([
     ...steps.map((step) => step.controlKey).filter(Boolean),
     ...steps.flatMap((step) => step.subKeys || []),
   ])
-  const extraKeys = overridableKeys.filter((key) => !coveredKeys.has(key))
+  const extraKeys = overridableKeys.filter(
+    (key) => !coveredKeys.has(key) && (expertMode || !EXPERT_ONLY_KEYS.has(key))
+  )
+
+  function parameterLabel(key: string) {
+    const label = PART_KEY_LABELS[key] ?? key
+    return expertMode ? label : friendlyCopy(label)
+  }
+
+  function partLabel(label: string) {
+    return expertMode ? label : friendlyCopy(label)
+  }
+
+  function partValue(key: string | null, fallback: string) {
+    if (!expertMode && key && EXPERT_ONLY_KEYS.has(key)) {
+      return friendlyCopy(fallback)
+    }
+    const current = key ? effectiveParams[key] : undefined
+    return friendlyCopy(humanizePartValue(current, fallback))
+  }
 
   function startEdit(key: string) {
     setEditingKey(key)
+    setEditError(null)
     const current = overrides[key] ?? effectiveParams[key]
     setEditValue(current == null ? "" : String(current))
   }
 
+  function cancelEdit() {
+    setEditingKey(null)
+    setEditError(null)
+  }
+
+  function retryPageLoad() {
+    setResolvedTemplateId(null)
+    setTemplate(null)
+    setNotFound(false)
+    setLoadError(null)
+    setPageReloadToken((value) => value + 1)
+  }
+
   async function savePart(key: string, rawValue: string | null) {
+    const normalized = rawValue?.trim() ?? null
+    if (
+      normalized &&
+      PART_NUMBER_KEYS.has(key) &&
+      !Number.isFinite(Number(normalized))
+    ) {
+      setEditError("请输入有效数字。")
+      return
+    }
+
     setIsSaving(true)
+    setEditError(null)
     try {
       const next: Record<string, unknown> = { ...overrides }
-      if (rawValue === null || !rawValue.trim()) {
+      if (!normalized) {
         delete next[key]
       } else {
-        const value = rawValue.trim()
-        next[key] = PART_NUMBER_KEYS.has(key) ? Number(value) : value
+        next[key] = PART_NUMBER_KEYS.has(key) ? Number(normalized) : normalized
       }
       const config = await updateTemplateGenerationConfig(templateId, next)
       setEffectiveParams(config.effective_params)
       setOverrides(config.overrides)
       setEditingKey(null)
       toast({
-        title: rawValue === null ? "已恢复内置默认" : "零件已更换",
-        description: "之后用这个配方出片都会默认生效。",
+        title: rawValue === null ? "已恢复配方默认" : "默认设置已保存",
+        description: "下次使用这份配方时自动生效。",
         variant: "success",
       })
     } catch (error) {
-      toast({
-        title: "更换失败",
-        description: readableError(error),
-        variant: "error",
-      })
+      setEditError(readableError(error))
     } finally {
       setIsSaving(false)
     }
@@ -189,384 +284,501 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
 
   function renderEditor(key: string) {
     const options = PART_EDIT_OPTIONS[key]
-    const hint = PART_EDIT_HINTS[key]
+    const hint =
+      !expertMode && key === "tts_voice"
+        ? "填写已在项目中配置的音色名称。"
+        : PART_EDIT_HINTS[key]
     const isLongText = PART_LONG_TEXT_KEYS.has(key)
-    // 画面模板走图选网格（批次三）；资源拉不到时回落文本框
     const isFramePicker = key === "frame_template" && frameTemplates.length > 0
     return (
-      <div className="mt-2 flex flex-col gap-1.5">
-        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-        {isLongText && (
+      <div className="mt-3 rounded-lg bg-muted/35 p-3">
+        {hint ? (
+          <p className="mb-2 text-xs leading-5 text-muted-foreground">{hint}</p>
+        ) : null}
+        {isLongText ? (
           <Textarea
-            className="min-h-40 font-mono text-xs"
+            aria-label={parameterLabel(key)}
+            className="min-h-40 bg-background font-mono text-xs"
             onChange={(event) => setEditValue(event.target.value)}
             value={editValue}
           />
-        )}
-        {isFramePicker && (
+        ) : null}
+        {isFramePicker ? (
           <FrameTemplatePicker
             onChange={setEditValue}
             templates={frameTemplates}
             value={editValue}
           />
-        )}
-        <div className="flex flex-wrap items-center gap-2">
+        ) : null}
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
           {options ? (
             <Select onValueChange={setEditValue} value={editValue || undefined}>
-              <SelectTrigger className="h-8 w-52">
-                <SelectValue placeholder="选择" />
+              <SelectTrigger
+                aria-label={parameterLabel(key)}
+                className="min-h-11 w-full bg-background sm:min-h-8 sm:w-64"
+              >
+                <SelectValue placeholder="选择一个默认值" />
               </SelectTrigger>
               <SelectContent>
                 {options.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
-                    {option.label}
+                    {expertMode ? option.label : friendlyCopy(option.label)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           ) : isLongText || isFramePicker ? null : (
             <Input
-              className="h-8 w-52"
+              aria-label={parameterLabel(key)}
+              className="min-h-11 w-full bg-background sm:min-h-8 sm:w-64"
               onChange={(event) => setEditValue(event.target.value)}
               type={PART_NUMBER_KEYS.has(key) ? "number" : "text"}
               value={editValue}
             />
           )}
           <Button
+            className="min-h-11 sm:min-h-8"
             disabled={isSaving || !editValue.trim()}
             onClick={() => void savePart(key, editValue)}
-            size="sm"
+            type="button"
           >
-            {isSaving && (
+            {isSaving ? (
               <Loader2 className="animate-spin" data-icon="inline-start" />
-            )}
+            ) : null}
             保存
           </Button>
           <Button
+            className="min-h-11 sm:min-h-8"
             disabled={isSaving}
-            onClick={() => setEditingKey(null)}
-            size="sm"
+            onClick={cancelEdit}
+            type="button"
             variant="ghost"
           >
             取消
           </Button>
-          {key in overrides && (
+          {key in overrides ? (
             <Button
+              className="min-h-11 sm:min-h-8"
               disabled={isSaving}
               onClick={() => void savePart(key, null)}
-              size="sm"
+              type="button"
               variant="ghost"
             >
               <RotateCcw data-icon="inline-start" />
-              恢复内置
+              恢复默认
             </Button>
-          )}
+          ) : null}
         </div>
+        {editError ? (
+          <InlineError message={editError} title="保存失败" />
+        ) : null}
       </div>
+    )
+  }
+
+  if (resolvedTemplateId !== templateId) {
+    return (
+      <PageFrame>
+        <BackRow />
+        <WorkspaceHeader
+          description="查看这份配方的默认设置"
+          headingLevel={1}
+          title="配方详情"
+        />
+        <AsyncState
+          description="正在同步配方信息和项目引用。"
+          state="loading"
+          title="正在读取配方"
+        />
+      </PageFrame>
     )
   }
 
   if (loadError) {
     return (
-      <main className="flex max-w-[1240px] flex-col gap-4 p-4 lg:p-6">
+      <PageFrame>
         <BackRow />
-        <InlineError title="配方读取失败" message={loadError} />
-      </main>
+        <WorkspaceHeader
+          description="查看这份配方的默认设置"
+          headingLevel={1}
+          title="配方详情"
+        />
+        <AsyncState
+          action={
+            <Button
+              onClick={retryPageLoad}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              重试
+            </Button>
+          }
+          description={loadError}
+          state="error"
+          title="配方读取失败"
+        />
+      </PageFrame>
     )
   }
 
   if (notFound) {
     return (
-      <main className="flex max-w-[1240px] flex-col gap-4 p-4 lg:p-6">
+      <PageFrame>
         <BackRow />
-        <InlineError
-          title="配方不存在"
-          message="配方不存在，可能已停用或删除。"
+        <WorkspaceHeader
+          description="查看这份配方的默认设置"
+          headingLevel={1}
+          title="配方详情"
         />
-      </main>
+        <EmptyState
+          actions={
+            <Button asChild variant="outline">
+              <a href={routeHref("/create")}>
+                <ArrowLeft data-icon="inline-start" />
+                返回快速生产
+              </a>
+            </Button>
+          }
+          description="它可能已被删除，或当前账户没有访问权限。"
+          icon={SlidersHorizontal}
+          title="没有找到这份配方"
+        />
+      </PageFrame>
     )
   }
 
   if (!template) {
-    return (
-      <main className="flex max-w-[1240px] flex-col gap-4 p-4 lg:p-6">
-        <BackRow />
-        <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          正在读取配方
-        </div>
-      </main>
-    )
+    return null
   }
 
   const customizedCount = Object.keys(overrides).length
 
   return (
-    <main className="flex max-w-[1240px] flex-col gap-4 p-4 lg:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <BackRow />
-          <h1 className="truncate text-lg font-semibold">
+    <PageFrame>
+      <BackRow />
+      <WorkspaceHeader
+        actions={
+          <Button asChild className="min-h-11 sm:min-h-9">
+            <a href={routeHref(productionStartRoute(template))}>
+              开始制作
+              <ArrowRight data-icon="inline-end" />
+            </a>
+          </Button>
+        }
+        description={
+          <span>调整长期默认值。开始制作后，仍可以对当次内容单独调整。</span>
+        }
+        headingLevel={1}
+        title={
+          <span className="flex flex-wrap items-center gap-2">
             {template.display_name}
-          </h1>
-          <Badge variant="outline">
-            {pipelineChipLabel(template.pipeline_id)}
-          </Badge>
-        </div>
-        <Button onClick={() => navigate(templateRoute(template))}>
-          开始制作
-          <ArrowRight data-icon="inline-end" />
-        </Button>
-      </div>
+            <Badge variant="secondary">{productionLineSummary(template)}</Badge>
+            {template.is_custom ? (
+              <Badge variant="outline">我的配方</Badge>
+            ) : null}
+          </span>
+        }
+      />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="flex flex-col gap-4">
-          {isLoading && (
-            <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              正在读取产线配置
-            </div>
-          )}
-          {configError && (
-            <InlineError title="产线读取失败" message={configError} />
-          )}
+      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+        <div className="flex min-w-0 flex-col gap-4">
+          {isLoading ? (
+            <AsyncState
+              description="正在同步这份配方的有效默认值。"
+              state="loading"
+              title="正在读取默认设置"
+            />
+          ) : null}
+          {configError ? (
+            <AsyncState
+              action={
+                <Button
+                  onClick={() => setConfigReloadToken((value) => value + 1)}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  重试
+                </Button>
+              }
+              description={configError}
+              state="error"
+              title="默认设置读取失败"
+            />
+          ) : null}
 
-          {/* 产线 */}
-          {hasLoaded && (
-            <section className="rounded-lg border bg-background p-4">
-              <div className="text-sm font-semibold">产线</div>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                这条路经过哪些零件、当前用的是什么。可换零件在这里直接换，保存后成为这个配方的默认。
-              </p>
-              <div className="mt-3 flex flex-col gap-3">
-                {steps.map((step, index) => {
-                  const current = humanizePartValue(
-                    step.controlKey
-                      ? effectiveParams[step.controlKey]
-                      : undefined,
-                    step.fallback
-                  )
-                  const changeableHere =
-                    !step.fixed &&
-                    step.controlKey !== null &&
-                    overridableKeys.includes(step.controlKey)
-                  const isProjectStep =
-                    step.controlKey === null && step.link === "projects"
-                  const isEditing =
-                    editingKey !== null &&
-                    editingKey === step.controlKey &&
-                    changeableHere
-                  return (
-                    <div
-                      className="rounded-lg border bg-background p-3"
-                      key={`${step.label}-${index}`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-sm font-medium">
-                            <span className="text-xs text-muted-foreground">
-                              {index + 1}
-                            </span>
-                            {step.label}
-                            {step.controlKey !== null &&
-                              step.controlKey in overrides && (
-                                <Badge variant="secondary">已自定义</Badge>
-                              )}
+          {hasLoaded ? (
+            <WorkspacePanel
+              description="按成片顺序查看各个步骤。在这里保存的内容，会成为这份配方的默认值。"
+              title="生产步骤与默认设置"
+            >
+              {steps.length > 0 ? (
+                <ol className="divide-y">
+                  {steps.map((step, index) => {
+                    const key = step.controlKey
+                    const isExpertOnly = Boolean(
+                      key && EXPERT_ONLY_KEYS.has(key)
+                    )
+                    const changeableHere = Boolean(
+                      !step.fixed &&
+                      key &&
+                      overridableKeys.includes(key) &&
+                      (expertMode || !isExpertOnly)
+                    )
+                    const isProjectStep =
+                      key === null && step.link === "projects"
+                    const isEditing = Boolean(
+                      key && editingKey === key && changeableHere
+                    )
+                    const subKeys = (step.subKeys || []).filter(
+                      (subKey) =>
+                        overridableKeys.includes(subKey) &&
+                        (expertMode || !EXPERT_ONLY_KEYS.has(subKey))
+                    )
+
+                    return (
+                      <li
+                        className="py-4 first:pt-0 last:pb-0"
+                        key={`${step.label}-${index}`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
+                            {index + 1}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-sm font-medium">
+                                {partLabel(step.label)}
+                              </h3>
+                              {key && key in overrides ? (
+                                <Badge variant="info">已调整</Badge>
+                              ) : null}
+                            </div>
+                            <p className="mt-1 text-xs leading-5 break-words text-muted-foreground">
+                              当前：{partValue(key, step.fallback)}
+                            </p>
                           </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            当前：{current}
-                          </div>
+                          {changeableHere && !isEditing && key ? (
+                            <Button
+                              className="min-h-11 sm:min-h-8"
+                              onClick={() => startEdit(key)}
+                              type="button"
+                              variant="outline"
+                            >
+                              调整
+                            </Button>
+                          ) : null}
+                          {isProjectStep ? (
+                            <Button
+                              asChild
+                              className="min-h-11 sm:min-h-8"
+                              variant="outline"
+                            >
+                              <a
+                                href={routeHref(
+                                  settingsLink({ kind: "projects" })
+                                )}
+                              >
+                                在项目中调整
+                              </a>
+                            </Button>
+                          ) : null}
+                          {!changeableHere && !isProjectStep ? (
+                            <Badge className="gap-1" variant="outline">
+                              <Lock />
+                              {isExpertOnly && !expertMode
+                                ? "配方默认"
+                                : "固定步骤"}
+                            </Badge>
+                          ) : null}
                         </div>
-                        {changeableHere && !isEditing && (
-                          <Button
-                            onClick={() => startEdit(step.controlKey as string)}
-                            size="sm"
-                            variant="outline"
-                          >
-                            更换
-                          </Button>
-                        )}
-                        {isProjectStep && (
-                          <Button
-                            onClick={() =>
-                              navigate(settingsLink({ kind: "projects" }))
-                            }
-                            size="sm"
-                            variant="outline"
-                          >
-                            在项目里改
-                          </Button>
-                        )}
-                        {!changeableHere && !isProjectStep && (
-                          <Badge className="shrink-0 gap-1" variant="outline">
-                            <Lock className="size-3" />
-                            产线固定
-                          </Badge>
-                        )}
-                      </div>
-                      {isEditing && renderEditor(step.controlKey as string)}
-                      {/* 附属参数（批次三后续）：归属这一步的白名单参数折在步骤卡下，兜底区只留无家可归的 */}
-                      {(() => {
-                        const subKeys = (step.subKeys || []).filter((key) =>
-                          overridableKeys.includes(key)
-                        )
-                        if (subKeys.length === 0) {
-                          return null
-                        }
-                        return (
-                          <div className="mt-3 flex flex-col gap-2 border-t pt-3">
-                            {subKeys.map((key) => {
-                              const isSubEditing = editingKey === key
-                              const subCurrent = humanizePartValue(
-                                effectiveParams[key],
-                                "未设置"
-                              )
-                              return (
-                                <div key={key}>
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                      <div className="flex items-center gap-2 text-sm">
-                                        {PART_KEY_LABELS[key] || key}
-                                        {key in overrides && (
-                                          <Badge variant="secondary">
-                                            已自定义
-                                          </Badge>
-                                        )}
-                                      </div>
-                                      <div className="mt-0.5 text-xs text-muted-foreground">
-                                        当前：{subCurrent}
-                                      </div>
-                                    </div>
-                                    {!isSubEditing && (
-                                      <Button
-                                        onClick={() => startEdit(key)}
-                                        size="sm"
-                                        variant="ghost"
-                                      >
-                                        更换
-                                      </Button>
-                                    )}
-                                  </div>
-                                  {isSubEditing && renderEditor(key)}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )
-                      })()}
-                    </div>
-                  )
-                })}
-                {steps.length === 0 && (
-                  <p className="text-sm text-muted-foreground">
-                    这条产线暂未登记可展示的零件清单。
-                  </p>
-                )}
-              </div>
-            </section>
-          )}
 
-          {/* 更多可调参数 */}
-          {hasLoaded && extraKeys.length > 0 && (
-            <section className="rounded-lg border bg-background p-4">
-              <div className="text-sm font-semibold">更多可调参数</div>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                产线图之外这个配方还能调的默认值。
-              </p>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        {isEditing && key ? renderEditor(key) : null}
+
+                        {subKeys.length > 0 ? (
+                          <div className="mt-3 ml-3 border-l pl-4 sm:ml-3.5">
+                            <div className="divide-y">
+                              {subKeys.map((subKey) => {
+                                const isSubEditing = editingKey === subKey
+                                return (
+                                  <div className="py-3" key={subKey}>
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                                          {parameterLabel(subKey)}
+                                          {subKey in overrides ? (
+                                            <Badge variant="info">已调整</Badge>
+                                          ) : null}
+                                        </div>
+                                        <p className="mt-1 text-xs leading-5 break-words text-muted-foreground">
+                                          当前：
+                                          {partValue(subKey, "未设置")}
+                                        </p>
+                                      </div>
+                                      {!isSubEditing ? (
+                                        <Button
+                                          className="min-h-11 sm:min-h-8"
+                                          onClick={() => startEdit(subKey)}
+                                          type="button"
+                                          variant="ghost"
+                                        >
+                                          调整
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                    {isSubEditing ? renderEditor(subKey) : null}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ) : null}
+                      </li>
+                    )
+                  })}
+                </ol>
+              ) : (
+                <EmptyState
+                  className="min-h-48 border-dashed"
+                  description="仍可以使用这份配方制作，只是暂时没有可在这里调整的默认值。"
+                  headingLevel={3}
+                  icon={SlidersHorizontal}
+                  title="暂无可调整步骤"
+                />
+              )}
+            </WorkspacePanel>
+          ) : null}
+
+          {hasLoaded && extraKeys.length > 0 ? (
+            <WorkspacePanel
+              description="这些默认值不属于某一个成片步骤。"
+              title="其他默认设置"
+            >
+              <div className="grid gap-x-5 sm:grid-cols-2">
                 {extraKeys.map((key) => {
                   const isEditing = editingKey === key
-                  const current = humanizePartValue(
-                    effectiveParams[key],
-                    "未设置"
-                  )
                   return (
                     <div
-                      className={
-                        isEditing
-                          ? "rounded-lg border bg-background p-3 sm:col-span-2"
-                          : "rounded-lg border bg-background p-3"
-                      }
+                      className={cn(
+                        "border-b py-3 first:pt-0 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0",
+                        isEditing && "sm:col-span-2"
+                      )}
                       key={key}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-sm font-medium">
-                            {PART_KEY_LABELS[key] ?? key}
-                            {key in overrides && (
-                              <Badge variant="secondary">已自定义</Badge>
-                            )}
+                          <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                            {parameterLabel(key)}
+                            {key in overrides ? (
+                              <Badge variant="info">已调整</Badge>
+                            ) : null}
                           </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            当前：{current}
-                          </div>
+                          <p className="mt-1 text-xs leading-5 break-words text-muted-foreground">
+                            当前：{partValue(key, "未设置")}
+                          </p>
                         </div>
-                        {!isEditing && (
+                        {!isEditing ? (
                           <Button
+                            className="min-h-11 sm:min-h-8"
                             onClick={() => startEdit(key)}
-                            size="sm"
+                            type="button"
                             variant="outline"
                           >
-                            更换
+                            调整
                           </Button>
-                        )}
+                        ) : null}
                       </div>
-                      {isEditing && renderEditor(key)}
+                      {isEditing ? renderEditor(key) : null}
                     </div>
                   )
                 })}
               </div>
-            </section>
-          )}
+            </WorkspacePanel>
+          ) : null}
         </div>
 
-        {/* 右栏 */}
-        <aside className="flex flex-col gap-3">
-          <div className="rounded-lg border bg-background p-3">
-            <div className="mb-2 text-xs text-muted-foreground">配方</div>
-            <div className="text-xs leading-6 text-muted-foreground">
-              {pipelineChipLabel(template.pipeline_id)}
-              <br />
-              {template.is_custom ? "我的配方" : "出厂骨架"}
-              <br />
-              已自定义 {customizedCount} 项
-              {projectUsers.length > 0 && (
-                <>
-                  <br />
-                  项目默认：{projectUsers.join("、")}
-                </>
-              )}
-            </div>
-          </div>
+        <aside className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-5">
+          <WorkspacePanel title="配方概览">
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-4">
+              <div>
+                <dt className="text-xs text-muted-foreground">成品</dt>
+                <dd className="mt-1 text-sm font-medium">
+                  {productionArtifactSummary(template)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">提交方式</dt>
+                <dd className="mt-1 text-sm font-medium">
+                  {productionSubmissionSummary(template)}
+                </dd>
+              </div>
+              <div className="col-span-2 border-t pt-3">
+                <dt className="text-xs text-muted-foreground">需要准备</dt>
+                <dd className="mt-1 text-sm font-medium">
+                  {productionInputSummary(template)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">默认调整</dt>
+                <dd className="mt-1 text-sm font-medium">
+                  {customizedCount > 0 ? `${customizedCount} 项` : "未调整"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">使用项目</dt>
+                <dd className="mt-1 text-sm font-medium">
+                  {projectUsers.length > 0
+                    ? `${projectUsers.length} 个`
+                    : "暂无"}
+                </dd>
+              </div>
+            </dl>
+            {projectUsers.length > 0 ? (
+              <p className="mt-4 border-t pt-3 text-xs leading-5 text-muted-foreground">
+                已作为项目默认：{projectUsers.join("、")}
+              </p>
+            ) : null}
+          </WorkspacePanel>
 
-          <div className="rounded-lg border bg-background p-3">
-            <div className="mb-2 text-xs text-muted-foreground">成品</div>
-            <p className="text-xs leading-6 text-muted-foreground">
-              {template.description}
+          <WorkspacePanel title="成品说明">
+            <p className="text-sm leading-6 text-muted-foreground">
+              {productionDescription(template)}
             </p>
-          </div>
+          </WorkspacePanel>
 
-          <div className="rounded-lg border bg-background p-3">
-            <div className="mb-2 text-xs text-muted-foreground">操作</div>
+          <WorkspacePanel title="管理配方">
             <CloneRecipeButton template={template} />
             <Button
-              className="mt-2 w-full"
-              onClick={() =>
-                navigate(settingsLink({ kind: "template", id: template.id }))
-              }
-              size="sm"
+              asChild
+              className="mt-2 min-h-11 w-full sm:min-h-8"
               variant="ghost"
             >
-              在设置里管理
+              <a
+                href={routeHref(
+                  settingsLink({ kind: "template", id: template.id })
+                )}
+              >
+                <Settings2 data-icon="inline-start" />
+                在设置中管理
+              </a>
             </Button>
-          </div>
+          </WorkspacePanel>
         </aside>
       </div>
-    </main>
+
+      <div className="sticky bottom-[calc(4.25rem+var(--safe-area-bottom))] z-10 -mx-2 rounded-xl border bg-background/95 p-2 shadow-lg backdrop-blur lg:hidden">
+        <Button asChild className="min-h-11 w-full">
+          <a href={routeHref(productionStartRoute(template))}>
+            开始制作
+            <ArrowRight data-icon="inline-end" />
+          </a>
+        </Button>
+      </div>
+    </PageFrame>
   )
 }
 
-/** 「克隆为新配方」：展开起名 → 克隆 → 直接落到新配方详情页。 */
 function CloneRecipeButton({ template }: { template: ProductionTemplate }) {
   const toast = useToast()
   const [open, setOpen] = useState(false)
@@ -598,61 +810,77 @@ function CloneRecipeButton({ template }: { template: ProductionTemplate }) {
     }
   }
 
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    void create()
+  }
+
   if (!open) {
     return (
       <Button
-        className="w-full"
+        className="min-h-11 w-full sm:min-h-8"
         onClick={() => setOpen(true)}
-        size="sm"
+        type="button"
         variant="outline"
       >
+        <Copy data-icon="inline-start" />
         克隆为新配方
       </Button>
     )
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <form className="flex flex-col gap-2" onSubmit={submit}>
+      <label className="text-xs font-medium" htmlFor="clone-recipe-name">
+        新配方名称
+      </label>
       <Input
         autoFocus
-        className="h-8"
+        className="min-h-11 sm:min-h-8"
+        id="clone-recipe-name"
         onChange={(event) => setName(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            void create()
-          }
-        }}
-        placeholder="给新配方起个名字"
+        placeholder="例如：竖版口播·简洁"
         value={name}
       />
-      <div className="flex gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <Button
-          className="flex-1"
+          className="min-h-11 sm:min-h-8"
           disabled={busy || !name.trim()}
-          onClick={() => void create()}
-          size="sm"
+          type="submit"
         >
-          {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
+          {busy ? (
+            <Loader2 className="animate-spin" data-icon="inline-start" />
+          ) : null}
           创建
         </Button>
         <Button
+          className="min-h-11 sm:min-h-8"
           disabled={busy}
-          onClick={() => setOpen(false)}
-          size="sm"
+          onClick={() => {
+            setOpen(false)
+            setName("")
+          }}
+          type="button"
           variant="ghost"
         >
           取消
         </Button>
       </div>
-    </div>
+    </form>
   )
 }
 
 function BackRow() {
   return (
-    <Button onClick={() => navigate("/create")} size="sm" variant="ghost">
-      <ArrowLeft data-icon="inline-start" />
-      快速生产
+    <Button
+      asChild
+      className="min-h-11 self-start px-0 sm:min-h-8"
+      variant="ghost"
+    >
+      <a href={routeHref("/create")}>
+        <ArrowLeft data-icon="inline-start" />
+        快速生产
+      </a>
     </Button>
   )
 }

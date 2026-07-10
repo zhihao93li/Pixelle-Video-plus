@@ -373,7 +373,7 @@ test("generic production template task API sends asset template input and metada
       duration: 30,
     },
     {
-      source: "react_p8_demo",
+      source: "react_production_studio",
       uploaded_assets: [{ path: "/tmp/cat.jpg", kind: "image" }],
     }
   )
@@ -392,7 +392,7 @@ test("generic production template task API sends asset template input and metada
         duration: 30,
       },
       metadata: {
-        source: "react_p8_demo",
+        source: "react_production_studio",
         uploaded_assets: [{ path: "/tmp/cat.jpg", kind: "image" }],
       },
     })

@@ -668,7 +668,7 @@ export async function setTemplateEnabled(templateId: string, enabled: boolean) {
 export async function createGenerationTemplateTask(
   templateId: string,
   input: Record<string, unknown>,
-  metadata: Record<string, unknown> = { source: "react_p8_demo" },
+  metadata: Record<string, unknown> = { source: "react_production_studio" },
   projectId?: string
 ) {
   return fetchJson<GenerationSubmitResponse>(
@@ -687,7 +687,7 @@ export async function createDailyVideoTask(templateId: string, script: string) {
   return createGenerationTemplateTask(
     templateId,
     { script },
-    { source: "react_p0_demo" }
+    { source: "react_production_studio" }
   )
 }
 
