@@ -34,6 +34,20 @@ test.describe("键盘与浏览器历史", () => {
     })
   }
 
+  test("桌面路由切换后焦点回到主内容", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const unhandledApi = await installApiFixtures(page)
+    await preparePage(page)
+    await page.goto("/#/create", { waitUntil: "networkidle" })
+
+    const navigation = page.locator('nav[aria-label="主导航"]:visible').first()
+    await navigation.getByRole("link", { name: "任务" }).click()
+
+    await expect(page).toHaveURL(/#\/tasks$/)
+    await expect(page.locator("#main-content")).toBeFocused()
+    expect(unhandledApi).toEqual([])
+  })
+
   test("破坏性 Dialog 锁定焦点，Escape 后返回触发器", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page)
     await preparePage(page)
@@ -136,7 +150,9 @@ test.describe("键盘与浏览器历史", () => {
     await page
       .getByLabel("名称", { exact: true })
       .fill("PetWoods 内容计划（未保存）")
-    await expect(page.getByText("有未保存更改", { exact: true }).first()).toBeVisible()
+    await expect(
+      page.getByText("有未保存更改", { exact: true }).first()
+    ).toBeVisible()
     const tasksLink = page
       .locator('nav[aria-label="主导航"]:visible')
       .getByRole("link", { name: "任务" })

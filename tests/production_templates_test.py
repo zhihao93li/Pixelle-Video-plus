@@ -55,6 +55,24 @@ def test_standard_skeleton_compiles_to_existing_generation_request():
     }
 
 
+def test_explicit_null_clears_an_inherited_per_run_setting():
+    registry = build_default_production_template_registry()
+    template = registry.get(STANDARD_SKELETON)
+    template.fixed_params["bgm_path"] = "/music/recipe-default.mp3"
+
+    inherited = registry.compile_request(
+        STANDARD_SKELETON,
+        input={"script": "Keep the recipe music."},
+    )
+    cleared = registry.compile_request(
+        STANDARD_SKELETON,
+        input={"script": "No music for this run.", "bgm_path": None},
+    )
+
+    assert inherited.params["bgm_path"] == "/music/recipe-default.mp3"
+    assert "bgm_path" not in cleared.params
+
+
 def test_registry_default_is_standard_skeleton():
     registry = build_default_production_template_registry()
 
@@ -152,7 +170,9 @@ def test_registry_lists_skeletons_before_retired_and_placeholders():
     assert ids[1] == ASSET_SKELETON
     for template_id in RETIRED_TEMPLATES:
         assert template_id in ids  # 退役但保留
-    assert ids[-1] == "pixelle_script_review_v1"
+        assert ids.index(template_id) < ids.index("pixelle_script_review_v1")
+    # 自定义模板会追加在内置占位模板之后，不能假设占位模板永远是列表最后一项。
+    assert "pixelle_script_review_v1" in ids
 
 
 def test_annotate_retired_marks_only_retired_generate_presets():

@@ -42,6 +42,14 @@ export type ApiFixtureOptions = {
     | "unknown"
     | "submit-error"
     | "result-error"
+  videoFixedParams?: Record<string, unknown>
+  captureJsonRequests?: ApiFixtureRequest[]
+}
+
+export type ApiFixtureRequest = {
+  method: string
+  path: string
+  body: unknown
 }
 
 const project = {
@@ -138,6 +146,23 @@ const templates = [
     "digital_human"
   ),
 ]
+
+function templatesForOptions(options: ApiFixtureOptions) {
+  if (!options.videoFixedParams) {
+    return templates
+  }
+  return templates.map((template) =>
+    template.id === VIDEO_TEMPLATE_ID
+      ? {
+          ...template,
+          fixed_params: {
+            ...template.fixed_params,
+            ...options.videoFixedParams,
+          },
+        }
+      : template
+  )
+}
 
 const contentItem = {
   item_id: CONTENT_ITEM_ID,
@@ -668,7 +693,7 @@ function responseFor(
     return {
       body: {
         default_template: VIDEO_TEMPLATE_ID,
-        templates,
+        templates: templatesForOptions(options),
       },
     }
   }
@@ -679,11 +704,14 @@ function responseFor(
     const templateId = path.split("/")[3]
     if (
       options.configState === "error" ||
-      (options.configState === "partial-error" && templateId === IMAGE_TEMPLATE_ID)
+      (options.configState === "partial-error" &&
+        templateId === IMAGE_TEMPLATE_ID)
     ) {
       return { status: 503, body: { detail: "配方默认值服务暂时不可用。" } }
     }
-    const template = templates.find((item) => item.id === templateId)
+    const template = templatesForOptions(options).find(
+      (item) => item.id === templateId
+    )
     return {
       body: {
         template_id: templateId,
@@ -1107,6 +1135,19 @@ export async function installApiFixtures(
     const apiPath = url.pathname.replace(/^\/api/, "")
     const requestKey = `${method} ${apiPath}`
     requestCounts.set(requestKey, (requestCounts.get(requestKey) ?? 0) + 1)
+
+    if (
+      options.captureJsonRequests &&
+      method === "POST" &&
+      (/^\/generation\/templates\/[^/]+\/tasks$/.test(apiPath) ||
+        apiPath === "/generation/batches")
+    ) {
+      options.captureJsonRequests.push({
+        method,
+        path: apiPath,
+        body: request.postDataJSON(),
+      })
+    }
 
     if (
       options.submissionDelayMs &&

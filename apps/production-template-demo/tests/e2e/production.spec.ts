@@ -1,9 +1,66 @@
 import { expect, test } from "playwright/test"
 
 import { preparePage } from "./fixtures/app"
-import { fixtureIds, installApiFixtures } from "./fixtures/api"
+import {
+  fixtureIds,
+  installApiFixtures,
+  type ApiFixtureRequest,
+} from "./fixtures/api"
 
 test.describe("生产模式与产物", () => {
+  test("配方有效默认进入表单，任务只提交本次 dirty override", async ({
+    page,
+  }) => {
+    const captured: ApiFixtureRequest[] = []
+    const unhandledApi = await installApiFixtures(page, {
+      captureJsonRequests: captured,
+      submissionState: "completed",
+      videoFixedParams: {
+        split_mode: "line",
+        tts_voice: "recipe-voice",
+        bgm_volume: 0.12,
+      },
+    })
+    await preparePage(page)
+    await page.goto(`/#/create/generate/${fixtureIds.videoTemplate}`, {
+      waitUntil: "networkidle",
+    })
+
+    await expect(page.getByText(/全部沿用配方默认/).first()).toBeVisible()
+    await page.getByRole("button", { name: /调整本次风格/ }).click()
+    const voice = page.getByLabel(/^音色/).last()
+    await expect(voice).toHaveValue("recipe-voice")
+
+    await voice.fill("temporary-voice")
+    await page.getByRole("button", { name: "恢复配方默认" }).click()
+    await expect(voice).toHaveValue("recipe-voice")
+    await voice.fill("run-voice")
+    await page.getByRole("button", { name: "应用本次设置" }).click()
+    await expect(page.getByText(/本次覆盖 1 项/).first()).toBeVisible()
+
+    await page
+      .getByLabel("视频文案", { exact: true })
+      .fill("只验证本次覆盖的提交文案。")
+    await page.getByRole("button", { name: "开始生成" }).first().click()
+    await expect(page.getByText("已完成", { exact: true })).toBeVisible()
+
+    const taskRequest = captured.find((request) =>
+      request.path.endsWith(`/templates/${fixtureIds.videoTemplate}/tasks`)
+    )
+    expect(taskRequest?.body).toMatchObject({
+      input: {
+        script: "只验证本次覆盖的提交文案。",
+        tts_voice: "run-voice",
+      },
+    })
+    expect(
+      Object.keys(
+        (taskRequest?.body as { input?: Record<string, unknown> }).input ?? {}
+      ).sort()
+    ).toEqual(["script", "tts_voice"])
+    expect(unhandledApi).toEqual([])
+  })
+
   test("切换项目后重置当前生产草稿与运行表面", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       includeSecondProject: true,
@@ -83,7 +140,9 @@ test.describe("生产模式与产物", () => {
     await expect(dialog).toBeVisible()
     await dialog.getByRole("button", { name: "确认提交" }).click()
 
-    await expect(page.getByText("部分失败", { exact: true }).first()).toBeVisible()
+    await expect(
+      page.getByText("部分失败", { exact: true }).first()
+    ).toBeVisible()
     await expect(page.getByText("失败 1", { exact: true })).toBeVisible()
     const retry = page.getByRole("button", { name: "重试", exact: true })
     await expect(retry).toHaveCount(1)
@@ -126,9 +185,7 @@ test.describe("生产模式与产物", () => {
     ).toBeEnabled()
     await page.getByRole("button", { name: "开始生成" }).first().click()
     await expect(
-      page
-        .locator("button:visible")
-        .filter({ hasText: "正在上传并提交…" })
+      page.locator("button:visible").filter({ hasText: "正在上传并提交…" })
     ).toBeVisible()
     await expect(page.getByRole("button", { name: "前往发布" })).toBeVisible()
     expect(unhandledApi).toEqual([])
@@ -150,10 +207,22 @@ test.describe("生产模式与产物", () => {
       .fill("猫咪摇尾巴时，速度和高度都在表达情绪。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
 
-    await expect(
-      page.locator("button:visible").filter({ hasText: "正在提交…" })
-    ).toBeVisible()
+    await Promise.all([
+      expect(
+        page.locator("button:visible").filter({ hasText: "正在提交…" })
+      ).toBeVisible(),
+      expect(page.getByText("提交中", { exact: true })).toBeVisible(),
+      expect(
+        page.getByRole("heading", { name: "任务状态", exact: true })
+      ).toBeVisible(),
+    ])
     await expect(page.getByText("已完成", { exact: true })).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "生成结果", exact: true })
+    ).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "任务状态", exact: true })
+    ).toHaveCount(0)
     await expect(page.getByRole("button", { name: "前往发布" })).toBeVisible()
     await expect(page.locator("video")).toBeVisible()
     expect(unhandledApi).toEqual([])
@@ -167,7 +236,9 @@ test.describe("生产模式与产物", () => {
     await page.goto(`/#/create/generate/${fixtureIds.videoTemplate}`, {
       waitUntil: "networkidle",
     })
-    await page.getByLabel("视频文案", { exact: true }).fill("故障状态验收文案。")
+    await page
+      .getByLabel("视频文案", { exact: true })
+      .fill("故障状态验收文案。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
 
     await expect(page.getByText("任务失败", { exact: true })).toBeVisible()
@@ -186,7 +257,9 @@ test.describe("生产模式与产物", () => {
     await page.goto(`/#/create/generate/${fixtureIds.videoTemplate}`, {
       waitUntil: "networkidle",
     })
-    await page.getByLabel("视频文案", { exact: true }).fill("取消状态验收文案。")
+    await page
+      .getByLabel("视频文案", { exact: true })
+      .fill("取消状态验收文案。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
 
     await expect(page.getByText("生成中", { exact: true })).toBeVisible()
@@ -207,7 +280,9 @@ test.describe("生产模式与产物", () => {
     await page.goto(`/#/create/generate/${fixtureIds.videoTemplate}`, {
       waitUntil: "networkidle",
     })
-    await page.getByLabel("视频文案", { exact: true }).fill("未知状态验收文案。")
+    await page
+      .getByLabel("视频文案", { exact: true })
+      .fill("未知状态验收文案。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
 
     await expect(page.getByText("状态待同步", { exact: true })).toBeVisible()
@@ -226,7 +301,9 @@ test.describe("生产模式与产物", () => {
     await page.goto(`/#/create/generate/${fixtureIds.videoTemplate}`, {
       waitUntil: "networkidle",
     })
-    await page.getByLabel("视频文案", { exact: true }).fill("提交失败验收文案。")
+    await page
+      .getByLabel("视频文案", { exact: true })
+      .fill("提交失败验收文案。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
 
     await expect(page.getByText("提交失败", { exact: true })).toBeVisible()
@@ -245,7 +322,9 @@ test.describe("生产模式与产物", () => {
     await page.goto(`/#/create/generate/${fixtureIds.videoTemplate}`, {
       waitUntil: "networkidle",
     })
-    await page.getByLabel("视频文案", { exact: true }).fill("结果读取失败验收文案。")
+    await page
+      .getByLabel("视频文案", { exact: true })
+      .fill("结果读取失败验收文案。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
 
     await expect(page.getByText("结果读取失败", { exact: true })).toBeVisible()

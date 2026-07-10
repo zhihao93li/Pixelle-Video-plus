@@ -47,9 +47,9 @@ for (const scenario of [
     theme: "light" as TestTheme,
   },
   {
-    name: "mobile dark",
-    width: 390,
-    height: 844,
+    name: "desktop dark",
+    width: 1440,
+    height: 900,
     theme: "dark" as TestTheme,
   },
 ]) {

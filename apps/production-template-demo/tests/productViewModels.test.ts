@@ -89,3 +89,18 @@ test("generation draft removes an override when a value returns to default", () 
   assert.deepEqual(restored.overrides, {})
   assert.deepEqual(restored.dirtyKeys, [])
 })
+
+test("generation draft compares nested template parameters by value", () => {
+  const initial = createGenerationDraft({
+    templateParams: { density: "medium", watermark: false },
+  })
+  const sameValue = updateGenerationDraft(initial, {
+    templateParams: { density: "medium", watermark: false },
+  })
+  const changed = updateGenerationDraft(initial, {
+    templateParams: { density: "high", watermark: false },
+  })
+
+  assert.deepEqual(sameValue.dirtyKeys, [])
+  assert.deepEqual(changed.dirtyKeys, ["templateParams"])
+})
