@@ -105,3 +105,70 @@ workflow / provider / runtime 级别的选项（画面 workflow、TTS workflow�
 - 图标按钮必须 `aria-label`；当前导航项 `aria-current="page"`。
 - Dialog/Sheet 必须有 Title；焦点由 radix 管理，不手写 tabindex。
 - 状态不只靠颜色：StatusBadge 带文字。
+
+## 6. UI Refresh 正式路由与信息架构合同（2026-07-10 冻结）
+
+正式产品只保留一套 AppShell 和五项主导航：工作台、快速生产、任务、作品库、设置。`/demo/studio` 只在改版验收期作为视觉基准，正式生成页完成并通过全站 QA 后删除。
+
+| 路由 | 页面 | 布局 | 项目作用域 |
+| --- | --- | --- | --- |
+| `/board` | 工作台 | wide | 必须 |
+| `/board/item/:itemId` | 内容详情 | standard | 必须 |
+| `/create` | 快速生产 | standard | 必须 |
+| `/create/generate/:templateId` | 普通生成 | fluid workspace | 必须 |
+| `/create/recipes/:templateId` | 配方详情 | standard | 必须 |
+| `/create/special/:mode/:templateId?` | 专用生成 | fluid workspace | 必须 |
+| `/create/script-review` | 多语言审核 | narrow | 必须 |
+| `/tasks` | 任务 | standard | 必须 |
+| `/library` | 作品库 | standard | 必须 |
+| `/settings` | 设置 | standard | 否 |
+| `/settings/projects/:projectId` | 项目详情 | standard | 必须 |
+
+未知路由必须显示 404；不得静默回落到快速生产。设置 tab、作品库筛选/页码/选中项必须写入 URL，支持刷新、前进和后退。
+
+## 7. 输入、产物与状态合同
+
+### 7.1 输入与产物矩阵
+
+| 入口 | 输入 | 提交模式 | 产物 |
+| --- | --- | --- | --- |
+| standard | script / topic | single / script batch | video |
+| asset_based | assets + intent | single | video |
+| image_post | script | single / batch | image_set |
+| long_form | script | single / batch | text |
+| image_to_video | image + prompt | single / image batch | video |
+| action_transfer | reference video + target image + prompt | single | video |
+| digital_human | character image + script/product | single | video |
+| script_review | topics → reviewed language variants | reviewed batch | video / image_set / text |
+
+产物 UI 必须按 `video | image_set | text` 判别联合渲染；非视频页面禁止复用「时长」「成片」「生成视频」等文案。
+
+### 7.2 统一运行状态
+
+所有生产页面只使用以下用户态：`idle / uploading / submitting / queued / running / completed / failed / cancelling / cancelled / interrupted`。页面不得直接把 raw stage 当成面向用户的状态；技术 stage 放进 TechDetails。
+
+每个页面第一次交付必须同时包含：loading、empty、error、stale、ready，以及其业务相关的 submitting、partial failure、terminal 状态。错误必须出现在触发动作所在区域，并给出明确恢复动作。
+
+### 7.3 设置来源
+
+生成设置只有三层：项目默认 → 配方生效默认 → 本次覆盖。界面使用 `defaults + overrides + dirtyKeys`；未修改字段显示「配方默认」，只有用户本次真正改过的字段显示「本次」。普通模式不暴露 workflow/provider/runtime/internal key。
+
+## 8. 响应式、主题与动效合同
+
+- 基准视口：1440×900、1024×768、768×1024、390×844、320×568。
+- `>= 1024px`：224px 桌面侧栏、68px 上下文页头；生成工作区允许双栏。
+- `< 1024px`：顶部项目栏 + 底部五项主导航；禁止把页题和五项导航挤在同一行。
+- `<= 640px`：Sheet 全屏，底部操作区使用 `env(safe-area-inset-bottom)`；主要触控目标至少 44px。
+- 页面在首次迁移时同时完成浅色、深色、响应式和基础无障碍，不安排二次适配批次。
+- 深浅主题保持同一 teal 品牌色相；状态只使用 success/warning/danger/info 语义 token。
+- 动画仅允许 color、opacity、transform，时长 120–180ms；尊重 `prefers-reduced-motion`，禁止 `transition-all`。
+- 200% 缩放不得丢失内容、项目切换或主要操作。
+
+## 9. 并行修改边界
+
+- Foundation 独占 `index.css`、`components/ui/**` 与基础 shared 组件。
+- Shell 独占 App、AppShell、router、theme、项目边界和 HTML 元信息。
+- 页面分支不得修改全局 token 或壳层；缺公共能力回到 Foundation 补充。
+- `ProductionStudio.tsx`、`HistoryWorkspace.tsx`、`SettingsWorkspace.tsx` 等大文件同一时间只允许一个负责人。
+- QA 分支只修改测试、fixture、验证脚本和截图基线。
+- UI 分支不修复项目隔离、任务身份、重启恢复、发布实体等工程合同，也不为当前错误合同增加前端 fallback。
