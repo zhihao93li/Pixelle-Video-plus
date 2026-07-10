@@ -20,6 +20,7 @@ import { ProjectScopeBoundary } from "@/components/shared/ProjectScopeBoundary"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectSeparator,
   SelectTrigger,
@@ -123,6 +124,7 @@ function ProjectSwitcher({
   const selected = activeProjects.find(
     (project) => project.project_id === state.projectId
   )
+  const selectedProject = selected ?? activeProjects[0]
 
   return (
     <div className={cn(compact ? "min-w-0 flex-1" : "px-3 pb-3")}>
@@ -134,7 +136,7 @@ function ProjectSwitcher({
           }
           state.setProjectId(value)
         }}
-        value={state.projectId ?? undefined}
+        value={selectedProject.project_id}
       >
         <SelectTrigger
           aria-label="切换项目"
@@ -143,22 +145,27 @@ function ProjectSwitcher({
             compact && "h-11 min-w-0 border-0 bg-muted/50"
           )}
         >
-          <SelectValue placeholder="选择项目">{selected?.name}</SelectValue>
+          <SelectValue placeholder="选择项目">{selectedProject.name}</SelectValue>
         </SelectTrigger>
         <SelectContent>
-          {activeProjects.map((project) => (
-            <SelectItem key={project.project_id} value={project.project_id}>
-              <span className="flex flex-col gap-0.5">
-                <span>{project.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {project.languages.map(languageLabel).join(" / ") || "无语言"}{" "}
-                  · {project.publish_platforms.length} 个平台
+          <SelectGroup>
+            {activeProjects.map((project) => (
+              <SelectItem key={project.project_id} value={project.project_id}>
+                <span className="flex flex-col gap-0.5">
+                  <span>{project.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {project.languages.map(languageLabel).join(" / ") ||
+                      "无语言"}{" "}
+                    · {project.publish_platforms.length} 个平台
+                  </span>
                 </span>
-              </span>
-            </SelectItem>
-          ))}
+              </SelectItem>
+            ))}
+          </SelectGroup>
           <SelectSeparator />
-          <SelectItem value={MANAGE_PROJECTS_VALUE}>管理项目…</SelectItem>
+          <SelectGroup>
+            <SelectItem value={MANAGE_PROJECTS_VALUE}>管理项目…</SelectItem>
+          </SelectGroup>
         </SelectContent>
       </Select>
     </div>

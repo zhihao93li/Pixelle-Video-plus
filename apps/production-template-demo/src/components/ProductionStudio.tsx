@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react"
 import {
+  Clock3,
   Copy,
+  FileText,
   ImageIcon,
   Layers,
   Loader2,
   Play,
   RefreshCcw,
   Send,
+  SlidersHorizontal,
   UploadCloud,
   Video,
   Volume2,
@@ -33,6 +36,7 @@ import {
   formatBytes,
   formatDuration,
   readableError,
+  voiceLabel,
 } from "@/lib/format"
 import {
   Card,
@@ -52,10 +56,19 @@ import { Progress } from "@/components/ui/progress"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
@@ -96,6 +109,7 @@ import { useTaskCenter } from "@/lib/taskCenter"
 import { useCurrentProject } from "@/lib/currentProject"
 import { useLocalStorageState } from "@/lib/useLocalStorageState"
 import {
+  apiResourceUrl,
   artifactFileUrl,
   cancelGenerationTask,
   createGenerationBatch,
@@ -292,6 +306,41 @@ function SourceTag({ dirty }: { dirty: boolean }) {
   )
 }
 
+function previewStoryboardScenes(
+  text: string,
+  splitMode: StandardAdvancedSettings["splitMode"]
+) {
+  const trimmed = text.trim()
+  if (!trimmed) {
+    return []
+  }
+
+  const chunks =
+    splitMode === "paragraph"
+      ? trimmed.split(/\n\s*\n/)
+      : splitMode === "line"
+        ? trimmed.split(/\n+/)
+        : trimmed.split(/(?<=[。！？!?])/)
+
+  return chunks
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 4)
+}
+
+function frameOrientationLabel(template?: ResourceTemplate) {
+  if (!template) {
+    return "画面模板"
+  }
+  if (template.orientation === "portrait") {
+    return "竖版"
+  }
+  if (template.orientation === "landscape") {
+    return "横版"
+  }
+  return "方形"
+}
+
 export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   const [loadState, setLoadState] = useState<LoadState>("loading")
   const [reloadToken, setReloadToken] = useState(0)
@@ -372,6 +421,13 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
           .slice(0, 3)
           .join("、")}${overriddenLabels.length > 3 ? " 等" : ""}）`
       : "全部沿用配方默认"
+  const selectedFrameTemplate = resources.frameTemplates.find(
+    (item) => item.key === advancedSettings.frameTemplate
+  )
+  const selectedFramePreviewUrl = apiResourceUrl(
+    selectedFrameTemplate?.preview_url
+  )
+  const previewSourceText = templateNeedsTopic ? topic : script
   const batchMeasureWord = nonVideoArtifact === "text" ? "篇" : "条"
   const batchOutputNoun =
     nonVideoArtifact === "text"
@@ -680,10 +736,37 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
 
   return (
     <TooltipProvider>
-      <div>
-        <main className="grid max-w-[1240px] gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:p-6">
+      <div className="max-w-[1600px] p-4 lg:p-5">
+        <div className="mb-4 flex items-start gap-4">
+          <div className="min-w-0 flex-1">
+            <TemplateSummaryBar
+              error={templatesError}
+              loadState={loadState}
+              onReload={() => setReloadToken((token) => token + 1)}
+              onSelect={handleSelectTemplate}
+              template={template}
+              templates={templates}
+            />
+          </div>
+          <div className="hidden shrink-0 lg:block">
+            <GenerationSubmitControl
+              batchCount={batchItems.length}
+              batchMeasureWord={batchMeasureWord}
+              batchOutputNoun={batchOutputNoun}
+              canSubmit={canSubmit}
+              inBatch={inBatch}
+              isSubmitting={isSubmitting}
+              onSubmitBatch={submitBatch}
+              onSubmitTask={submitTask}
+              submitDisabledReason={submitDisabledReason}
+              templateNeedsAssets={templateNeedsAssets}
+            />
+          </div>
+        </div>
+
+        <main className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(380px,0.72fr)] lg:gap-5">
             <section className="flex min-w-0 flex-col gap-5">
-              <Card className="rounded-lg">
+              <Card className="min-h-[640px] rounded-lg">
                 <CardHeader className="border-b">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -724,15 +807,6 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <TemplateSummaryBar
-                    error={templatesError}
-                    loadState={loadState}
-                    onReload={() => setReloadToken((token) => token + 1)}
-                    onSelect={handleSelectTemplate}
-                    template={template}
-                    templates={templates}
-                  />
-
                   {!templateCanSubmit && loadState === "ready" && (
                     <InlineError
                       title="当前模板暂不支持在此页提交"
@@ -807,79 +881,6 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                   {submitError && (
                     <InlineError title="提交失败" message={submitError} />
                   )}
-
-                  <div className="mt-5 flex flex-col items-end gap-1.5">
-                    {/* 按下之前明确知道自己改了什么（批次三：来源标注总结） */}
-                    {!templateNeedsAssets && (
-                      <div className="text-xs text-muted-foreground">
-                        {overrideSummary}
-                      </div>
-                    )}
-                    {inBatch ? (
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            disabled={batchItems.length === 0 || isSubmitting}
-                            size="lg"
-                          >
-                            {isSubmitting ? (
-                              <Loader2
-                                className="animate-spin"
-                                data-icon="inline-start"
-                              />
-                            ) : (
-                              <Layers data-icon="inline-start" />
-                            )}
-                            {isSubmitting
-                              ? "正在提交…"
-                              : `批量生成 ${batchItems.length} ${batchMeasureWord}${batchOutputNoun}`}
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>
-                              批量生成 {batchItems.length} {batchMeasureWord}
-                              {batchOutputNoun}？
-                            </AlertDialogTitle>
-                            <AlertDialogDescription>
-                              每条会占用一次生成额度，提交后可在下方与「任务」页跟踪进度、失败可单条重试。
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>再检查一下</AlertDialogCancel>
-                            <AlertDialogAction
-                              className={cn(
-                                buttonVariants({ variant: "default" })
-                              )}
-                              onClick={() => void submitBatch()}
-                            >
-                              确认提交
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    ) : (
-                      <Button disabled={!canSubmit} onClick={submitTask} size="lg">
-                        {isSubmitting ? (
-                          <Loader2 className="animate-spin" data-icon="inline-start" />
-                        ) : templateNeedsAssets ? (
-                          <UploadCloud data-icon="inline-start" />
-                        ) : (
-                          <Play data-icon="inline-start" />
-                        )}
-                        {isSubmitting
-                          ? templateNeedsAssets
-                            ? "正在上传并提交…"
-                            : "正在提交…"
-                          : "开始生成"}
-                      </Button>
-                    )}
-                    {!inBatch && submitDisabledReason && (
-                      <div className="text-xs text-muted-foreground">
-                        {submitDisabledReason}
-                      </div>
-                    )}
-                  </div>
                 </CardContent>
               </Card>
 
@@ -913,17 +914,141 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
               </aside>
             ) : (
               <TaskPanel
+                artifactKind={nonVideoArtifact}
+                framePreviewUrl={selectedFramePreviewUrl}
                 isCancellingTask={isCancellingTask}
                 onCancelTask={cancelCurrentTask}
+                previewText={previewSourceText}
                 result={result}
+                splitMode={advancedSettings.splitMode}
                 task={task}
                 taskActionError={taskActionError}
                 template={template}
               />
             )}
           </main>
+
+        <div className="sticky bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-20 mt-4 border-t bg-background/95 px-1 py-3 backdrop-blur lg:hidden">
+          <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span className="truncate">{overrideSummary}</span>
+            <span className="shrink-0">
+              {template?.estimated_turnaround || "约 2 分钟"}
+            </span>
+          </div>
+          <GenerationSubmitControl
+            batchCount={batchItems.length}
+            batchMeasureWord={batchMeasureWord}
+            batchOutputNoun={batchOutputNoun}
+            canSubmit={canSubmit}
+            className="w-full"
+            inBatch={inBatch}
+            isSubmitting={isSubmitting}
+            onSubmitBatch={submitBatch}
+            onSubmitTask={submitTask}
+            submitDisabledReason={submitDisabledReason}
+            templateNeedsAssets={templateNeedsAssets}
+          />
+        </div>
       </div>
     </TooltipProvider>
+  )
+}
+
+function GenerationSubmitControl({
+  inBatch,
+  batchCount,
+  batchMeasureWord,
+  batchOutputNoun,
+  isSubmitting,
+  canSubmit,
+  templateNeedsAssets,
+  submitDisabledReason,
+  className,
+  onSubmitTask,
+  onSubmitBatch,
+}: {
+  inBatch: boolean
+  batchCount: number
+  batchMeasureWord: string
+  batchOutputNoun: string
+  isSubmitting: boolean
+  canSubmit: boolean
+  templateNeedsAssets: boolean
+  submitDisabledReason: string | null
+  className?: string
+  onSubmitTask: () => Promise<void>
+  onSubmitBatch: () => Promise<void>
+}) {
+  if (inBatch) {
+    return (
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            className={className}
+            disabled={batchCount === 0 || isSubmitting}
+            size="lg"
+          >
+            {isSubmitting ? (
+              <Loader2 className="animate-spin" data-icon="inline-start" />
+            ) : (
+              <Layers data-icon="inline-start" />
+            )}
+            {isSubmitting
+              ? "正在提交…"
+              : `批量生成 ${batchCount} ${batchMeasureWord}${batchOutputNoun}`}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              批量生成 {batchCount} {batchMeasureWord}
+              {batchOutputNoun}？
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              每条会占用一次生成额度。提交后可以在当前页面或「任务」中查看进度，失败项目可单独重试。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>再检查一下</AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(buttonVariants({ variant: "default" }))}
+              onClick={() => void onSubmitBatch()}
+            >
+              确认提交
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    )
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1.5">
+      <Button
+        className={className}
+        disabled={!canSubmit}
+        onClick={() => void onSubmitTask()}
+        size="lg"
+      >
+        {isSubmitting ? (
+          <Loader2 className="animate-spin" data-icon="inline-start" />
+        ) : templateNeedsAssets ? (
+          <UploadCloud data-icon="inline-start" />
+        ) : (
+          <Play data-icon="inline-start" />
+        )}
+        {isSubmitting
+          ? templateNeedsAssets
+            ? "正在上传并提交…"
+            : "正在提交…"
+          : "开始生成"}
+      </Button>
+      {submitDisabledReason && (
+        <span className="max-w-56 text-right text-xs text-muted-foreground">
+          {submitDisabledReason}
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -1112,6 +1237,7 @@ function StandardInput({
     null
   )
   const [isLoadingTemplateParams, setIsLoadingTemplateParams] = useState(true)
+  const [quickStyleOpen, setQuickStyleOpen] = useState(false)
   const previewText =
     previewCopy(inputKind, text, advancedSettings.title) ||
     "这是一段用于预览画面与声音的示例文案。"
@@ -1126,6 +1252,16 @@ function StandardInput({
   const templateParamEntries = templateParamsResponse
     ? Object.entries(templateParamsResponse.params)
     : []
+  const selectedFrameResource = resources.frameTemplates.find(
+    (item) => item.key === advancedSettings.frameTemplate
+  )
+  const selectedBgm = resources.bgm.find(
+    (item) => item.path === advancedSettings.bgmPath
+  )
+  const styleSummary =
+    artifactKind === "image_set"
+      ? `${frameOrientationLabel(selectedFrameResource)} · ${selectedFrameResource?.display_name || "默认图文版式"}`
+      : `${frameOrientationLabel(selectedFrameResource)} · ${voiceLabel(advancedSettings.ttsVoice)} · ${selectedFrameResource?.display_name || "默认画面"} · ${selectedBgm?.name || "无背景音乐"}`
 
   useEffect(() => {
     let cancelled = false
@@ -1393,6 +1529,32 @@ function StandardInput({
         </Field>
       )}
 
+      {artifactKind !== "text" && (
+        <>
+          <button
+            className="flex min-h-14 w-full items-center gap-3 rounded-lg border bg-background px-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            onClick={() => setQuickStyleOpen(true)}
+            type="button"
+          >
+            <SlidersHorizontal className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-sm">
+              {styleSummary}
+            </span>
+            <span className="shrink-0 text-sm font-medium text-primary">
+              调整本次风格
+            </span>
+          </button>
+          <QuickStyleSheet
+            artifactKind={artifactKind}
+            onChange={patchAdvanced}
+            onOpenChange={setQuickStyleOpen}
+            open={quickStyleOpen}
+            resources={resources}
+            settings={advancedSettings}
+          />
+        </>
+      )}
+
       <div className="flex flex-col gap-3">
         {/* 产线同构（批次三）：分组编号与配方详情页产线图一一对应 */}
         <div className="flex flex-wrap items-center justify-between gap-2 px-1">
@@ -1478,7 +1640,6 @@ function StandardInput({
         {/* 长文（text）无画面 */}
         {artifactKind !== "text" && visualStep && (
         <AdvancedGroup
-          defaultOpen
           description="模板看图挑款、参数与帧图预览"
           id="visual"
           step={visualStep}
@@ -1833,7 +1994,6 @@ function StandardInput({
         {/* 图文/长文无配音 */}
         {!isNonVideo && voiceStep && (
         <AdvancedGroup
-          defaultOpen
           description="引擎、音色、语速与试听"
           id="audio"
           step={voiceStep}
@@ -2022,7 +2182,6 @@ function StandardInput({
         {/* 合成组（批次三）：BGM 属于合成阶段；合成引擎是配方级参数，如实指路 */}
         {!isNonVideo && composeStep && (
         <AdvancedGroup
-          defaultOpen
           description="背景音乐与合成引擎"
           id="compose"
           step={composeStep}
@@ -2123,6 +2282,182 @@ function StandardInput({
         )}
       </div>
     </FieldGroup>
+  )
+}
+
+function QuickStyleSheet({
+  open,
+  artifactKind,
+  settings,
+  resources,
+  onOpenChange,
+  onChange,
+}: {
+  open: boolean
+  artifactKind: ArtifactKind
+  settings: StandardAdvancedSettings
+  resources: GenerationResources
+  onOpenChange: (open: boolean) => void
+  onChange: (patch: Partial<StandardAdvancedSettings>) => void
+}) {
+  const isImageSet = artifactKind === "image_set"
+
+  return (
+    <Sheet onOpenChange={onOpenChange} open={open}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        <SheetHeader>
+          <SheetTitle>调整本次风格</SheetTitle>
+          <SheetDescription>
+            只影响这一次生成；需要长期生效时，请在配方详情中修改默认值。
+          </SheetDescription>
+        </SheetHeader>
+
+        <FieldGroup className="px-4">
+          <Field>
+            <FieldLabel>画面模板</FieldLabel>
+            <Select
+              onValueChange={(value) => onChange({ frameTemplate: value })}
+              value={settings.frameTemplate}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="选择画面模板" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {resources.frameTemplates.map((item) => (
+                    <SelectItem key={item.key} value={item.key}>
+                      {item.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+
+          {!isImageSet && (
+            <>
+              <Field>
+                <FieldLabel>配音引擎</FieldLabel>
+                <Select
+                  onValueChange={(value) =>
+                    onChange({
+                      ttsInferenceMode:
+                        value as StandardAdvancedSettings["ttsInferenceMode"],
+                    })
+                  }
+                  value={settings.ttsInferenceMode}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="local">本地 / Edge Voice</SelectItem>
+                      <SelectItem value="fish">Fish Audio</SelectItem>
+                      <SelectItem value="comfyui">ComfyUI</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="quick-style-voice">音色</FieldLabel>
+                <Input
+                  id="quick-style-voice"
+                  onChange={(event) =>
+                    onChange({ ttsVoice: event.target.value })
+                  }
+                  value={settings.ttsVoice}
+                />
+                <FieldDescription>
+                  本地引擎填写系统音色；Fish Audio 填写 reference ID。
+                </FieldDescription>
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="quick-style-speed">
+                  语速 · {settings.ttsSpeed.toFixed(1)}x
+                </FieldLabel>
+                <Slider
+                  id="quick-style-speed"
+                  max={1.5}
+                  min={0.7}
+                  onValueChange={([value]) =>
+                    onChange({ ttsSpeed: value ?? 1 })
+                  }
+                  step={0.1}
+                  value={[settings.ttsSpeed]}
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel>背景音乐</FieldLabel>
+                <Select
+                  onValueChange={(value) =>
+                    onChange({ bgmPath: value === "__none__" ? "" : value })
+                  }
+                  value={settings.bgmPath || "__none__"}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="__none__">不使用背景音乐</SelectItem>
+                      {resources.bgm.map((item) => (
+                        <SelectItem key={item.path} value={item.path}>
+                          {item.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="quick-style-volume">
+                  背景音乐音量 · {Math.round(settings.bgmVolume * 100)}%
+                </FieldLabel>
+                <Slider
+                  id="quick-style-volume"
+                  max={1}
+                  min={0}
+                  onValueChange={([value]) =>
+                    onChange({ bgmVolume: value ?? 0 })
+                  }
+                  step={0.05}
+                  value={[settings.bgmVolume]}
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel>播放方式</FieldLabel>
+                <ToggleGroup
+                  onValueChange={(value) => {
+                    if (value) {
+                      onChange({
+                        bgmMode:
+                          value as StandardAdvancedSettings["bgmMode"],
+                      })
+                    }
+                  }}
+                  type="single"
+                  value={settings.bgmMode}
+                  variant="outline"
+                >
+                  <ToggleGroupItem value="loop">循环播放</ToggleGroupItem>
+                  <ToggleGroupItem value="once">播放一次</ToggleGroupItem>
+                </ToggleGroup>
+              </Field>
+            </>
+          )}
+        </FieldGroup>
+
+        <SheetFooter>
+          <Button onClick={() => onOpenChange(false)}>应用本次设置</Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   )
 }
 
@@ -2341,18 +2676,111 @@ function AssetInput({
   )
 }
 
+function StoryboardPreviewPanel({
+  artifactKind,
+  framePreviewUrl,
+  scenes,
+}: {
+  artifactKind: ArtifactKind
+  framePreviewUrl: string | null
+  scenes: string[]
+}) {
+  const title =
+    artifactKind === "text"
+      ? "长文结构预览"
+      : artifactKind === "image_set"
+        ? "图集分页预览"
+        : "分镜预览"
+  const description =
+    artifactKind === "text"
+      ? "根据当前文案预估文章结构，正式生成时可能调整。"
+      : artifactKind === "image_set"
+        ? "根据当前换行预估图集页面，正式生成时可能调整。"
+        : "根据当前拆分方式预估镜头，正式生成时可能调整。"
+
+  return (
+    <aside className="lg:sticky lg:top-5 lg:self-start">
+      <Card className="overflow-hidden rounded-lg">
+        <CardHeader className="border-b">
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          {scenes.length === 0 ? (
+            <div className="flex min-h-64 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+              <FileText className="size-6 text-muted-foreground" />
+              <div>
+                <div className="text-sm font-medium">输入内容后显示预估</div>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  这里会跟随文案和拆分方式更新，不会创建真实任务。
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="px-4">
+              {scenes.map((scene, index) => (
+                <article
+                  className="grid gap-3 border-b py-4 last:border-b-0 sm:grid-cols-[minmax(116px,0.72fr)_minmax(0,1fr)]"
+                  key={`${index}-${scene.slice(0, 24)}`}
+                >
+                  {artifactKind !== "text" && framePreviewUrl && (
+                    <img
+                      alt={`当前画面模板的场景 ${index + 1} 预览`}
+                      className="aspect-[4/3] w-full rounded-lg border object-cover"
+                      height={300}
+                      loading={index === 0 ? "eager" : "lazy"}
+                      src={framePreviewUrl}
+                      width={400}
+                    />
+                  )}
+                  <div className="flex min-w-0 flex-col py-1">
+                    <h3 className="text-sm font-medium">
+                      {artifactKind === "text"
+                        ? `段落 ${index + 1}`
+                        : artifactKind === "image_set"
+                          ? `页面 ${index + 1}`
+                          : `场景 ${index + 1}`}
+                    </h3>
+                    <p className="mt-2 line-clamp-4 text-sm leading-6 text-muted-foreground">
+                      {scene}
+                    </p>
+                    {artifactKind === "video" && (
+                      <div className="mt-auto flex items-center gap-1.5 pt-3 text-xs text-muted-foreground">
+                        <Clock3 className="size-3.5" />
+                        约 15 秒
+                      </div>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </aside>
+  )
+}
+
 function TaskPanel({
+  artifactKind,
+  framePreviewUrl,
   isCancellingTask,
   onCancelTask,
+  previewText,
   task,
   result,
+  splitMode,
   template,
   taskActionError,
 }: {
+  artifactKind: ArtifactKind
+  framePreviewUrl: string | null
   isCancellingTask: boolean
   onCancelTask: () => void
+  previewText: string
   task: GenerationTask | null
   result: GenerationResult | null
+  splitMode: StandardAdvancedSettings["splitMode"]
   template: ProductionTemplate | null
   taskActionError: string | null
 }) {
@@ -2382,9 +2810,20 @@ function TaskPanel({
     ?.asset_manifest as AssetManifestInput | undefined
   const assetItems = buildAssetItems(assetManifest)
   const assetCount = assetManifest?.assets?.length ?? assetItems.length
+  const previewScenes = previewStoryboardScenes(previewText, splitMode)
+
+  if (!task && !result) {
+    return (
+      <StoryboardPreviewPanel
+        artifactKind={artifactKind}
+        framePreviewUrl={framePreviewUrl}
+        scenes={previewScenes}
+      />
+    )
+  }
 
   return (
-    <aside className="flex flex-col gap-5">
+    <aside className="flex flex-col gap-5 lg:sticky lg:top-5 lg:self-start">
       <Card className="rounded-lg">
         <CardHeader className="border-b">
           <CardTitle>任务状态</CardTitle>
