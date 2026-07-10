@@ -223,6 +223,21 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
       return friendlyCopy(fallback)
     }
     const current = key ? effectiveParams[key] : undefined
+    if (key === "bgm_volume" && Number.isFinite(Number(current))) {
+      return `${Math.round(Number(current) * 100)}%`
+    }
+    if (key === "tts_speed" && Number.isFinite(Number(current))) {
+      return `${Number(current).toFixed(1)}x`
+    }
+    if (key === "word_count" && Number.isFinite(Number(current))) {
+      return `${Number(current)} 字`
+    }
+    if (
+      (key === "media_width" || key === "media_height") &&
+      Number.isFinite(Number(current))
+    ) {
+      return `${Number(current)} px`
+    }
     return friendlyCopy(humanizePartValue(current, fallback))
   }
 
@@ -382,7 +397,6 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
         <BackRow />
         <WorkspaceHeader
           description="查看这份配方的默认设置"
-          headingLevel={1}
           title="配方详情"
         />
         <AsyncState
@@ -400,7 +414,6 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
         <BackRow />
         <WorkspaceHeader
           description="查看这份配方的默认设置"
-          headingLevel={1}
           title="配方详情"
         />
         <AsyncState
@@ -428,7 +441,6 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
         <BackRow />
         <WorkspaceHeader
           description="查看这份配方的默认设置"
-          headingLevel={1}
           title="配方详情"
         />
         <EmptyState
@@ -469,7 +481,6 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
         description={
           <span>调整长期默认值。开始制作后，仍可以对当次内容单独调整。</span>
         }
-        headingLevel={1}
         title={
           <span className="flex flex-wrap items-center gap-2">
             {template.display_name}

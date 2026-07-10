@@ -108,6 +108,7 @@ import { navigate } from "@/lib/router"
 import { useTaskCenter } from "@/lib/taskCenter"
 import { useCurrentProject } from "@/lib/currentProject"
 import { useLocalStorageState } from "@/lib/useLocalStorageState"
+import { frameTemplateLabel } from "@/lib/templateLabels"
 import {
   createGenerationDraft,
   resolveGenerationDraft,
@@ -1330,8 +1331,8 @@ function StandardInput({
   )
   const styleSummary =
     artifactKind === "image_set"
-      ? `${frameOrientationLabel(selectedFrameResource)} · ${selectedFrameResource?.display_name || "默认图文版式"}`
-      : `${frameOrientationLabel(selectedFrameResource)} · ${voiceLabel(advancedSettings.ttsVoice)} · ${selectedFrameResource?.display_name || "默认画面"} · ${selectedBgm?.name || "无背景音乐"}`
+      ? `${frameOrientationLabel(selectedFrameResource)} · ${frameTemplateLabel(selectedFrameResource?.key || advancedSettings.frameTemplate)}`
+      : `${frameOrientationLabel(selectedFrameResource)} · ${voiceLabel(advancedSettings.ttsVoice)} · ${frameTemplateLabel(selectedFrameResource?.key || advancedSettings.frameTemplate)} · ${selectedBgm?.name || "无背景音乐"}`
 
   useEffect(() => {
     let cancelled = false
@@ -2406,7 +2407,7 @@ function QuickStyleSheet({
                 <SelectGroup>
                   {resources.frameTemplates.map((item) => (
                     <SelectItem key={item.key} value={item.key}>
-                      {item.display_name}
+                      {frameTemplateLabel(item.key)}
                     </SelectItem>
                   ))}
                 </SelectGroup>

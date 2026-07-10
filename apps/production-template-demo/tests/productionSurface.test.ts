@@ -6,6 +6,7 @@ import {
   productionStartRoute,
   productionSubmissionSummary,
 } from "../src/lib/productionSurface.ts"
+import { frameTemplateLabel } from "../src/lib/templateLabels.ts"
 
 function template(
   patch: Partial<ProductionTemplate> = {}
@@ -83,5 +84,16 @@ test("only compatible script recipes advertise batch submission", () => {
       })
     ),
     "单条"
+  )
+})
+
+test("frame template labels do not expose storage-like keys", () => {
+  assert.equal(
+    frameTemplateLabel("1080x1920/image_default.html"),
+    "经典留白"
+  )
+  assert.equal(
+    frameTemplateLabel("1920x1080/image_wide_darktech.html"),
+    "暗黑科技"
   )
 })

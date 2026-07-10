@@ -1,3 +1,5 @@
+import { frameTemplateLabel } from "./templateLabels.ts"
+
 /**
  * 产线零件清单：把模板按管线步骤拆成零件，标注控制参数、可换性与人话取值。
  * 纯数据 + 纯函数，供 RecipeDetailPage 渲染、CreateGallery 卡片预览共用。
@@ -79,6 +81,8 @@ const VALUE_LABELS: Record<string, string> = {
   local: "本机 TTS",
   fish: "Fish Audio",
   comfyui: "ComfyUI TTS",
+  loop: "循环播放",
+  once: "播放一次",
 }
 
 export function humanizePartValue(value: unknown, fallback: string): string {
@@ -86,6 +90,9 @@ export function humanizePartValue(value: unknown, fallback: string): string {
     return fallback
   }
   const text = String(value)
+  if (text.endsWith(".html")) {
+    return frameTemplateLabel(text)
+  }
   return VALUE_LABELS[text] ?? text
 }
 

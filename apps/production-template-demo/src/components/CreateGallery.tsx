@@ -473,7 +473,6 @@ export function CreateGallery() {
           project ? <Badge variant="outline">{project.name}</Badge> : undefined
         }
         description="先选择成品类型，再用现成配方开始制作；需要长期调整的效果可以保存为自己的配方。"
-        headingLevel={1}
         title="选择生产方式"
       />
 

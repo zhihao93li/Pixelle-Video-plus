@@ -4,6 +4,7 @@ import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { apiResourceUrl, type ResourceTemplate } from "@/lib/generationApi"
+import { frameTemplateLabel } from "@/lib/templateLabels"
 import { cn } from "@/lib/utils"
 
 /**
@@ -19,11 +20,6 @@ const ORIENTATION_LABELS: Record<string, string> = {
 }
 
 const INITIAL_VISIBLE = 12
-
-function templateStem(key: string): string {
-  const file = key.split("/").pop() || key
-  return file.replace(/\.html$/, "")
-}
 
 export function FrameTemplatePicker({
   templates,
@@ -108,25 +104,25 @@ export function FrameTemplatePicker({
         )}
         {visible.map((item) => {
           const previewSrc = apiResourceUrl(item.preview_url)
-          const stem = templateStem(item.key)
+          const label = frameTemplateLabel(item.key)
           return (
             <PickerCard
               aspect={`${item.width} / ${item.height}`}
               key={item.key}
-              label={stem}
+              label={label}
               onClick={() => onChange(item.key)}
               selected={item.key === value}
             >
               {previewSrc ? (
                 <img
-                  alt={`模板 ${stem} 预览`}
+                  alt={`${label}模板预览`}
                   className="h-full w-full object-cover"
                   loading="lazy"
                   src={previewSrc}
                 />
               ) : (
                 <div className="flex h-full items-center justify-center bg-muted/40 p-1 text-center text-xs text-muted-foreground">
-                  {stem}
+                  {label}
                 </div>
               )}
             </PickerCard>

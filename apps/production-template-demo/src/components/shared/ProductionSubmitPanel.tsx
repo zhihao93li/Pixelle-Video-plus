@@ -26,6 +26,7 @@ import { useExpertMode } from "@/lib/expertMode"
 import { readableError } from "@/lib/format"
 import { navigate } from "@/lib/router"
 import { settingsLink } from "@/lib/settingsLinks"
+import { frameTemplateLabel } from "@/lib/templateLabels"
 import {
   fileUrlFromPath,
   listResourceBgm,
@@ -64,7 +65,7 @@ function summaryChips(template: ProductionTemplate) {
   const chips: string[] = []
   const frame = String(params.frame_template ?? "")
   if (frame) {
-    chips.push(`画面 ${frame.split("/").pop()?.replace(".html", "") ?? frame}`)
+    chips.push(`画面 ${frameTemplateLabel(frame)}`)
   }
   const voice = String(params.tts_voice ?? "")
   const ttsMode = String(params.tts_inference_mode ?? "")
