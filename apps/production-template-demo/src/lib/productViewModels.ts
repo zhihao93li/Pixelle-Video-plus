@@ -107,7 +107,7 @@ export function updateGenerationDraft<T extends Record<string, unknown>>(
   for (const rawKey of Object.keys(patch)) {
     const key = rawKey as keyof T
     const value = patch[key]
-    if (Object.is(value, draft.defaults[key])) {
+    if (generationValuesEqual(value, draft.defaults[key])) {
       delete overrides[key]
     } else {
       overrides[key] = value
@@ -125,6 +125,38 @@ export function resolveGenerationDraft<T extends Record<string, unknown>>(
   draft: GenerationDraft<T>
 ): T {
   return { ...draft.defaults, ...draft.overrides }
+}
+
+function generationValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) {
+    return true
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right)) {
+      return false
+    }
+    return (
+      left.length === right.length &&
+      left.every((value, index) => generationValuesEqual(value, right[index]))
+    )
+  }
+  if (isPlainRecord(left) && isPlainRecord(right)) {
+    const leftKeys = Object.keys(left)
+    const rightKeys = Object.keys(right)
+    return (
+      leftKeys.length === rightKeys.length &&
+      leftKeys.every(
+        (key) =>
+          Object.hasOwn(right, key) &&
+          generationValuesEqual(left[key], right[key])
+      )
+    )
+  }
+  return false
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
 
 type ArtifactBase = {

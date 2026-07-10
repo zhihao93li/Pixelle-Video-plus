@@ -74,11 +74,11 @@
 
 信息密度与层级靠字阶和留白，不靠盒子。**排版参照 = shadcn 官方 blocks（settings/forms/dashboard 类）：mockup 只定结构分组，不定字号密度；禁自创字号档（text-[13px] 之类），一律用 shadcn 默认档与默认控件高度。**
 
-**逐页套用进度：作品库 ✓、任务页 ✓、内容详情页 ✓、生成页（产线同构，批次三）✓；快速生产/看板、设置/审核/特殊生成待后续批次。**
+**逐页套用状态（2026-07-11）：**正式路由已全部进入本轮 UI Refresh 基线；快速生产、看板、设置、审核与特殊生成不再标记为“待后续批次”。页面覆盖真源以 `tests/e2e/fixtures/surfaces.ts` 为准，不再维护另一份易过期清单。
 
 - **字阶四档**：页题 18px/500、区题 14px/500、正文 13px、辅助 11–12px muted。禁止一页只有 xl 和 xs 两档硬跳。
 - **盒子降级**：区块用「区题 + 发丝线（`border-b` / `border-t`）+ 留白」分隔；边框盒只留给独立可交互对象（可点卡片、输入控件、播放器容器、AlertDialog）；禁止盒中盒超过两层；纯展示的元数据用定义列表（label 11px muted 在上、值 13px 在下），不装盒。
-- **状态色语义**：绿=完成、红=失败、黄=进行、灰=中性/排队，全站唯一映射 = `shared/StatusBadge`（中文 + 语义色，缺省回落中性 + 原文）。禁止再散落裸 Badge 显英文 status。
+- **状态色语义**：绿=完成、红=失败、黄=进行、灰=中性/排队，全站唯一映射 = `shared/StatusBadge`（中文 + 语义色）。未知状态统一回落为中性的「状态待同步」，不回显 raw status；禁止再散落裸 Badge 显英文 status。
 - **主色纪律**：一屏至多一个实心主按钮；主色仅用于主动作 / 激活态 / 链接，禁止装饰性使用。主色保留现有绿系，做纪律化不换色相。
 - **参考分工**（对标谁，别抄错对象）：作品库 / 内容列表 → **YouTube Studio**（媒体行 + 状态列 + 数据列 + 行悬停操作）；配方陈列 → **HeyGen / Synthesia**；发布排期 → **Buffer**；排版工艺（字阶 / 发丝线 / 去盒子）→ **Stripe**（只当工艺参考，不抄它的对象模型）。
 
@@ -155,7 +155,13 @@ workflow / provider / runtime 级别的选项（画面 workflow、TTS workflow�
 
 生成设置只有三层：项目默认 → 配方生效默认 → 本次覆盖。界面使用 `defaults + overrides + dirtyKeys`；未修改字段显示「配方默认」，只有用户本次真正改过的字段显示「本次」。普通模式不暴露 workflow/provider/runtime/internal key。
 
+- 生成页以 `ProductionTemplate.fixed_params` 作为完整配方生效默认；该字段已由 registry 合并持久化配方覆盖。`generation-config.effective_params` 只服务配方默认编辑，不替代完整 fixed params。
+- single 与 batch 只把 `GenerationDraft.overrides` 映射进任务 input；未修改字段必须省略，由后端继承配方。恢复配方默认 = 删除 dirty override；显式清空继承值 = 发送 `null`，后端从本次合并参数中移除该键。
+- 单条状态/结果统一由 `productionRunViewModel` 适配后交给 `SingleTaskPanel`；批量统一从 `BatchTaskPanel` 进入。正式生成页不得再直接根据 raw status 决定用户动作。
+
 ## 8. 响应式、主题与动效合同
+
+**阶段优先级调整（2026-07-11）：** Phase 0–2 的阶段门以桌面端正式路由、浅深主题、核心键盘交互与基础 Axe 为主。移动端和小屏专项（底部导航、sticky CTA、safe-area、390/320 布局）保留为回归与后续收口目标，**不再阻断 Phase 0–2 完成判定**。以下条目仍是最终产品合同，不表示可以删除已有移动端回归。
 
 - 基准视口：1440×900、1024×768、768×1024、390×844、320×568。
 - `>= 1024px`：224px 桌面侧栏、68px 上下文页头；生成工作区允许双栏。
@@ -167,6 +173,8 @@ workflow / provider / runtime 级别的选项（画面 workflow、TTS workflow�
 - 200% 缩放不得丢失内容、项目切换或主要操作。
 
 ## 9. 并行修改边界
+
+**历史执行说明：** 2026-07-10 的 UI Refresh 没有建立计划中的 Foundation、Shell、页面与 QA 命名子分支；相关提交直接线性落在 `codex/ui-refresh-integration`，且基础层、壳层与首批 QA 曾合并在同一提交中。下列边界是今后并行施工的强制规则，不是对本次历史的追溯性声明。
 
 - Foundation 独占 `index.css`、`components/ui/**` 与基础 shared 组件。
 - Shell 独占 App、AppShell、router、theme、项目边界和 HTML 元信息。

@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Clock3,
-  Copy,
   FileText,
   ImageIcon,
   Layers,
@@ -36,7 +35,6 @@ import {
   QualityMessages,
   TechDetails,
 } from "@/components/shared/feedback"
-import { StatusBadge } from "@/components/shared/StatusBadge"
 import {
   formatBytes,
   formatDuration,
@@ -57,7 +55,6 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Progress } from "@/components/ui/progress"
 import {
   Select,
   SelectContent,
@@ -99,12 +96,11 @@ import {
 } from "@/lib/batchInput"
 import { trackBatchTasks } from "@/lib/trackBatch"
 import { useBatchPolling } from "@/lib/useBatchPolling"
-import { BatchStatusCard } from "@/components/shared/BatchStatusCard"
-import { ImageSetView } from "@/components/shared/ImageSetView"
+import { BatchTaskPanel } from "@/components/shared/BatchTaskPanel"
 import { RecipeSelect } from "@/components/shared/RecipeSelect"
 import { SettingsSummaryRow } from "@/components/shared/SettingsSummaryRow"
-import { TextArticleView } from "@/components/shared/TextArticleView"
-import { imageSetLabel } from "@/lib/imageSet"
+import { SingleTaskPanel } from "@/components/shared/SingleTaskPanel"
+import { PageFrame } from "@/components/shared/PageFrame"
 import {
   isActiveProductTemplate,
   pipelineChipLabel,
@@ -121,13 +117,29 @@ import {
   resolveGenerationDraft,
   runStatusIsActive,
   runStatusIsCancellable,
+  statusIs,
   updateGenerationDraft,
   type GenerationDraft,
 } from "@/lib/productViewModels"
+import {
+  assetDraftForTemplate,
+  assetOverridesToInput,
+  fallbackAssetSettings as defaultAssetAdvancedSettings,
+  fallbackLongFormSettings as defaultLongFormSettings,
+  fallbackStandardSettings as defaultAdvancedSettings,
+  longFormDraftForTemplate,
+  longFormOverridesToInput,
+  standardDraftForTemplate,
+  standardOverridesToInput,
+  type AssetGenerationSettings,
+  type LongFormGenerationSettings,
+  type StandardGenerationSettings,
+  type TemplateParamValue,
+} from "@/lib/productionDrafts"
 import { resolveGenerateTemplate } from "@/lib/productionTemplateResolution"
+import { productionRunViewModel } from "@/lib/productionRunAdapters"
 import {
   apiResourceUrl,
-  artifactFileUrl,
   cancelGenerationTask,
   createGenerationBatch,
   createGenerationTemplateTask,
@@ -159,7 +171,6 @@ import {
 } from "@/lib/generationApi"
 import {
   buildAssetItems,
-  buildProgressRuntimeItems,
   buildQualitySummary,
   type AssetManifestInput,
   type QualityReviewInput,
@@ -179,110 +190,19 @@ type GenerationResources = {
   ttsWorkflows: ResourceWorkflow[]
 }
 
-type TemplateParamValue = string | number | boolean
-
-type StandardAdvancedSettings = {
-  title: string
-  nScenes: number
-  splitMode: "paragraph" | "line" | "sentence"
-  frameTemplate: string
-  templateParams: Record<string, TemplateParamValue>
-  mediaWorkflow: string
-  mediaWidth: number
-  mediaHeight: number
-  mediaDuration: number
-  mediaPreviewPrompt: string
-  promptPrefix: string
-  imagePromptVisualContext: string
-  imagePromptGenerationRules: string
-  bgmPath: string
-  bgmVolume: number
-  bgmMode: "loop" | "once"
-  ttsInferenceMode: "local" | "comfyui" | "fish"
-  ttsVoice: string
-  ttsWorkflow: string
-  ttsSpeed: number
-  ttsRefAudioPath: string
-  ttsRefAudioName: string
-}
-
-type AssetAdvancedSettings = {
-  bgmPath: string
-  bgmVolume: number
-  bgmMode: "loop" | "once"
-  voiceId: string
-  ttsSpeed: number
-}
-
-type LongFormAdvancedSettings = {
-  wordCount: number
-  longFormPrompt: string
-  llmModel: string
-}
+type StandardAdvancedSettings = StandardGenerationSettings
+type AssetAdvancedSettings = AssetGenerationSettings
+type LongFormAdvancedSettings = LongFormGenerationSettings
+type StandardPreviewSettings = Pick<
+  StandardAdvancedSettings,
+  "mediaDuration" | "mediaPreviewPrompt" | "ttsRefAudioName"
+>
 
 const defaultResources: GenerationResources = {
   bgm: [],
   frameTemplates: [],
   mediaWorkflows: [],
   ttsWorkflows: [],
-}
-
-const defaultAdvancedSettings: StandardAdvancedSettings = {
-  title: "",
-  nScenes: 5,
-  splitMode: "paragraph",
-  frameTemplate: "1080x1920/image_default.html",
-  templateParams: {},
-  mediaWorkflow: "",
-  mediaWidth: 1080,
-  mediaHeight: 1440,
-  mediaDuration: 4,
-  mediaPreviewPrompt: "",
-  promptPrefix: "",
-  imagePromptVisualContext: "",
-  imagePromptGenerationRules: "",
-  bgmPath: "",
-  bgmVolume: 0.2,
-  bgmMode: "loop",
-  ttsInferenceMode: "local",
-  ttsVoice: "zh-CN-YunjianNeural",
-  ttsWorkflow: "",
-  ttsSpeed: 1,
-  ttsRefAudioPath: "",
-  ttsRefAudioName: "",
-}
-
-const defaultAssetAdvancedSettings: AssetAdvancedSettings = {
-  bgmPath: "",
-  bgmVolume: 0.2,
-  bgmMode: "loop",
-  voiceId: "zh-CN-YunjianNeural",
-  ttsSpeed: 1.2,
-}
-
-const defaultLongFormSettings: LongFormAdvancedSettings = {
-  wordCount: 1800,
-  longFormPrompt: "",
-  llmModel: "",
-}
-
-function longFormDraftForTemplate(
-  template: ProductionTemplate
-): GenerationDraft<LongFormAdvancedSettings> {
-  if (templateArtifactType(template.pipeline_id) !== "text") {
-    return createGenerationDraft(defaultLongFormSettings)
-  }
-  const fixed = template.fixed_params
-  const parsedWordCount = Number(fixed.word_count)
-  return createGenerationDraft({
-    wordCount:
-      Number.isFinite(parsedWordCount) && parsedWordCount > 0
-        ? parsedWordCount
-        : defaultLongFormSettings.wordCount,
-    longFormPrompt:
-      typeof fixed.long_form_prompt === "string" ? fixed.long_form_prompt : "",
-    llmModel: typeof fixed.llm_model === "string" ? fixed.llm_model : "",
-  })
 }
 
 /**
@@ -331,13 +251,16 @@ const OVERRIDE_TRACKED: Array<{
   { key: "bgmMode", label: "背景音乐播放方式" },
 ]
 
-function overriddenAdvancedLabels(
-  settings: StandardAdvancedSettings
-): string[] {
-  return OVERRIDE_TRACKED.filter(
-    ({ key }) => settings[key] !== defaultAdvancedSettings[key]
-  ).map(({ label }) => label)
-}
+const ASSET_OVERRIDE_TRACKED: Array<{
+  key: keyof AssetAdvancedSettings
+  label: string
+}> = [
+  { key: "bgmPath", label: "背景音乐文件" },
+  { key: "bgmVolume", label: "背景音乐音量" },
+  { key: "bgmMode", label: "背景音乐播放方式" },
+  { key: "voiceId", label: "音色" },
+  { key: "ttsSpeed", label: "语速" },
+]
 
 /** 字段来源标注：改过→「本次」，没改→灰字「配方默认」。 */
 function SourceTag({ dirty }: { dirty: boolean }) {
@@ -403,20 +326,30 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
     `pixelle-draft-topic:${draftScope}`,
     ""
   )
-  const [advancedSettings, setAdvancedSettings] =
-    useState<StandardAdvancedSettings>(defaultAdvancedSettings)
+  const [standardDraft, setStandardDraft] = useState<
+    GenerationDraft<StandardAdvancedSettings>
+  >(() => createGenerationDraft(defaultAdvancedSettings))
+  const [standardPreviewSettings, setStandardPreviewSettings] =
+    useState<StandardPreviewSettings>(() => ({
+      mediaDuration: defaultAdvancedSettings.mediaDuration,
+      mediaPreviewPrompt: defaultAdvancedSettings.mediaPreviewPrompt,
+      ttsRefAudioName: defaultAdvancedSettings.ttsRefAudioName,
+    }))
   const [resources, setResources] =
     useState<GenerationResources>(defaultResources)
   const [resourcesError, setResourcesError] = useState<string | null>(null)
   const [assetFiles, setAssetFiles] = useState<File[]>([])
-  const [uploadedAssets, setUploadedAssets] = useState<UploadedGenerationAsset[]>([])
+  const [uploadedAssets, setUploadedAssets] = useState<
+    UploadedGenerationAsset[]
+  >([])
   const [assetTitle, setAssetTitle] = useState("")
   const [assetIntent, setAssetIntent] = useState(
     "根据这些用户素材制作一条适合小红书发布的 PetWoods 短视频。"
   )
   const [assetDuration, setAssetDuration] = useState(30)
-  const [assetAdvancedSettings, setAssetAdvancedSettings] =
-    useState<AssetAdvancedSettings>(defaultAssetAdvancedSettings)
+  const [assetDraft, setAssetDraft] = useState<
+    GenerationDraft<AssetAdvancedSettings>
+  >(() => createGenerationDraft(defaultAssetAdvancedSettings))
   const [longFormDraft, setLongFormDraft] = useState<
     GenerationDraft<LongFormAdvancedSettings>
   >(() => createGenerationDraft(defaultLongFormSettings))
@@ -442,6 +375,38 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   const task = currentTaskId
     ? (taskCenter.getTask(currentTaskId)?.task ?? null)
     : null
+  const advancedSettings = {
+    ...resolveGenerationDraft(standardDraft),
+    ...standardPreviewSettings,
+  }
+  const assetAdvancedSettings = resolveGenerationDraft(assetDraft)
+
+  const changeAdvancedSettings = useCallback(
+    (value: StandardAdvancedSettings) => {
+      const {
+        mediaDuration,
+        mediaPreviewPrompt,
+        ttsRefAudioName,
+        ...productionValue
+      } = value
+      setStandardPreviewSettings({
+        mediaDuration,
+        mediaPreviewPrompt,
+        ttsRefAudioName,
+      })
+      setStandardDraft((current) =>
+        updateGenerationDraft(current, productionValue)
+      )
+    },
+    []
+  )
+
+  const changeAssetAdvancedSettings = useCallback(
+    (value: AssetAdvancedSettings) => {
+      setAssetDraft((current) => updateGenerationDraft(current, value))
+    },
+    []
+  )
 
   const trimmedScript = script.trim()
   const trimmedTopic = topic.trim()
@@ -471,7 +436,12 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
     [batchText]
   )
   // 提交前总结：本次覆盖了哪些配方默认（来源标注 v1，脏值比较）
-  const standardOverriddenLabels = overriddenAdvancedLabels(advancedSettings)
+  const standardOverriddenLabels = OVERRIDE_TRACKED.filter(({ key }) =>
+    standardDraft.dirtyKeys.includes(key)
+  ).map(({ label }) => label)
+  const assetOverriddenLabels = ASSET_OVERRIDE_TRACKED.filter(({ key }) =>
+    assetDraft.dirtyKeys.includes(key)
+  ).map(({ label }) => label)
   const longFormOverriddenLabels = longFormDraft.dirtyKeys.map((key) =>
     key === "wordCount"
       ? "目标字数"
@@ -479,8 +449,9 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
         ? "长文提示词"
         : "写作模型"
   )
-  const overriddenLabels =
-    nonVideoArtifact === "text"
+  const overriddenLabels = templateNeedsAssets
+    ? assetOverriddenLabels
+    : nonVideoArtifact === "text"
       ? longFormOverriddenLabels
       : standardOverriddenLabels
   const overrideSummary =
@@ -571,8 +542,16 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
         }
 
         const selected = resolution.template
+        const nextStandardDraft = standardDraftForTemplate(selected)
         setTemplates(response.templates)
         setTemplate(selected)
+        setStandardDraft(nextStandardDraft)
+        setStandardPreviewSettings({
+          mediaDuration: nextStandardDraft.defaults.mediaDuration,
+          mediaPreviewPrompt: nextStandardDraft.defaults.mediaPreviewPrompt,
+          ttsRefAudioName: nextStandardDraft.defaults.ttsRefAudioName,
+        })
+        setAssetDraft(assetDraftForTemplate(selected))
         setLongFormDraft(longFormDraftForTemplate(selected))
         setLoadState("ready")
       } catch (error) {
@@ -596,8 +575,12 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
 
     async function loadResources() {
       setResourcesError(null)
-      const [bgmResult, frameTemplateResult, mediaWorkflowResult, ttsWorkflowResult] =
-        await Promise.allSettled([
+      const [
+        bgmResult,
+        frameTemplateResult,
+        mediaWorkflowResult,
+        ttsWorkflowResult,
+      ] = await Promise.allSettled([
           listResourceBgm(),
           listResourceTemplates(),
           listResourceMediaWorkflows(),
@@ -630,7 +613,9 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
         ttsWorkflowResult,
       ]
         .filter((result) => result.status === "rejected")
-        .map((result) => readableError((result as PromiseRejectedResult).reason))
+        .map((result) =>
+          readableError((result as PromiseRejectedResult).reason)
+        )
       if (failures.length > 0) {
         setResourcesError(failures.join("；"))
       }
@@ -647,7 +632,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   useEffect(() => {
     if (
       !task ||
-      task.status !== "completed" ||
+      !statusIs(adaptRunStatus(task.status), "completed") ||
       result?.task_id === task.task_id
     ) {
       return
@@ -701,11 +686,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
             video_title: trimmedAssetTitle,
             intent: trimmedAssetIntent || trimmedAssetTitle,
             duration: assetDuration,
-            bgm_path: assetAdvancedSettings.bgmPath,
-            bgm_volume: assetAdvancedSettings.bgmVolume,
-            bgm_mode: assetAdvancedSettings.bgmMode,
-            voice_id: assetAdvancedSettings.voiceId.trim(),
-            tts_speed: assetAdvancedSettings.ttsSpeed,
+            ...assetOverridesToInput(template, assetDraft.overrides),
           },
           {
             source: "react_production_studio",
@@ -718,9 +699,9 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
         response = await createGenerationTemplateTask(
           template.id,
           buildStandardTemplateInput({
-            advancedSettings,
-            longFormOverrides: longFormDraft.overrides,
+            longFormDraft,
             script: trimmedScript,
+            standardDraft,
             template,
             topic: trimmedTopic,
           }),
@@ -753,8 +734,10 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
           template,
           script: item.input.script,
           topic: "",
-          advancedSettings: { ...advancedSettings, title: item.input.title },
-          longFormOverrides: longFormDraft.overrides,
+          standardDraft: updateGenerationDraft(standardDraft, {
+            title: item.input.title,
+          }),
+          longFormDraft,
         }),
       }))
       const response = await createGenerationBatch({
@@ -768,7 +751,11 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
         title: `批量任务已创建（${response.total_count} ${batchMeasureWord}）`,
         variant: "success",
       })
-      void trackBatchTasks(response, taskCenter.trackTask, template.display_name)
+      void trackBatchTasks(
+        response,
+        taskCenter.trackTask,
+        template.display_name
+      )
     } catch (error) {
       setSubmitError(readableError(error))
     } finally {
@@ -826,7 +813,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
 
   return (
     <TooltipProvider>
-      <div className="max-w-[1600px] p-4 lg:p-5">
+      <PageFrame className="gap-0" width="wide">
         <div className="mb-4 flex items-start gap-4">
           <div className="min-w-0 flex-1">
             <TemplateSummaryBar
@@ -858,7 +845,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
 
         {loadState === "ready" && template ? (
           <>
-            <main className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(380px,0.72fr)] lg:gap-5">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(380px,0.72fr)] lg:gap-5">
           <section className="flex min-w-0 flex-col gap-5">
             <Card className="min-h-[640px] rounded-lg">
               <CardHeader className="border-b">
@@ -916,7 +903,15 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                       assetFiles={assetFiles}
                       assetIntent={assetIntent}
                       assetTitle={assetTitle}
-                      onAssetAdvancedSettingsChange={setAssetAdvancedSettings}
+                          dirtyKeys={assetDraft.dirtyKeys}
+                          onAssetAdvancedSettingsChange={
+                            changeAssetAdvancedSettings
+                          }
+                          onResetAdvancedSettings={() =>
+                            setAssetDraft(
+                              createGenerationDraft(assetDraft.defaults)
+                            )
+                          }
                       onBgmUploaded={addBgmResource}
                       onAssetDurationChange={setAssetDuration}
                       onAssetFilesChange={(files) => {
@@ -932,11 +927,17 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                     />
                   ) : templateNeedsTopic ? (
                     <StandardInput
+                          advancedDirtyKeys={standardDraft.dirtyKeys}
                       advancedSettings={advancedSettings}
                       inputKind="topic"
                       longFormDraft={longFormDraft}
                       onBgmUploaded={addBgmResource}
-                      onAdvancedSettingsChange={setAdvancedSettings}
+                          onAdvancedReset={() =>
+                            setStandardDraft(
+                              createGenerationDraft(standardDraft.defaults)
+                            )
+                          }
+                          onAdvancedSettingsChange={changeAdvancedSettings}
                       onLongFormDraftChange={setLongFormDraft}
                       onTextChange={setTopic}
                       pipelineId={template?.pipeline_id}
@@ -948,6 +949,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                     />
                   ) : (
                     <StandardInput
+                          advancedDirtyKeys={standardDraft.dirtyKeys}
                       advancedSettings={advancedSettings}
                       artifactKind={nonVideoArtifact}
                       batchItems={batchItems}
@@ -960,7 +962,12 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                       recipeId={template?.id}
                       onBatchTextChange={setBatchText}
                       onBgmUploaded={addBgmResource}
-                      onAdvancedSettingsChange={setAdvancedSettings}
+                          onAdvancedReset={() =>
+                            setStandardDraft(
+                              createGenerationDraft(standardDraft.defaults)
+                            )
+                          }
+                          onAdvancedSettingsChange={changeAdvancedSettings}
                       onLongFormDraftChange={setLongFormDraft}
                       onRemoveBatchItem={(index) =>
                         setBatchText((current) =>
@@ -981,24 +988,23 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                 )}
               </CardContent>
             </Card>
+              </section>
 
-            {inBatch && submittedBatch && (
-              <BatchStatusCard
+              {inBatch ? (
+                <aside className="flex min-w-0 flex-col gap-5">
+                  {submittedBatch ? (
+                    <BatchTaskPanel
                 artifactLabel={artifactKindLabel(nonVideoArtifact)}
                 batch={submittedBatch}
                 onRetryItem={retryBatchItem}
                 retryingItemIndex={retryingBatchIndex}
               />
-            )}
-          </section>
-
-          {inBatch ? (
-            <aside className="flex min-w-0 flex-col gap-5">
+                  ) : (
               <Card className="rounded-lg">
                 <CardHeader className="border-b">
                   <CardTitle>批量提交</CardTitle>
                   <CardDescription>
-                    每条一个任务，共享上方的画面/声音等设置；提交后进度显示在左侧与「任务」页。
+                          每条一个任务，共享本次画面和声音设置；提交后在这里跟踪进度。
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1009,12 +1015,14 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                   </div>
                 </CardContent>
               </Card>
+                  )}
             </aside>
           ) : (
             <TaskPanel
               artifactKind={nonVideoArtifact}
               framePreviewUrl={selectedFramePreviewUrl}
               isCancellingTask={isCancellingTask}
+                  isSubmitting={isSubmitting}
               onCancelTask={cancelCurrentTask}
               onRetryResult={() => {
                 setResultFetchError(null)
@@ -1029,7 +1037,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
               template={template}
             />
           )}
-            </main>
+            </div>
 
             <div className="sticky bottom-[calc(4.25rem+var(--safe-area-bottom))] z-20 mt-4 border-t bg-background/95 px-1 py-3 backdrop-blur lg:hidden">
           <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
@@ -1054,7 +1062,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
             </div>
           </>
         ) : null}
-      </div>
+      </PageFrame>
     </TooltipProvider>
   )
 }
@@ -1243,6 +1251,7 @@ function TemplateSummaryBar({
 function StandardInput({
   inputKind,
   text,
+  advancedDirtyKeys,
   advancedSettings,
   resources,
   resourcesError,
@@ -1258,12 +1267,14 @@ function StandardInput({
   onBatchTextChange,
   onRemoveBatchItem,
   onTextChange,
+  onAdvancedReset,
   onAdvancedSettingsChange,
   onBgmUploaded,
   onLongFormDraftChange,
 }: {
   inputKind: "script" | "topic"
   text: string
+  advancedDirtyKeys: Array<keyof StandardAdvancedSettings>
   advancedSettings: StandardAdvancedSettings
   resources: GenerationResources
   resourcesError: string | null
@@ -1281,6 +1292,7 @@ function StandardInput({
   onBatchTextChange?: (value: string) => void
   onRemoveBatchItem?: (index: number) => void
   onTextChange: (value: string) => void
+  onAdvancedReset: () => void
   onAdvancedSettingsChange: (value: StandardAdvancedSettings) => void
   onBgmUploaded: (bgm: ResourceBgm) => void
   onLongFormDraftChange: (
@@ -1325,23 +1337,33 @@ function StandardInput({
     "media_workflow",
     "frame_template",
   ])
-  const visualLabel = pipelinePartLabel(pipelineId, "media_workflow", "每镜画面")
+  const visualLabel = pipelinePartLabel(
+    pipelineId,
+    "media_workflow",
+    "每镜画面"
+  )
   const composeStep = pipelineStepBadge(pipelineId, ["compose_runtime"])
   const dirty = (key: keyof StandardAdvancedSettings) =>
-    advancedSettings[key] !== defaultAdvancedSettings[key]
+    advancedDirtyKeys.includes(key)
   const expertMode = useExpertMode()
   const [ttsPreview, setTtsPreview] = useState<TtsPreviewResponse | null>(null)
   const [ttsPreviewError, setTtsPreviewError] = useState<string | null>(null)
   const [isPreviewingTts, setIsPreviewingTts] = useState(false)
-  const [framePreview, setFramePreview] =
-    useState<FramePreviewResponse | null>(null)
+  const [framePreview, setFramePreview] = useState<FramePreviewResponse | null>(
+    null
+  )
   const [framePreviewParams, setFramePreviewParams] =
     useState<TemplateParamsResponse | null>(null)
-  const [framePreviewError, setFramePreviewError] = useState<string | null>(null)
+  const [framePreviewError, setFramePreviewError] = useState<string | null>(
+    null
+  )
   const [isPreviewingFrame, setIsPreviewingFrame] = useState(false)
-  const [mediaPreview, setMediaPreview] =
-    useState<MediaPreviewResponse | null>(null)
-  const [mediaPreviewError, setMediaPreviewError] = useState<string | null>(null)
+  const [mediaPreview, setMediaPreview] = useState<MediaPreviewResponse | null>(
+    null
+  )
+  const [mediaPreviewError, setMediaPreviewError] = useState<string | null>(
+    null
+  )
   const [isPreviewingMedia, setIsPreviewingMedia] = useState(false)
   const [refAudioUploadError, setRefAudioUploadError] = useState<string | null>(
     null
@@ -1369,16 +1391,30 @@ function StandardInput({
   const templateParamEntries = templateParamsResponse
     ? Object.entries(templateParamsResponse.params)
     : []
+  const resolvedFrameTemplateParams = templateParamsResponse
+    ? {
+        ...templateParamDefaultValues(templateParamsResponse),
+        ...advancedSettings.templateParams,
+      }
+    : advancedSettings.templateParams
+  const previewMediaWidth =
+    templateParamsResponse?.media_width ?? advancedSettings.mediaWidth
+  const previewMediaHeight =
+    templateParamsResponse?.media_height ?? advancedSettings.mediaHeight
   const selectedFrameResource = resources.frameTemplates.find(
     (item) => item.key === advancedSettings.frameTemplate
   )
   const selectedBgm = resources.bgm.find(
     (item) => item.path === advancedSettings.bgmPath
   )
+  const sourceSummary =
+    advancedDirtyKeys.length > 0
+      ? `本次覆盖 ${advancedDirtyKeys.length} 项`
+      : "全部沿用配方默认"
   const styleSummary =
     artifactKind === "image_set"
-      ? `${frameOrientationLabel(selectedFrameResource)} · ${frameTemplateLabel(selectedFrameResource?.key || advancedSettings.frameTemplate)}`
-      : `${frameOrientationLabel(selectedFrameResource)} · ${voiceLabel(advancedSettings.ttsVoice)} · ${frameTemplateLabel(selectedFrameResource?.key || advancedSettings.frameTemplate)} · ${selectedBgm?.name || "无背景音乐"}`
+      ? `${frameOrientationLabel(selectedFrameResource)} · ${frameTemplateLabel(selectedFrameResource?.key || advancedSettings.frameTemplate)} · ${sourceSummary}`
+      : `${frameOrientationLabel(selectedFrameResource)} · ${voiceLabel(advancedSettings.ttsVoice)} · ${frameTemplateLabel(selectedFrameResource?.key || advancedSettings.frameTemplate)} · ${selectedBgm?.name || "无背景音乐"} · ${sourceSummary}`
 
   useEffect(() => {
     let cancelled = false
@@ -1406,35 +1442,6 @@ function StandardInput({
     }
   }, [advancedSettings.frameTemplate])
 
-  useEffect(() => {
-    if (!templateParamsResponse) {
-      return
-    }
-
-    const defaults = templateParamDefaultValues(templateParamsResponse)
-    const allowedNames = new Set(Object.keys(defaults))
-    const currentValues = Object.fromEntries(
-      Object.entries(advancedSettings.templateParams).filter(([name]) =>
-        allowedNames.has(name)
-      )
-    ) as Record<string, TemplateParamValue>
-    const nextValues = { ...defaults, ...currentValues }
-    const nextSettings = {
-      ...advancedSettings,
-      mediaWidth: templateParamsResponse.media_width,
-      mediaHeight: templateParamsResponse.media_height,
-      templateParams: nextValues,
-    }
-
-    if (
-      !sameTemplateParams(nextValues, advancedSettings.templateParams) ||
-      advancedSettings.mediaWidth !== templateParamsResponse.media_width ||
-      advancedSettings.mediaHeight !== templateParamsResponse.media_height
-    ) {
-      onAdvancedSettingsChange(nextSettings)
-    }
-  }, [advancedSettings, onAdvancedSettingsChange, templateParamsResponse])
-
   function patchAdvanced(patch: Partial<StandardAdvancedSettings>) {
     setTtsPreview(null)
     setTtsPreviewError(null)
@@ -1458,6 +1465,9 @@ function StandardInput({
   ) {
     patchAdvanced({
       templateParams: {
+        ...(templateParamsResponse
+          ? templateParamDefaultValues(templateParamsResponse)
+          : {}),
         ...advancedSettings.templateParams,
         [name]: normalizeTemplateParamValue(config.type, value),
       },
@@ -1547,11 +1557,14 @@ function StandardInput({
     setMediaPreviewError(null)
     try {
       const response = await generateMediaPreview({
-        prompt: buildMediaPrompt(mediaPreviewPrompt, advancedSettings.promptPrefix),
+        prompt: buildMediaPrompt(
+          mediaPreviewPrompt,
+          advancedSettings.promptPrefix
+        ),
         workflow: advancedSettings.mediaWorkflow,
         mediaType,
-        width: advancedSettings.mediaWidth,
-        height: advancedSettings.mediaHeight,
+        width: previewMediaWidth,
+        height: previewMediaHeight,
         duration: advancedSettings.mediaDuration,
       })
       setMediaPreview(response)
@@ -1573,7 +1586,7 @@ function StandardInput({
           template: advancedSettings.frameTemplate,
           title: advancedSettings.title.trim() || undefined,
           text: previewText,
-          templateParams: advancedSettings.templateParams,
+          templateParams: resolvedFrameTemplateParams,
         }),
         getFrameTemplateParams(advancedSettings.frameTemplate),
       ])
@@ -1655,7 +1668,7 @@ function StandardInput({
           <SettingsSummaryRow
             actionLabel="调整本次长文设置"
             onClick={() => setLongFormSettingsOpen(true)}
-            summary={`${resolveGenerationDraft(longFormDraft).wordCount} 字 · ${resolveGenerationDraft(longFormDraft).llmModel || "系统默认模型"}`}
+            summary={`${resolveGenerationDraft(longFormDraft).wordCount} 字 · ${resolveGenerationDraft(longFormDraft).llmModel || "系统默认模型"} · ${longFormDraft.dirtyKeys.length > 0 ? `本次覆盖 ${longFormDraft.dirtyKeys.length} 项` : "全部沿用配方默认"}`}
           />
           <LongFormSettingsSheet
             draft={longFormDraft}
@@ -1672,9 +1685,11 @@ function StandardInput({
             summary={styleSummary}
           />
           <QuickStyleSheet
+            dirtyKeys={advancedDirtyKeys}
             artifactKind={artifactKind}
             onChange={patchAdvanced}
             onOpenChange={setQuickStyleOpen}
+            onReset={onAdvancedReset}
             open={quickStyleOpen}
             resources={resources}
             settings={advancedSettings}
@@ -1728,7 +1743,9 @@ function StandardInput({
                   max={12}
                   min={1}
                   onChange={(event) =>
-                    patchAdvanced({ nScenes: Number(event.target.value || 5) })
+                      patchAdvanced({
+                        nScenes: Number(event.target.value || 5),
+                      })
                   }
                   type="number"
                   value={advancedSettings.nScenes}
@@ -1829,7 +1846,10 @@ function StandardInput({
             )}
 
             {templateParamsError && (
-              <InlineError title="模板参数读取失败" message={templateParamsError} />
+                <InlineError
+                  title="模板参数读取失败"
+                  message={templateParamsError}
+                />
             )}
 
             {!isLoadingTemplateParams &&
@@ -1872,7 +1892,11 @@ function StandardInput({
                           className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
                           id={`template-param-${name}`}
                           onChange={(event) =>
-                            updateTemplateParam(name, config, event.target.value)
+                              updateTemplateParam(
+                                name,
+                                config,
+                                event.target.value
+                              )
                           }
                           type={
                             config.type === "number"
@@ -1910,7 +1934,10 @@ function StandardInput({
                 variant="outline"
               >
                 {isPreviewingFrame ? (
-                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
                 ) : (
                   <ImageIcon data-icon="inline-start" />
                 )}
@@ -1949,7 +1976,9 @@ function StandardInput({
                   />
                 </div>
                 <TechDetails
-                  items={[{ label: "帧图路径", value: framePreview.frame_path }]}
+                    items={[
+                      { label: "帧图路径", value: framePreview.frame_path },
+                    ]}
                 />
               </div>
             )}
@@ -2031,7 +2060,10 @@ function StandardInput({
                   variant="outline"
                 >
                   {isPreviewingMedia ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
+                      <Loader2
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
                   ) : (
                     <Video data-icon="inline-start" />
                   )}
@@ -2058,7 +2090,7 @@ function StandardInput({
                 <Fact label="媒体类型" value={mediaType} />
                 <Fact
                   label="媒体尺寸"
-                  value={`${advancedSettings.mediaWidth} x ${advancedSettings.mediaHeight}`}
+                    value={`${previewMediaWidth} x ${previewMediaHeight}`}
                 />
               </div>
 
@@ -2083,7 +2115,10 @@ function StandardInput({
               )}
 
               {mediaPreviewError && (
-                <InlineError title="媒体预览失败" message={mediaPreviewError} />
+                  <InlineError
+                    title="媒体预览失败"
+                    message={mediaPreviewError}
+                  />
               )}
               {mediaPreview && (
                 <div className="mt-4 flex flex-col gap-3">
@@ -2108,7 +2143,9 @@ function StandardInput({
                     />
                   )}
                   <TechDetails
-                    items={[{ label: "媒体路径", value: mediaPreview.media_path }]}
+                      items={[
+                        { label: "媒体路径", value: mediaPreview.media_path },
+                      ]}
                   />
                 </div>
               )}
@@ -2216,7 +2253,9 @@ function StandardInput({
 
           {expertMode && advancedSettings.ttsInferenceMode === "comfyui" && (
             <Field>
-              <FieldLabel htmlFor="advanced-ref-audio">Reference audio</FieldLabel>
+                <FieldLabel htmlFor="advanced-ref-audio">
+                  Reference audio
+                </FieldLabel>
               <input
                 accept="audio/mpeg,audio/wav,audio/flac,audio/mp4,audio/aac,audio/ogg,.mp3,.wav,.flac,.m4a,.aac,.ogg"
                 className="block w-full rounded-lg border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm"
@@ -2232,7 +2271,10 @@ function StandardInput({
               </FieldDescription>
               {isUploadingRefAudio && (
                 <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
                   正在上传参考音频
                 </div>
               )}
@@ -2271,7 +2313,10 @@ function StandardInput({
                 variant="outline"
               >
                 {isPreviewingTts ? (
-                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
                 ) : (
                   <Volume2 data-icon="inline-start" />
                 )}
@@ -2292,16 +2337,23 @@ function StandardInput({
                   />
                 )}
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Fact label="音频时长" value={formatDuration(ttsPreview.duration)} />
-                  <Fact label="声音" value={advancedSettings.ttsVoice || "默认"} />
+                    <Fact
+                      label="音频时长"
+                      value={formatDuration(ttsPreview.duration)}
+                    />
+                    <Fact
+                      label="声音"
+                      value={advancedSettings.ttsVoice || "默认"}
+                    />
                 </div>
                 <TechDetails
-                  items={[{ label: "音频路径", value: ttsPreview.audio_path }]}
+                    items={[
+                      { label: "音频路径", value: ttsPreview.audio_path },
+                    ]}
                 />
               </div>
             )}
           </div>
-
         </AdvancedGroup>
         )}
 
@@ -2321,7 +2373,9 @@ function StandardInput({
               </FieldLabel>
               <Select
                 onValueChange={(value) =>
-                  patchAdvanced({ bgmPath: value === "__none__" ? "" : value })
+                    patchAdvanced({
+                      bgmPath: value === "__none__" ? "" : value,
+                    })
                 }
                 value={advancedSettings.bgmPath || "__none__"}
               >
@@ -2414,19 +2468,24 @@ function StandardInput({
 function QuickStyleSheet({
   open,
   artifactKind,
+  dirtyKeys,
   settings,
   resources,
   onOpenChange,
   onChange,
+  onReset,
 }: {
   open: boolean
   artifactKind: ArtifactKind
+  dirtyKeys: Array<keyof StandardAdvancedSettings>
   settings: StandardAdvancedSettings
   resources: GenerationResources
   onOpenChange: (open: boolean) => void
   onChange: (patch: Partial<StandardAdvancedSettings>) => void
+  onReset: () => void
 }) {
   const isImageSet = artifactKind === "image_set"
+  const dirty = (key: keyof StandardAdvancedSettings) => dirtyKeys.includes(key)
 
   return (
     <Sheet onOpenChange={onOpenChange} open={open}>
@@ -2440,7 +2499,10 @@ function QuickStyleSheet({
 
         <FieldGroup className="px-4">
           <Field>
-            <FieldLabel>画面模板</FieldLabel>
+            <FieldLabel>
+              画面模板
+              <SourceTag dirty={dirty("frameTemplate")} />
+            </FieldLabel>
             <Select
               onValueChange={(value) => onChange({ frameTemplate: value })}
               value={settings.frameTemplate}
@@ -2463,7 +2525,10 @@ function QuickStyleSheet({
           {!isImageSet && (
             <>
               <Field>
-                <FieldLabel>配音引擎</FieldLabel>
+                <FieldLabel>
+                  配音引擎
+                  <SourceTag dirty={dirty("ttsInferenceMode")} />
+                </FieldLabel>
                 <Select
                   onValueChange={(value) =>
                     onChange({
@@ -2487,7 +2552,10 @@ function QuickStyleSheet({
               </Field>
 
               <Field>
-                <FieldLabel htmlFor="quick-style-voice">音色</FieldLabel>
+                <FieldLabel htmlFor="quick-style-voice">
+                  音色
+                  <SourceTag dirty={dirty("ttsVoice")} />
+                </FieldLabel>
                 <Input
                   id="quick-style-voice"
                   onChange={(event) =>
@@ -2503,6 +2571,7 @@ function QuickStyleSheet({
               <Field>
                 <FieldLabel htmlFor="quick-style-speed">
                   语速 · {settings.ttsSpeed.toFixed(1)}x
+                  <SourceTag dirty={dirty("ttsSpeed")} />
                 </FieldLabel>
                 <Slider
                   id="quick-style-speed"
@@ -2517,7 +2586,10 @@ function QuickStyleSheet({
               </Field>
 
               <Field>
-                <FieldLabel>背景音乐</FieldLabel>
+                <FieldLabel>
+                  背景音乐
+                  <SourceTag dirty={dirty("bgmPath")} />
+                </FieldLabel>
                 <Select
                   onValueChange={(value) =>
                     onChange({ bgmPath: value === "__none__" ? "" : value })
@@ -2543,6 +2615,7 @@ function QuickStyleSheet({
               <Field>
                 <FieldLabel htmlFor="quick-style-volume">
                   背景音乐音量 · {Math.round(settings.bgmVolume * 100)}%
+                  <SourceTag dirty={dirty("bgmVolume")} />
                 </FieldLabel>
                 <Slider
                   id="quick-style-volume"
@@ -2557,13 +2630,15 @@ function QuickStyleSheet({
               </Field>
 
               <Field>
-                <FieldLabel>播放方式</FieldLabel>
+                <FieldLabel>
+                  播放方式
+                  <SourceTag dirty={dirty("bgmMode")} />
+                </FieldLabel>
                 <ToggleGroup
                   onValueChange={(value) => {
                     if (value) {
                       onChange({
-                        bgmMode:
-                          value as StandardAdvancedSettings["bgmMode"],
+                        bgmMode: value as StandardAdvancedSettings["bgmMode"],
                       })
                     }
                   }}
@@ -2579,7 +2654,15 @@ function QuickStyleSheet({
           )}
         </FieldGroup>
 
-        <SheetFooter>
+        <SheetFooter className="sm:justify-between">
+          <Button
+            disabled={dirtyKeys.length === 0}
+            onClick={onReset}
+            type="button"
+            variant="outline"
+          >
+            恢复配方默认
+          </Button>
           <Button onClick={() => onOpenChange(false)}>应用本次设置</Button>
         </SheetFooter>
       </SheetContent>
@@ -2680,6 +2763,7 @@ function AssetInput({
   assetIntent,
   assetDuration,
   assetAdvancedSettings,
+  dirtyKeys,
   resources,
   resourcesError,
   onAssetFilesChange,
@@ -2687,6 +2771,7 @@ function AssetInput({
   onAssetIntentChange,
   onAssetDurationChange,
   onAssetAdvancedSettingsChange,
+  onResetAdvancedSettings,
   onBgmUploaded,
 }: {
   assetFiles: File[]
@@ -2695,6 +2780,7 @@ function AssetInput({
   assetIntent: string
   assetDuration: number
   assetAdvancedSettings: AssetAdvancedSettings
+  dirtyKeys: Array<keyof AssetAdvancedSettings>
   resources: GenerationResources
   resourcesError: string | null
   onAssetFilesChange: (files: File[]) => void
@@ -2702,9 +2788,11 @@ function AssetInput({
   onAssetIntentChange: (value: string) => void
   onAssetDurationChange: (value: number) => void
   onAssetAdvancedSettingsChange: (value: AssetAdvancedSettings) => void
+  onResetAdvancedSettings: () => void
   onBgmUploaded: (bgm: ResourceBgm) => void
 }) {
   const bgmPreviewUrl = resourceFileUrl(assetAdvancedSettings.bgmPath)
+  const dirty = (key: keyof AssetAdvancedSettings) => dirtyKeys.includes(key)
 
   function patchAssetAdvanced(patch: Partial<AssetAdvancedSettings>) {
     onAssetAdvancedSettingsChange({ ...assetAdvancedSettings, ...patch })
@@ -2721,9 +2809,7 @@ function AssetInput({
           id="assets"
           onFilesChange={onAssetFilesChange}
         />
-        <FieldDescription>
-          提交时会先上传素材，再开始生成。
-        </FieldDescription>
+        <FieldDescription>提交时会先上传素材，再开始生成。</FieldDescription>
       </Field>
 
       {uploadedAssets.length > 0 && (
@@ -2776,12 +2862,31 @@ function AssetInput({
         id="asset-production-settings"
         title="素材合成设置"
       >
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 p-3">
+          <span className="text-sm text-muted-foreground">
+            {dirtyKeys.length > 0
+              ? `本次覆盖 ${dirtyKeys.length} 项配方默认`
+              : "全部沿用配方默认"}
+          </span>
+          <Button
+            disabled={dirtyKeys.length === 0}
+            onClick={onResetAdvancedSettings}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            恢复配方默认
+          </Button>
+        </div>
           {resourcesError && (
             <InlineError title="资源读取失败" message={resourcesError} />
           )}
           <div className="grid gap-4 lg:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="asset-bgm">背景音乐</FieldLabel>
+            <FieldLabel htmlFor="asset-bgm">
+              背景音乐
+              <SourceTag dirty={dirty("bgmPath")} />
+            </FieldLabel>
               <Select
                 onValueChange={(value) =>
                   patchAssetAdvanced({
@@ -2790,7 +2895,11 @@ function AssetInput({
                 }
                 value={assetAdvancedSettings.bgmPath || "__none__"}
               >
-                <SelectTrigger aria-label="素材背景音乐" className="w-full" id="asset-bgm">
+              <SelectTrigger
+                aria-label="素材背景音乐"
+                className="w-full"
+                id="asset-bgm"
+              >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -2807,7 +2916,10 @@ function AssetInput({
             </Field>
 
             <Field>
-              <FieldLabel htmlFor="asset-bgm-mode">BGM 模式</FieldLabel>
+            <FieldLabel htmlFor="asset-bgm-mode">
+              BGM 模式
+              <SourceTag dirty={dirty("bgmMode")} />
+            </FieldLabel>
               <Select
                 onValueChange={(value) =>
                   patchAssetAdvanced({
@@ -2816,7 +2928,11 @@ function AssetInput({
                 }
                 value={assetAdvancedSettings.bgmMode}
               >
-                <SelectTrigger aria-label="素材背景音乐播放方式" className="w-full" id="asset-bgm-mode">
+              <SelectTrigger
+                aria-label="素材背景音乐播放方式"
+                className="w-full"
+                id="asset-bgm-mode"
+              >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -2836,7 +2952,10 @@ function AssetInput({
             />
 
             <Field>
-              <FieldLabel htmlFor="asset-bgm-volume">BGM 音量</FieldLabel>
+            <FieldLabel htmlFor="asset-bgm-volume">
+              BGM 音量
+              <SourceTag dirty={dirty("bgmVolume")} />
+            </FieldLabel>
               <Input
                 id="asset-bgm-volume"
                 max={1}
@@ -2853,28 +2972,36 @@ function AssetInput({
             </Field>
 
             <Field>
-              <FieldLabel htmlFor="asset-voice">声音</FieldLabel>
+            <FieldLabel htmlFor="asset-voice">
+              声音
+              <SourceTag dirty={dirty("voiceId")} />
+            </FieldLabel>
               <Input
                 id="asset-voice"
                 onChange={(event) =>
                   patchAssetAdvanced({ voiceId: event.target.value })
                 }
+              placeholder="系统默认"
                 value={assetAdvancedSettings.voiceId}
               />
               <FieldDescription>
-                对应旧 Streamlit 素材生成里的 voice 选择；source/provider 继续固定在模板里。
+              对应旧 Streamlit 素材生成里的 voice 选择；source/provider
+              继续固定在模板里。
               </FieldDescription>
             </Field>
 
             <Field>
-              <FieldLabel htmlFor="asset-tts-speed">语速</FieldLabel>
+            <FieldLabel htmlFor="asset-tts-speed">
+              语速
+              <SourceTag dirty={dirty("ttsSpeed")} />
+            </FieldLabel>
               <Input
                 id="asset-tts-speed"
                 max={2}
                 min={0.5}
                 onChange={(event) =>
                   patchAssetAdvanced({
-                    ttsSpeed: Number(event.target.value || 1.2),
+                  ttsSpeed: Number(event.target.value || 1),
                   })
                 }
                 step={0.1}
@@ -2964,8 +3091,7 @@ function StoryboardPreviewPanel({
                     </p>
                     {artifactKind === "video" && (
                       <div className="mt-auto flex items-center gap-1.5 pt-3 text-xs text-muted-foreground">
-                        <Clock3 className="size-3.5" />
-                        约 15 秒
+                        <Clock3 className="size-3.5" />约 15 秒
                       </div>
                     )}
                   </div>
@@ -2983,6 +3109,7 @@ function TaskPanel({
   artifactKind,
   framePreviewUrl,
   isCancellingTask,
+  isSubmitting,
   onCancelTask,
   onRetryResult,
   previewText,
@@ -2996,6 +3123,7 @@ function TaskPanel({
   artifactKind: ArtifactKind
   framePreviewUrl: string | null
   isCancellingTask: boolean
+  isSubmitting: boolean
   onCancelTask: () => void
   onRetryResult: () => void
   previewText: string
@@ -3006,36 +3134,16 @@ function TaskPanel({
   template: ProductionTemplate | null
   taskActionError: string | null
 }) {
-  const toast = useToast()
   const expertMode = useExpertMode()
-  const videoUrl = artifactFileUrl(result?.primary_video)
-  const isImageSet = result?.artifact_type === "image_set"
-  const isText = result?.artifact_type === "text"
-  const articleText =
-    isText && typeof result?.metadata?.article === "string"
-      ? result.metadata.article
-      : ""
-  const imageSetItems =
-    isImageSet && result
-      ? result.artifacts
-          .filter((artifact) => artifact.kind === "image")
-          .map((artifact, index) => ({
-            url: artifactFileUrl(artifact) ?? "",
-            label: imageSetLabel(index, artifact.role),
-          }))
-          .filter((item) => item.url)
-      : []
-  const qualitySummary = buildQualitySummary(
-    result?.metadata?.quality_review as QualityReviewInput | undefined
-  )
-  const progressRuntimeItems = buildProgressRuntimeItems(task?.progress.detail)
-  const assetManifest = result?.metadata?.asset_manifest as
-    AssetManifestInput | undefined
-  const assetItems = buildAssetItems(assetManifest)
-  const assetCount = assetManifest?.assets?.length ?? assetItems.length
+  const run = productionRunViewModel({
+    isSubmitting,
+    result,
+    task,
+    template,
+  })
   const previewScenes = previewStoryboardScenes(previewText, splitMode)
 
-  if (!task && !result) {
+  if (!run) {
     return (
       <StoryboardPreviewPanel
         artifactKind={artifactKind}
@@ -3045,172 +3153,23 @@ function TaskPanel({
     )
   }
 
-  return (
-    <aside className="flex flex-col gap-5 lg:sticky lg:top-5 lg:self-start">
-      <Card className="rounded-lg">
-        <CardHeader className="border-b">
-          <CardTitle>任务状态</CardTitle>
-          <CardDescription>
-            提交后在这里跟踪进度；失败时会显示原因。
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {!task && (
-            <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-              提交后这里会显示生成进度。
-            </div>
-          )}
+  const qualitySummary = buildQualitySummary(
+    result?.metadata?.quality_review as QualityReviewInput | undefined
+  )
+  const assetManifest = result?.metadata?.asset_manifest as
+    AssetManifestInput | undefined
+  const assetItems = buildAssetItems(assetManifest)
+  const assetCount = assetManifest?.assets?.length ?? assetItems.length
+  const artifactDetail =
+    run.artifact?.kind === "text"
+      ? `${run.artifact.article.length} 字`
+      : run.artifact?.kind === "image_set"
+        ? (run.artifact.images[0]?.url ?? "（图集）")
+        : run.artifact?.src
 
-          {task && (
+  const resultDetails =
+    result && run.artifact ? (
             <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between gap-3">
-                <StatusBadge status={task.status} />
-                <div className="flex shrink-0 items-center gap-2">
-                  {expertMode ? (
-                    <Button
-                      aria-label="复制任务 ID"
-                      onClick={() => {
-                        void navigator.clipboard?.writeText(task.task_id)
-                        toast({ title: "任务 ID 已复制", variant: "success" })
-                      }}
-                      size="icon-sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      <Copy />
-                    </Button>
-                  ) : null}
-                  {runStatusIsCancellable(adaptRunStatus(task.status)) && (
-                    <Button
-                      disabled={isCancellingTask}
-                      onClick={onCancelTask}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      {isCancellingTask && <Loader2 className="animate-spin" />}
-                      取消任务
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-lg border bg-muted/30 p-3">
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="font-medium">
-                    {task.progress.message ||
-                      (task.status === "pending"
-                        ? "任务已排队"
-                        : "正在处理任务")}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {Math.round(task.progress.percentage)}%
-                  </span>
-                </div>
-                <Progress className="mt-3" value={task.progress.percentage} />
-                {expertMode && progressRuntimeItems.length > 0 && (
-                  <div className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-2">
-                    {progressRuntimeItems.map((item) => (
-                      <Fact
-                        key={item.label}
-                        label={item.label}
-                        value={item.value}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {task.status === "failed" && task.error && (
-                <InlineError
-                  title="任务失败"
-                  message={`${task.error.message}${
-                    template?.failure_guidance
-                      ? ` ${template.failure_guidance}`
-                      : ""
-                  }`}
-                />
-              )}
-
-              <TechDetails
-                items={[
-                  { label: "任务 ID", value: task.task_id },
-                  { label: "生成链路", value: task.pipeline_id },
-                  { label: "输入类型", value: task.entry },
-                  { label: "当前阶段", value: task.progress.stage },
-                  {
-                    label: "失败层级",
-                    value: task.status === "failed" ? task.error?.layer : null,
-                  },
-                ]}
-              />
-            </div>
-          )}
-
-          {taskActionError && (
-            <InlineError title="任务操作失败" message={taskActionError} />
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-lg">
-        <CardHeader className="border-b">
-          <CardTitle>生成结果</CardTitle>
-          <CardDescription>任务完成后自动展示成片和关键信息。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {!result && !resultFetchError && (
-            <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-              完成后这里会显示成片预览。
-            </div>
-          )}
-
-          {resultFetchError ? (
-            <div className="flex flex-col gap-3">
-              <InlineError
-                message={resultFetchError}
-                title="结果读取失败"
-              />
-              <Button onClick={onRetryResult} type="button" variant="outline">
-                <RefreshCcw data-icon="inline-start" />
-                重新读取结果
-              </Button>
-            </div>
-          ) : null}
-
-          {result && (
-            <div className="flex flex-col gap-4">
-              {isText ? (
-                <TextArticleView
-                  article={articleText}
-                  title={
-                    typeof result.metadata?.title === "string"
-                      ? result.metadata.title
-                      : null
-                  }
-                />
-              ) : isImageSet ? (
-                <ImageSetView
-                  caption={
-                    typeof result.metadata?.caption === "string"
-                      ? result.metadata.caption
-                      : null
-                  }
-                  items={imageSetItems}
-                />
-              ) : videoUrl ? (
-                <video
-                  className="aspect-[9/16] max-h-[520px] rounded-lg border bg-black"
-                  controls
-                  src={videoUrl}
-                />
-              ) : (
-                <InlineError
-                  title="结果视频不可预览"
-                  message="成片已生成，但当前无法在浏览器中预览。"
-                />
-              )}
-
               <Button
                 onClick={() => navigate(`/library?task=${result.task_id}`)}
                 size="lg"
@@ -3264,9 +3223,7 @@ function TaskPanel({
                         key={`${asset.label}-${index}`}
                       >
                         <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-medium">
-                            {asset.label}
-                          </div>
+                    <div className="text-sm font-medium">{asset.label}</div>
                           <Badge
                             variant={
                               asset.statusLabel === "缺失"
@@ -3300,27 +3257,36 @@ function TaskPanel({
               <TechDetails
                 items={[
                   {
-                    label: isText
+              label:
+                run.artifact.kind === "text"
                       ? "长文字数"
-                      : isImageSet
+                  : run.artifact.kind === "image_set"
                         ? "图集封面"
                         : "成片路径",
-                    value: isText
-                      ? `${articleText.length} 字`
-                      : (result.primary_video?.path ??
-                        imageSetItems[0]?.url ??
-                        "（图集）"),
+              value: artifactDetail,
                   },
                 ]}
               />
             </div>
-          )}
-        </CardContent>
-      </Card>
-    </aside>
+    ) : null
+
+  return (
+    <SingleTaskPanel
+      actionError={taskActionError}
+      artifactError={
+        result && !run.artifact
+          ? "产物已经生成，但当前结果没有可用的预览地址或正文。"
+          : null
+      }
+      isCancelling={isCancellingTask}
+      onCancel={onCancelTask}
+      onRetryResult={onRetryResult}
+      resultDetails={resultDetails}
+      resultFetchError={resultFetchError}
+      run={run}
+    />
   )
 }
-
 function previewCopy(
   inputKind: "script" | "topic",
   text: string,
@@ -3338,7 +3304,9 @@ function previewCopy(
   return source.slice(0, 180)
 }
 
-function frameTemplateMediaType(template: string): "static" | "image" | "video" {
+function frameTemplateMediaType(
+  template: string
+): "static" | "image" | "video" {
   const filename = template.split("/").pop() ?? template
   if (filename.startsWith("static_")) {
     return "static"
@@ -3401,7 +3369,9 @@ function BgmUploadControl({
         className="block w-full rounded-lg border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm"
         disabled={isUploading}
         id="bgm-upload"
-        onChange={(event) => void uploadBgm(event.currentTarget.files?.[0] ?? null)}
+        onChange={(event) =>
+          void uploadBgm(event.currentTarget.files?.[0] ?? null)
+        }
         type="file"
       />
       <FieldDescription>
@@ -3413,7 +3383,9 @@ function BgmUploadControl({
           正在上传 BGM
         </div>
       )}
-      {uploadError && <InlineError title="BGM 上传失败" message={uploadError} />}
+      {uploadError && (
+        <InlineError title="BGM 上传失败" message={uploadError} />
+      )}
     </Field>
   )
 }
@@ -3453,18 +3425,6 @@ function normalizeTemplateParamValue(
     return color || "#000000"
   }
   return String(value ?? "")
-}
-
-function sameTemplateParams(
-  left: Record<string, TemplateParamValue>,
-  right: Record<string, TemplateParamValue>
-) {
-  const leftEntries = Object.entries(left)
-  const rightEntries = Object.entries(right)
-  if (leftEntries.length !== rightEntries.length) {
-    return false
-  }
-  return leftEntries.every(([key, value]) => right[key] === value)
 }
 
 function formatTemplateParamDefault(value: unknown) {
@@ -3508,7 +3468,9 @@ function BatchScriptInput({
       </Field>
       {items.length > 0 ? (
         <div className="rounded-lg border bg-muted/30 p-3">
-          <div className="text-sm font-medium">解析预览 · {items.length} 条</div>
+          <div className="text-sm font-medium">
+            解析预览 · {items.length} 条
+          </div>
           <div className="mt-2 flex flex-col gap-1.5">
             {items.map((item, index) => {
               const itemTitle = getBatchPreviewTitle(item.input, index)
@@ -3559,62 +3521,23 @@ function buildStandardTemplateInput({
   template,
   script,
   topic,
-  advancedSettings,
-  longFormOverrides,
+  standardDraft,
+  longFormDraft,
 }: {
   template: ProductionTemplate
   script: string
   topic: string
-  advancedSettings: StandardAdvancedSettings
-  longFormOverrides: Partial<LongFormAdvancedSettings>
+  standardDraft: GenerationDraft<StandardAdvancedSettings>
+  longFormDraft: GenerationDraft<LongFormAdvancedSettings>
 }) {
   const baseInput = template.input_requirements.includes("topic")
     ? { topic }
     : { script }
-
-  return compactRecord({
+  return {
     ...baseInput,
-    title: advancedSettings.title.trim(),
-    n_scenes: template.input_requirements.includes("topic")
-      ? advancedSettings.nScenes
-      : undefined,
-    split_mode: template.input_requirements.includes("script")
-      ? advancedSettings.splitMode
-      : undefined,
-    frame_template: advancedSettings.frameTemplate,
-    template_params:
-      Object.keys(advancedSettings.templateParams).length > 0
-        ? advancedSettings.templateParams
-        : undefined,
-    media_workflow: advancedSettings.mediaWorkflow,
-    media_width: advancedSettings.mediaWidth,
-    media_height: advancedSettings.mediaHeight,
-    prompt_prefix: advancedSettings.promptPrefix.trim(),
-    image_prompt_visual_context:
-      advancedSettings.imagePromptVisualContext.trim(),
-    image_prompt_generation_rules:
-      advancedSettings.imagePromptGenerationRules.trim(),
-    bgm_path: advancedSettings.bgmPath,
-    bgm_volume: advancedSettings.bgmVolume,
-    bgm_mode: advancedSettings.bgmMode,
-    tts_inference_mode: advancedSettings.ttsInferenceMode,
-    tts_voice: advancedSettings.ttsVoice.trim(),
-    tts_workflow: advancedSettings.ttsWorkflow,
-    tts_speed: advancedSettings.ttsSpeed,
-    word_count: longFormOverrides.wordCount,
-    long_form_prompt: longFormOverrides.longFormPrompt?.trim(),
-    llm_model: longFormOverrides.llmModel?.trim(),
-    ref_audio:
-      advancedSettings.ttsInferenceMode === "comfyui"
-        ? advancedSettings.ttsRefAudioPath
-        : undefined,
-  })
-}
-
-function compactRecord(record: Record<string, unknown>) {
-  return Object.fromEntries(
-    Object.entries(record).filter(([, value]) => value !== "" && value != null)
-  )
+    ...standardOverridesToInput(template, standardDraft.overrides),
+    ...longFormOverridesToInput(template, longFormDraft.overrides),
+  }
 }
 
 function productionTemplateLabel(
@@ -3628,7 +3551,9 @@ function productionTemplateLabel(
     "name" in metadataTemplate
   ) {
     const name = String((metadataTemplate as { name?: unknown }).name ?? "")
-    const version = String((metadataTemplate as { version?: unknown }).version ?? "")
+    const version = String(
+      (metadataTemplate as { version?: unknown }).version ?? ""
+    )
     return [name, version].filter(Boolean).join(" · ") || "未返回"
   }
 

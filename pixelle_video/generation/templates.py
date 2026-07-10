@@ -141,7 +141,14 @@ class ProductionTemplateRegistry:
             if key not in input:
                 continue
             value = input[key]
-            if value is None or value == "":
+            # Per-run override contract: omitted means inherit the recipe;
+            # explicit null removes an inherited value and lets the runtime use
+            # its own default. Empty strings from older clients keep the legacy
+            # "not provided" behavior.
+            if value is None:
+                params.pop(key, None)
+                continue
+            if value == "":
                 continue
             params[key] = value
 
