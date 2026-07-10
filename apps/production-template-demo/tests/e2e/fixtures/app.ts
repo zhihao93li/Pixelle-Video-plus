@@ -2,6 +2,20 @@ import { expect, type Page } from "playwright/test"
 
 export type TestTheme = "light" | "dark"
 
+export type SeededRunState =
+  | "idle"
+  | "uploading"
+  | "submitting"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelling"
+  | "cancelled"
+  | "interrupted"
+
+export type SeededTrackedTask = ReturnType<typeof trackedTaskForState>
+
 export const PRIMARY_ROUTES = [
   { label: "工作台", path: "/board" },
   { label: "快速生产", path: "/create" },
@@ -18,16 +32,63 @@ export const VIEWPORTS = [
   { name: "320x568", width: 320, height: 568 },
 ] as const
 
-export async function preparePage(page: Page, theme: TestTheme = "light") {
+export async function preparePage(
+  page: Page,
+  theme: TestTheme = "light",
+  options: { trackedTasks?: SeededTrackedTask[] } = {}
+) {
   await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
   await page.addInitScript(
-    ({ selectedTheme }) => {
+    ({ selectedTheme, trackedTasks }) => {
       window.localStorage.setItem("pixelle-theme", selectedTheme)
       window.localStorage.setItem("pixelle.currentProjectId", "project-1")
-      window.localStorage.setItem("pixelle-task-center-v1", "[]")
+      window.localStorage.setItem(
+        "pixelle-task-center-v1",
+        JSON.stringify(trackedTasks)
+      )
     },
-    { selectedTheme: theme }
+    { selectedTheme: theme, trackedTasks: options.trackedTasks ?? [] }
   )
+}
+
+export function trackedTaskForState(state: SeededRunState) {
+  const percentage =
+    state === "completed"
+      ? 100
+      : state === "failed" || state === "cancelled" || state === "interrupted"
+        ? 62
+        : state === "idle"
+          ? 0
+          : 38
+  return {
+    task: {
+      task_id: `run-${state}`,
+      pipeline_id: "standard",
+      entry: "script",
+      status: state,
+      progress: {
+        stage: state,
+        percentage,
+        message: `当前状态：${state}`,
+        current: null,
+        total: null,
+        detail: {},
+      },
+      error:
+        state === "failed" || state === "interrupted"
+          ? {
+              layer: "runtime",
+              message: "用于界面状态验收的故障信息。",
+              exception_type: "FixtureError",
+              detail: {},
+            }
+          : null,
+      created_at: "2026-07-11T08:00:00Z",
+      updated_at: "2026-07-11T08:01:00Z",
+    },
+    templateName: `状态验收·${state}`,
+    submittedAt: "2026-07-11T08:00:00Z",
+  }
 }
 
 export async function visitRoute(page: Page, path: string, heading: string) {

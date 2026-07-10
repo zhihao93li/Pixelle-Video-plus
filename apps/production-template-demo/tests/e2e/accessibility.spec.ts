@@ -1,19 +1,19 @@
 import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page } from "playwright/test"
 
-import {
-  preparePage,
-  PRIMARY_ROUTES,
-  type TestTheme,
-  visitRoute,
-} from "./fixtures/app"
+import { preparePage, type TestTheme, visitRoute } from "./fixtures/app"
 import { installApiFixtures } from "./fixtures/api"
+import { FORMAL_SURFACES } from "./fixtures/surfaces"
 
 type SeriousViolation = {
   help: string
   id: string
   impact: string | null | undefined
-  nodes: string[]
+  nodes: Array<{
+    failureSummary: string | undefined
+    html: string
+    target: string
+  }>
   route: string
 }
 
@@ -30,7 +30,11 @@ async function seriousViolations(page: Page, route: string) {
       help: violation.help,
       id: violation.id,
       impact: violation.impact,
-      nodes: violation.nodes.map((node) => node.target.join(" ")),
+      nodes: violation.nodes.map((node) => ({
+        failureSummary: node.failureSummary,
+        html: node.html,
+        target: node.target.join(" "),
+      })),
       route,
     }))
 }
@@ -49,9 +53,10 @@ for (const scenario of [
     theme: "dark" as TestTheme,
   },
 ]) {
-  test(`${scenario.name} 主路由无 serious/critical axe 问题`, async ({
+  test(`${scenario.name} 全部正式 surface 无 serious/critical axe 问题`, async ({
     page,
   }) => {
+    test.setTimeout(90_000)
     await page.setViewportSize({
       width: scenario.width,
       height: scenario.height,
@@ -60,8 +65,8 @@ for (const scenario of [
     await preparePage(page, scenario.theme)
     const violations: SeriousViolation[] = []
 
-    for (const route of PRIMARY_ROUTES) {
-      await visitRoute(page, route.path, route.label)
+    for (const route of FORMAL_SURFACES) {
+      await visitRoute(page, route.path, route.heading)
       violations.push(...(await seriousViolations(page, route.path)))
     }
 

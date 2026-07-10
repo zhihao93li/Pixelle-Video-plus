@@ -6,11 +6,10 @@ import {
   productionStartRoute,
   productionSubmissionSummary,
 } from "../src/lib/productionSurface.ts"
+import { resolveGenerateTemplate } from "../src/lib/productionTemplateResolution.ts"
 import { frameTemplateLabel } from "../src/lib/templateLabels.ts"
 
-function template(
-  patch: Partial<ProductionTemplate> = {}
-): ProductionTemplate {
+function template(patch: Partial<ProductionTemplate> = {}): ProductionTemplate {
   return {
     id: "template-standard",
     version: "1",
@@ -88,12 +87,46 @@ test("only compatible script recipes advertise batch submission", () => {
 })
 
 test("frame template labels do not expose storage-like keys", () => {
-  assert.equal(
-    frameTemplateLabel("1080x1920/image_default.html"),
-    "经典留白"
-  )
+  assert.equal(frameTemplateLabel("1080x1920/image_default.html"), "经典留白")
   assert.equal(
     frameTemplateLabel("1920x1080/image_wide_darktech.html"),
     "暗黑科技"
   )
+})
+
+test("explicit generate recipe identities never fall back", () => {
+  const standard = template({ id: "standard-default" })
+
+  assert.deepEqual(
+    resolveGenerateTemplate([standard], "missing-recipe", standard.id),
+    {
+      ok: false,
+      error: "指定配方不存在或当前项目无权使用，请返回快速生产重新选择。",
+    }
+  )
+  assert.equal(
+    resolveGenerateTemplate(
+      [standard, template({ id: "disabled", enabled: false })],
+      "disabled",
+      standard.id
+    ).ok,
+    false
+  )
+  assert.equal(
+    resolveGenerateTemplate(
+      [standard, template({ id: "special", product_entry: "image_to_video" })],
+      "special",
+      standard.id
+    ).ok,
+    false
+  )
+})
+
+test("route without a recipe uses only the backend default", () => {
+  const standard = template({ id: "standard-default" })
+  const selected = resolveGenerateTemplate([standard], undefined, standard.id)
+
+  assert.equal(selected.ok, true)
+  assert.equal(selected.ok ? selected.template.id : null, standard.id)
+  assert.equal(resolveGenerateTemplate([standard], undefined, null).ok, false)
 })
