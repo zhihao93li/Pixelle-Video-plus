@@ -29,7 +29,13 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/components/ui/toast"
-import { Fact, InlineError, TechDetails } from "@/components/shared/feedback"
+import {
+  Fact,
+  InlineError,
+  QualityBadge,
+  QualityMessages,
+  TechDetails,
+} from "@/components/shared/feedback"
 import { StatusBadge } from "@/components/shared/StatusBadge"
 import {
   formatBytes,
@@ -110,11 +116,15 @@ import { useCurrentProject } from "@/lib/currentProject"
 import { useLocalStorageState } from "@/lib/useLocalStorageState"
 import { frameTemplateLabel } from "@/lib/templateLabels"
 import {
+  adaptRunStatus,
   createGenerationDraft,
   resolveGenerationDraft,
+  runStatusIsActive,
+  runStatusIsCancellable,
   updateGenerationDraft,
   type GenerationDraft,
 } from "@/lib/productViewModels"
+import { resolveGenerateTemplate } from "@/lib/productionTemplateResolution"
 import {
   apiResourceUrl,
   artifactFileUrl,
@@ -125,7 +135,6 @@ import {
   generateMediaPreview,
   getFrameTemplateParams,
   getTaskResult,
-  isTerminalStatus,
   listResourceBgm,
   listResourceMediaWorkflows,
   listResourceTemplates,
@@ -157,7 +166,6 @@ import {
 } from "@/lib/resultSummary"
 import { cn } from "@/lib/utils"
 
-const STANDARD_TEMPLATE_ID = "pipeline_standard_base_v1"
 const sampleScript =
   "母猫配完以后还一直叫，不一定说明没有配上。发情期的激素变化不会马上停止，所以它可能还会持续叫几天。真正判断有没有配上，要看后续有没有再次发情、精神食欲是否正常，以及是否需要在合适时间做检查。"
 const sampleTopic = "猫咪夏天饮水少，主人应该怎么判断和处理"
@@ -385,11 +393,16 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   const [templatesError, setTemplatesError] = useState<string | null>(null)
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
   const [template, setTemplate] = useState<ProductionTemplate | null>(null)
+  const { projectId } = useCurrentProject()
+  const draftScope = projectId ?? "unscoped"
   const [script, setScript] = useLocalStorageState(
-    "pixelle-draft-script",
+    `pixelle-draft-script:${draftScope}`,
     ""
   )
-  const [topic, setTopic] = useLocalStorageState("pixelle-draft-topic", "")
+  const [topic, setTopic] = useLocalStorageState(
+    `pixelle-draft-topic:${draftScope}`,
+    ""
+  )
   const [advancedSettings, setAdvancedSettings] =
     useState<StandardAdvancedSettings>(defaultAdvancedSettings)
   const [resources, setResources] =
@@ -413,6 +426,8 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCancellingTask, setIsCancellingTask] = useState(false)
   const [taskActionError, setTaskActionError] = useState<string | null>(null)
+  const [resultFetchError, setResultFetchError] = useState<string | null>(null)
+  const [resultReloadToken, setResultReloadToken] = useState(0)
   // 批量提交模式（本页内存态，不持久化）
   const [batchMode, setBatchMode] = useState(false)
   const [batchText, setBatchText] = useState("")
@@ -424,8 +439,6 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   } = useBatchPolling()
   const taskCenter = useTaskCenter()
   const toast = useToast()
-  const { projectId } = useCurrentProject()
-
   const task = currentTaskId
     ? (taskCenter.getTask(currentTaskId)?.task ?? null)
     : null
@@ -435,19 +448,22 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   const trimmedAssetTitle = assetTitle.trim()
   const trimmedAssetIntent = assetIntent.trim()
   const templateNeedsAssets = Boolean(
-    template?.requires_user_assets || template?.input_requirements.includes("assets")
+    template?.requires_user_assets ||
+    template?.input_requirements.includes("assets")
   )
-  const templateNeedsTopic = Boolean(template?.input_requirements.includes("topic"))
+  const templateNeedsTopic = Boolean(
+    template?.input_requirements.includes("topic")
+  )
   // 非视频产线（图文线 / 长文线）：无配音/画面/合成视频，隐藏视频专属输入与承诺文案
   const isNonVideo = isNonVideoPipeline(template?.pipeline_id)
   const nonVideoArtifact = templateArtifactType(template?.pipeline_id)
   // 批量是「任何 script 入口配方生成页的一种提交模式」——topic/assets 入口不支持
   const canBatch = Boolean(
     template &&
-      template.product_entry === "generate" &&
-      template.input_requirements.includes("script") &&
-      !templateNeedsAssets &&
-      !templateNeedsTopic
+    template.product_entry === "generate" &&
+    template.input_requirements.includes("script") &&
+    !templateNeedsAssets &&
+    !templateNeedsTopic
   )
   const inBatch = batchMode && canBatch
   const batchItems = useMemo(
@@ -493,22 +509,25 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
         : "视频"
   const templateCanSubmit = Boolean(
     template &&
-      template.enabled &&
-      ((template.input_requirements.includes("script") && !template.requires_user_assets) ||
-        template.input_requirements.includes("topic") ||
-        template.input_requirements.includes("assets"))
+    template.enabled &&
+    ((template.input_requirements.includes("script") &&
+      !template.requires_user_assets) ||
+      template.input_requirements.includes("topic") ||
+      template.input_requirements.includes("assets"))
   )
   const hasRequiredTemplateInput = templateNeedsAssets
     ? assetFiles.length > 0
     : templateNeedsTopic
       ? trimmedTopic.length > 0
-    : trimmedScript.length > 0
+      : trimmedScript.length > 0
+  const adaptedTaskState = adaptRunStatus(task?.status)
+  const hasActiveTask = task ? runStatusIsActive(adaptedTaskState) : false
   const canSubmit =
     loadState === "ready" &&
     templateCanSubmit &&
     hasRequiredTemplateInput &&
     !isSubmitting &&
-    !(task && !isTerminalStatus(task.status))
+    !hasActiveTask
   const submitDisabledReason = canSubmit
     ? null
     : isSubmitting
@@ -517,7 +536,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
         ? "正在读取可用模板"
         : !templateCanSubmit
           ? "当前模板暂不支持在此页提交"
-          : task && !isTerminalStatus(task.status)
+          : hasActiveTask
             ? "有任务正在生成中，完成后可再次提交"
             : templateNeedsAssets
               ? "请先选择素材文件"
@@ -538,19 +557,20 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
           return
         }
 
-        const defaultId =
-          templateId || response.default_template || STANDARD_TEMPLATE_ID
-        const selected =
-          response.templates.find((item) => item.id === defaultId) ??
-          response.templates.find((item) => item.id === STANDARD_TEMPLATE_ID) ??
-          null
-
-        if (!selected) {
+        const resolution = resolveGenerateTemplate(
+          response.templates,
+          templateId,
+          response.default_template
+        )
+        if (!resolution.ok) {
+          setTemplates(response.templates)
+          setTemplate(null)
           setLoadState("error")
-          setTemplatesError("没有找到可用的默认生成模板。")
+          setTemplatesError(resolution.error)
           return
         }
 
+        const selected = resolution.template
         setTemplates(response.templates)
         setTemplate(selected)
         setLongFormDraft(longFormDraftForTemplate(selected))
@@ -625,7 +645,11 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
 
   // 轮询与终态通知由全局任务中心负责；这里只在完成后拉取结果。
   useEffect(() => {
-    if (!task || task.status !== "completed" || result?.task_id === task.task_id) {
+    if (
+      !task ||
+      task.status !== "completed" ||
+      result?.task_id === task.task_id
+    ) {
       return
     }
 
@@ -636,10 +660,11 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
         const taskResult = await getTaskResult(completedTaskId)
         if (!cancelled) {
           setResult(taskResult)
+          setResultFetchError(null)
         }
       } catch (error) {
         if (!cancelled) {
-          setTaskActionError(readableError(error))
+          setResultFetchError(readableError(error))
         }
       }
     }
@@ -649,7 +674,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
     return () => {
       cancelled = true
     }
-  }, [task, result?.task_id])
+  }, [result?.task_id, resultReloadToken, task])
 
   async function submitTask() {
     if (!template || !canSubmit) {
@@ -659,6 +684,7 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
     setIsSubmitting(true)
     setSubmitError(null)
     setTaskActionError(null)
+    setResultFetchError(null)
     setCurrentTaskId(null)
     setResult(null)
 
@@ -751,7 +777,11 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   }
 
   async function cancelCurrentTask() {
-    if (!task || isTerminalStatus(task.status) || isCancellingTask) {
+    if (
+      !task ||
+      !runStatusIsCancellable(adaptRunStatus(task.status)) ||
+      isCancellingTask
+    ) {
       return
     }
 
@@ -808,73 +838,77 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
               templates={templates}
             />
           </div>
-          <div className="hidden shrink-0 lg:block">
-            <GenerationSubmitControl
-              batchCount={batchItems.length}
-              batchMeasureWord={batchMeasureWord}
-              batchOutputNoun={batchOutputNoun}
-              canSubmit={canSubmit}
-              inBatch={inBatch}
-              isSubmitting={isSubmitting}
-              onSubmitBatch={submitBatch}
-              onSubmitTask={submitTask}
-              submitDisabledReason={submitDisabledReason}
-              templateNeedsAssets={templateNeedsAssets}
-            />
-          </div>
+          {loadState === "ready" && template ? (
+            <div className="hidden shrink-0 lg:block">
+              <GenerationSubmitControl
+                batchCount={batchItems.length}
+                batchMeasureWord={batchMeasureWord}
+                batchOutputNoun={batchOutputNoun}
+                canSubmit={canSubmit}
+                inBatch={inBatch}
+                isSubmitting={isSubmitting}
+                onSubmitBatch={submitBatch}
+                onSubmitTask={submitTask}
+                submitDisabledReason={submitDisabledReason}
+                templateNeedsAssets={templateNeedsAssets}
+              />
+            </div>
+          ) : null}
         </div>
 
-        <main className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(380px,0.72fr)] lg:gap-5">
-            <section className="flex min-w-0 flex-col gap-5">
-              <Card className="min-h-[640px] rounded-lg">
-                <CardHeader className="border-b">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <CardTitle>
-                        {templateNeedsAssets
-                          ? "上传素材"
-                          : templateNeedsTopic
-                            ? "输入选题"
-                            : "填入文案"}
-                      </CardTitle>
-                      <CardDescription>
-                        {templateNeedsAssets
-                          ? "上传你的照片或视频，AI 会围绕它们组织旁白和镜头。"
-                          : templateNeedsTopic
-                            ? "只需一个选题，AI 会自动撰写文案并完成配音、画面和合成。"
-                            : nonVideoArtifact === "text"
-                              ? "文案将扩写成结构化长文，不配音、不合成视频。"
-                              : nonVideoArtifact === "image_set"
-                                ? "文案将逐行排版成图集，不配音、不合成视频。"
-                                : "文案不会被改写，将按原文进行拆分、配音、配画面并合成视频。"}
-                      </CardDescription>
-                    </div>
-                    {canBatch && (
-                      <ToggleGroup
-                        onValueChange={(value) => {
-                          if (value) {
-                            setBatchMode(value === "batch")
-                          }
-                        }}
-                        type="single"
-                        value={inBatch ? "batch" : "single"}
-                        variant="outline"
-                      >
-                        <ToggleGroupItem value="single">单条</ToggleGroupItem>
-                        <ToggleGroupItem value="batch">批量</ToggleGroupItem>
-                      </ToggleGroup>
-                    )}
+        {loadState === "ready" && template ? (
+          <>
+            <main className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(380px,0.72fr)] lg:gap-5">
+          <section className="flex min-w-0 flex-col gap-5">
+            <Card className="min-h-[640px] rounded-lg">
+              <CardHeader className="border-b">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <CardTitle>
+                      {templateNeedsAssets
+                        ? "上传素材"
+                        : templateNeedsTopic
+                          ? "输入选题"
+                          : "填入文案"}
+                    </CardTitle>
+                    <CardDescription>
+                      {templateNeedsAssets
+                        ? "上传你的照片或视频，AI 会围绕它们组织旁白和镜头。"
+                        : templateNeedsTopic
+                          ? "只需一个选题，AI 会自动撰写文案并完成配音、画面和合成。"
+                          : nonVideoArtifact === "text"
+                            ? "文案将扩写成结构化长文，不配音、不合成视频。"
+                            : nonVideoArtifact === "image_set"
+                              ? "文案将逐行排版成图集，不配音、不合成视频。"
+                              : "文案不会被改写，将按原文进行拆分、配音、配画面并合成视频。"}
+                    </CardDescription>
                   </div>
-                </CardHeader>
-                <CardContent>
-                  {!templateCanSubmit && loadState === "ready" && (
-                    <InlineError
-                      title="当前模板暂不支持在此页提交"
-                      message="请更换一个可用模板，或前往对应的专用入口。"
-                    />
+                  {canBatch && (
+                    <ToggleGroup
+                      onValueChange={(value) => {
+                        if (value) {
+                          setBatchMode(value === "batch")
+                        }
+                      }}
+                      type="single"
+                      value={inBatch ? "batch" : "single"}
+                      variant="outline"
+                    >
+                      <ToggleGroupItem value="single">单条</ToggleGroupItem>
+                      <ToggleGroupItem value="batch">批量</ToggleGroupItem>
+                    </ToggleGroup>
                   )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {!templateCanSubmit && loadState === "ready" && (
+                  <InlineError
+                    title="当前模板暂不支持在此页提交"
+                    message="请更换一个可用模板，或前往对应的专用入口。"
+                  />
+                )}
 
-                  <div className="mt-5">
+                <div className="mt-5">
                   {templateNeedsAssets ? (
                     <AssetInput
                       assetAdvancedSettings={assetAdvancedSettings}
@@ -940,59 +974,64 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                       text={script}
                     />
                   )}
-                  </div>
+                </div>
 
-                  {submitError && (
-                    <InlineError title="提交失败" message={submitError} />
-                  )}
-                </CardContent>
-              </Card>
+                {submitError && (
+                  <InlineError title="提交失败" message={submitError} />
+                )}
+              </CardContent>
+            </Card>
 
-              {inBatch && submittedBatch && (
-                <BatchStatusCard
-                  artifactLabel={artifactKindLabel(nonVideoArtifact)}
-                  batch={submittedBatch}
-                  onRetryItem={retryBatchItem}
-                  retryingItemIndex={retryingBatchIndex}
-                />
-              )}
-            </section>
-
-            {inBatch ? (
-              <aside className="flex min-w-0 flex-col gap-5">
-                <Card className="rounded-lg">
-                  <CardHeader className="border-b">
-                    <CardTitle>批量提交</CardTitle>
-                    <CardDescription>
-                      每条一个任务，共享上方的画面/声音等设置；提交后进度显示在左侧与「任务」页。
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-sm text-muted-foreground">
-                      {batchItems.length > 0
-                        ? `已解析 ${batchItems.length} ${batchMeasureWord}`
-                        : "在左侧粘贴多条内容开始批量。"}
-                    </div>
-                  </CardContent>
-                </Card>
-              </aside>
-            ) : (
-              <TaskPanel
-                artifactKind={nonVideoArtifact}
-                framePreviewUrl={selectedFramePreviewUrl}
-                isCancellingTask={isCancellingTask}
-                onCancelTask={cancelCurrentTask}
-                previewText={previewSourceText}
-                result={result}
-                splitMode={advancedSettings.splitMode}
-                task={task}
-                taskActionError={taskActionError}
-                template={template}
+            {inBatch && submittedBatch && (
+              <BatchStatusCard
+                artifactLabel={artifactKindLabel(nonVideoArtifact)}
+                batch={submittedBatch}
+                onRetryItem={retryBatchItem}
+                retryingItemIndex={retryingBatchIndex}
               />
             )}
-          </main>
+          </section>
 
-        <div className="sticky bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-20 mt-4 border-t bg-background/95 px-1 py-3 backdrop-blur lg:hidden">
+          {inBatch ? (
+            <aside className="flex min-w-0 flex-col gap-5">
+              <Card className="rounded-lg">
+                <CardHeader className="border-b">
+                  <CardTitle>批量提交</CardTitle>
+                  <CardDescription>
+                    每条一个任务，共享上方的画面/声音等设置；提交后进度显示在左侧与「任务」页。
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-sm text-muted-foreground">
+                    {batchItems.length > 0
+                      ? `已解析 ${batchItems.length} ${batchMeasureWord}`
+                      : "在左侧粘贴多条内容开始批量。"}
+                  </div>
+                </CardContent>
+              </Card>
+            </aside>
+          ) : (
+            <TaskPanel
+              artifactKind={nonVideoArtifact}
+              framePreviewUrl={selectedFramePreviewUrl}
+              isCancellingTask={isCancellingTask}
+              onCancelTask={cancelCurrentTask}
+              onRetryResult={() => {
+                setResultFetchError(null)
+                setResultReloadToken((value) => value + 1)
+              }}
+              previewText={previewSourceText}
+              result={result}
+              resultFetchError={resultFetchError}
+              splitMode={advancedSettings.splitMode}
+              task={task}
+              taskActionError={taskActionError}
+              template={template}
+            />
+          )}
+            </main>
+
+            <div className="sticky bottom-[calc(4.25rem+var(--safe-area-bottom))] z-20 mt-4 border-t bg-background/95 px-1 py-3 backdrop-blur lg:hidden">
           <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
             <span className="truncate">{overrideSummary}</span>
             <span className="shrink-0">
@@ -1012,7 +1051,9 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
             submitDisabledReason={submitDisabledReason}
             templateNeedsAssets={templateNeedsAssets}
           />
-        </div>
+            </div>
+          </>
+        ) : null}
       </div>
     </TooltipProvider>
   )
@@ -1144,10 +1185,15 @@ function TemplateSummaryBar({
     return (
       <div className="flex flex-col gap-3">
         <InlineError title="配方读取失败" message={error || "未知错误"} />
-        <Button onClick={onReload} variant="outline">
-          <RefreshCcw data-icon="inline-start" />
-          重试
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={onReload} variant="outline">
+            <RefreshCcw data-icon="inline-start" />
+            重试
+          </Button>
+          <Button onClick={() => navigate("/create")} variant="ghost">
+            返回快速生产
+          </Button>
+        </div>
       </div>
     )
   }
@@ -2938,9 +2984,11 @@ function TaskPanel({
   framePreviewUrl,
   isCancellingTask,
   onCancelTask,
+  onRetryResult,
   previewText,
   task,
   result,
+  resultFetchError,
   splitMode,
   template,
   taskActionError,
@@ -2949,14 +2997,17 @@ function TaskPanel({
   framePreviewUrl: string | null
   isCancellingTask: boolean
   onCancelTask: () => void
+  onRetryResult: () => void
   previewText: string
   task: GenerationTask | null
   result: GenerationResult | null
+  resultFetchError: string | null
   splitMode: StandardAdvancedSettings["splitMode"]
   template: ProductionTemplate | null
   taskActionError: string | null
 }) {
   const toast = useToast()
+  const expertMode = useExpertMode()
   const videoUrl = artifactFileUrl(result?.primary_video)
   const isImageSet = result?.artifact_type === "image_set"
   const isText = result?.artifact_type === "text"
@@ -2978,8 +3029,8 @@ function TaskPanel({
     result?.metadata?.quality_review as QualityReviewInput | undefined
   )
   const progressRuntimeItems = buildProgressRuntimeItems(task?.progress.detail)
-  const assetManifest = result?.metadata
-    ?.asset_manifest as AssetManifestInput | undefined
+  const assetManifest = result?.metadata?.asset_manifest as
+    AssetManifestInput | undefined
   const assetItems = buildAssetItems(assetManifest)
   const assetCount = assetManifest?.assets?.length ?? assetItems.length
   const previewScenes = previewStoryboardScenes(previewText, splitMode)
@@ -3015,19 +3066,21 @@ function TaskPanel({
               <div className="flex items-center justify-between gap-3">
                 <StatusBadge status={task.status} />
                 <div className="flex shrink-0 items-center gap-2">
-                  <Button
-                    aria-label="复制任务 ID"
-                    onClick={() => {
-                      void navigator.clipboard?.writeText(task.task_id)
-                      toast({ title: "任务 ID 已复制", variant: "success" })
-                    }}
-                    size="icon-sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <Copy />
-                  </Button>
-                  {!isTerminalStatus(task.status) && (
+                  {expertMode ? (
+                    <Button
+                      aria-label="复制任务 ID"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(task.task_id)
+                        toast({ title: "任务 ID 已复制", variant: "success" })
+                      }}
+                      size="icon-sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Copy />
+                    </Button>
+                  ) : null}
+                  {runStatusIsCancellable(adaptRunStatus(task.status)) && (
                     <Button
                       disabled={isCancellingTask}
                       onClick={onCancelTask}
@@ -3045,17 +3098,24 @@ function TaskPanel({
               <div className="rounded-lg border bg-muted/30 p-3">
                 <div className="flex items-center justify-between gap-3 text-sm">
                   <span className="font-medium">
-                    {task.progress.message || task.progress.stage}
+                    {task.progress.message ||
+                      (task.status === "pending"
+                        ? "任务已排队"
+                        : "正在处理任务")}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {Math.round(task.progress.percentage)}%
                   </span>
                 </div>
                 <Progress className="mt-3" value={task.progress.percentage} />
-                {progressRuntimeItems.length > 0 && (
+                {expertMode && progressRuntimeItems.length > 0 && (
                   <div className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-2">
                     {progressRuntimeItems.map((item) => (
-                      <Fact key={item.label} label={item.label} value={item.value} />
+                      <Fact
+                        key={item.label}
+                        label={item.label}
+                        value={item.value}
+                      />
                     ))}
                   </div>
                 )}
@@ -3096,16 +3156,27 @@ function TaskPanel({
       <Card className="rounded-lg">
         <CardHeader className="border-b">
           <CardTitle>生成结果</CardTitle>
-          <CardDescription>
-            任务完成后自动展示成片和关键信息。
-          </CardDescription>
+          <CardDescription>任务完成后自动展示成片和关键信息。</CardDescription>
         </CardHeader>
         <CardContent>
-          {!result && (
+          {!result && !resultFetchError && (
             <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
               完成后这里会显示成片预览。
             </div>
           )}
+
+          {resultFetchError ? (
+            <div className="flex flex-col gap-3">
+              <InlineError
+                message={resultFetchError}
+                title="结果读取失败"
+              />
+              <Button onClick={onRetryResult} type="button" variant="outline">
+                <RefreshCcw data-icon="inline-start" />
+                重新读取结果
+              </Button>
+            </div>
+          ) : null}
 
           {result && (
             <div className="flex flex-col gap-4">
@@ -3155,10 +3226,7 @@ function TaskPanel({
                 />
                 <Fact label="时长" value={formatDuration(result.duration)} />
                 <Fact label="文件大小" value={formatBytes(result.file_size)} />
-                <Fact
-                  label="发布判断"
-                  value={qualitySummary.label}
-                />
+                <Fact label="发布判断" value={qualitySummary.label} />
                 <Fact
                   label="素材记录"
                   value={assetCount ? `${assetCount} 项` : "未返回"}
@@ -3170,7 +3238,7 @@ function TaskPanel({
               <div className="rounded-lg border bg-background p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-sm font-medium">质量检查</div>
-                  <QualityBadge tone={qualitySummary.tone} label={qualitySummary.label} />
+                  <QualityBadge summary={qualitySummary} />
                 </div>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
                   {qualitySummary.summary}
@@ -3196,7 +3264,9 @@ function TaskPanel({
                         key={`${asset.label}-${index}`}
                       >
                         <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-medium">{asset.label}</div>
+                          <div className="text-sm font-medium">
+                            {asset.label}
+                          </div>
                           <Badge
                             variant={
                               asset.statusLabel === "缺失"
@@ -3210,9 +3280,11 @@ function TaskPanel({
                         <div className="mt-1 text-xs text-muted-foreground">
                           {asset.kind}
                         </div>
-                        <div className="mt-2 line-clamp-2 break-all font-mono text-xs text-muted-foreground">
-                          {asset.detail}
-                        </div>
+                        {expertMode ? (
+                          <div className="mt-2 line-clamp-2 font-mono text-xs break-all text-muted-foreground">
+                            {asset.detail}
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -3544,58 +3616,6 @@ function compactRecord(record: Record<string, unknown>) {
     Object.entries(record).filter(([, value]) => value !== "" && value != null)
   )
 }
-
-function QualityBadge({
-  tone,
-  label,
-}: {
-  tone: ReturnType<typeof buildQualitySummary>["tone"]
-  label: string
-}) {
-  if (tone === "failed") {
-    return <Badge variant="destructive">{label}</Badge>
-  }
-  if (tone === "warning" || tone === "missing") {
-    return <Badge variant="outline">{label}</Badge>
-  }
-  return <Badge variant="secondary">{label}</Badge>
-}
-
-function QualityMessages({
-  failures,
-  warnings,
-}: {
-  failures: string[]
-  warnings: string[]
-}) {
-  const messages = [
-    ...failures.map((message) => ({ tone: "failed", message })),
-    ...warnings.map((message) => ({ tone: "warning", message })),
-  ]
-
-  if (messages.length === 0) {
-    return null
-  }
-
-  return (
-    <div className="mt-3 flex flex-col gap-2">
-      {messages.map((item, index) => (
-        <div
-          className={cn(
-            "rounded-lg px-3 py-2 text-sm leading-6",
-            item.tone === "failed"
-              ? "bg-destructive/10 text-destructive"
-              : "bg-muted/60 text-muted-foreground"
-          )}
-          key={`${item.tone}-${index}`}
-        >
-          {item.message}
-        </div>
-      ))}
-    </div>
-  )
-}
-
 
 function productionTemplateLabel(
   result: GenerationResult,

@@ -19,7 +19,13 @@ import { AsyncState } from "@/components/shared/AsyncState"
 import { BatchStatusCard } from "@/components/shared/BatchStatusCard"
 import { EmptyState } from "@/components/shared/EmptyState"
 import { FileDropzone } from "@/components/shared/FileDropzone"
-import { Fact, InlineError, TechDetails } from "@/components/shared/feedback"
+import {
+  Fact,
+  InlineError,
+  QualityBadge,
+  QualityMessages,
+  TechDetails,
+} from "@/components/shared/feedback"
 import { PageFrame } from "@/components/shared/PageFrame"
 import { StatusBadge } from "@/components/shared/StatusBadge"
 import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
@@ -57,13 +63,13 @@ import {
   readableError,
   voiceLabel,
 } from "@/lib/format"
+import { useExpertMode } from "@/lib/expertMode"
 import {
   artifactFileUrl,
   cancelGenerationTask,
   createGenerationBatch,
   createGenerationTemplateTask,
   getTaskResult,
-  isTerminalStatus,
   listTemplates,
   uploadGenerationAssets,
   type GenerationResult,
@@ -74,6 +80,11 @@ import {
   productionDescription,
   productionInputSummary,
 } from "@/lib/productionSurface"
+import {
+  adaptRunStatus,
+  runStatusIsActive,
+  runStatusIsCancellable,
+} from "@/lib/productViewModels"
 import {
   buildAssetItems,
   buildProgressRuntimeItems,
@@ -325,7 +336,9 @@ function SpecialWorkspace({
     : null
   const isI2v = mode === "image_to_video"
   const inBatch = isI2v && batchMode
-  const hasActiveTask = Boolean(task && !isTerminalStatus(task.status))
+  const hasActiveTask = Boolean(
+    task && runStatusIsActive(adaptRunStatus(task.status))
+  )
   const voiceOverrideValues = useMemo(
     () => digitalVoiceOverrides(voiceDefaults, voiceSettings),
     [voiceDefaults, voiceSettings]
@@ -505,7 +518,11 @@ function SpecialWorkspace({
   }
 
   async function cancelCurrentTask() {
-    if (!task || isTerminalStatus(task.status) || isCancellingTask) {
+    if (
+      !task ||
+      !runStatusIsCancellable(adaptRunStatus(task.status)) ||
+      isCancellingTask
+    ) {
       return
     }
     setIsCancellingTask(true)
@@ -1284,6 +1301,7 @@ function TaskStatusPanel({
   taskActionError: string | null
 }) {
   const toast = useToast()
+  const expertMode = useExpertMode()
   if (!task) {
     return null
   }
@@ -1298,19 +1316,21 @@ function TaskStatusPanel({
         <div className="flex items-center justify-between gap-3">
           <StatusBadge status={task.status} />
           <div className="flex items-center gap-2">
-            <Button
-              aria-label="复制任务 ID"
-              onClick={() => {
-                void navigator.clipboard?.writeText(task.task_id)
-                toast({ title: "任务 ID 已复制", variant: "success" })
-              }}
-              size="icon-sm"
-              type="button"
-              variant="outline"
-            >
-              <Copy />
-            </Button>
-            {!isTerminalStatus(task.status) ? (
+            {expertMode ? (
+              <Button
+                aria-label="复制任务 ID"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(task.task_id)
+                  toast({ title: "任务 ID 已复制", variant: "success" })
+                }}
+                size="icon-sm"
+                type="button"
+                variant="outline"
+              >
+                <Copy />
+              </Button>
+            ) : null}
+            {runStatusIsCancellable(adaptRunStatus(task.status)) ? (
               <Button
                 disabled={isCancellingTask}
                 onClick={onCancelTask}
@@ -1877,48 +1897,4 @@ function progressLabel(task: GenerationTask) {
     labels[task.progress.stage] ??
     (task.status === "pending" ? "任务已排队" : "正在处理任务")
   )
-}
-
-function QualityBadge({
-  summary,
-}: {
-  summary: ReturnType<typeof buildQualitySummary>
-}) {
-  if (summary.tone === "failed") {
-    return <Badge variant="destructive">{summary.label}</Badge>
-  }
-  if (summary.tone === "warning" || summary.tone === "missing") {
-    return <Badge variant="outline">{summary.label}</Badge>
-  }
-  return <Badge variant="success">{summary.label}</Badge>
-}
-
-function QualityMessages({
-  failures,
-  warnings,
-}: {
-  failures: string[]
-  warnings: string[]
-}) {
-  const messages = [
-    ...failures.map((message) => ({ tone: "failed", message })),
-    ...warnings.map((message) => ({ tone: "warning", message })),
-  ]
-  return messages.length > 0 ? (
-    <div className="mt-3 flex flex-col gap-2">
-      {messages.map((item, index) => (
-        <div
-          className={cn(
-            "rounded-lg px-3 py-2 text-sm leading-6",
-            item.tone === "failed"
-              ? "bg-destructive/10 text-destructive"
-              : "bg-warning/10 text-warning"
-          )}
-          key={`${item.tone}-${index}`}
-        >
-          {item.message}
-        </div>
-      ))}
-    </div>
-  ) : null
 }

@@ -16,6 +16,76 @@ export type RunState =
   | "cancelled"
   | "interrupted"
 
+export type StatusAdapterResult<T extends string> =
+  | { kind: "known"; value: T; rawStatus: string }
+  | { kind: "unknown"; rawStatus: string | null }
+
+export type AdaptedRunState = StatusAdapterResult<RunState>
+
+const ACTIVE_RUN_STATES: readonly RunState[] = [
+  "uploading",
+  "submitting",
+  "queued",
+  "running",
+  "cancelling",
+]
+
+const CANCELLABLE_RUN_STATES: readonly RunState[] = [
+  "uploading",
+  "submitting",
+  "queued",
+  "running",
+]
+
+export function adaptRunStatus(status: unknown): AdaptedRunState {
+  const rawStatus = normalizeStatus(status)
+  switch (rawStatus) {
+    case "idle":
+    case "uploading":
+    case "submitting":
+    case "queued":
+    case "running":
+    case "completed":
+    case "failed":
+    case "cancelling":
+    case "cancelled":
+    case "interrupted":
+      return knownStatus(rawStatus, rawStatus)
+    case "pending":
+    case "submitted":
+      return knownStatus("queued", rawStatus)
+    case "processing":
+      return knownStatus("running", rawStatus)
+    case "partial_failed":
+    case "error":
+      return knownStatus("failed", rawStatus)
+    default:
+      return { kind: "unknown", rawStatus: rawStatus || null }
+  }
+}
+
+export function statusIs<T extends string>(
+  result: StatusAdapterResult<T>,
+  expected: T
+) {
+  return result.kind === "known" && result.value === expected
+}
+
+export function runStatusIsActive(result: AdaptedRunState) {
+  return ACTIVE_RUN_STATES.some((state) => statusIs(result, state))
+}
+
+export function runStatusIsCancellable(result: AdaptedRunState) {
+  return CANCELLABLE_RUN_STATES.some((state) => statusIs(result, state))
+}
+
+export function knownStatus<T extends string>(
+  value: T,
+  rawStatus: string = value
+): StatusAdapterResult<T> {
+  return { kind: "known", value, rawStatus }
+}
+
 export type GenerationDraft<T extends Record<string, unknown>> = {
   defaults: T
   overrides: Partial<T>
@@ -84,14 +154,12 @@ export type TextArtifactViewModel = ArtifactBase & {
 }
 
 export type ArtifactViewModel =
-  | VideoArtifactViewModel
-  | ImageSetArtifactViewModel
-  | TextArtifactViewModel
+  VideoArtifactViewModel | ImageSetArtifactViewModel | TextArtifactViewModel
 
 export type ProductionRunChildViewModel = {
   id: string
   label: string
-  state: RunState
+  state: AdaptedRunState
   progress: number
   message?: string | null
   error?: string | null
@@ -103,7 +171,7 @@ export type ProductionRunViewModel = {
   id: string
   title: string
   artifactKind: ArtifactKind
-  state: RunState
+  state: AdaptedRunState
   progress: number
   message?: string | null
   error?: string | null
@@ -116,20 +184,53 @@ export type ProductionRunViewModel = {
 }
 
 export type PublishAttemptState =
-  | "idle"
-  | "scheduled"
-  | "publishing"
-  | "published"
-  | "failed"
+  "idle" | "scheduled" | "publishing" | "published" | "failed"
+
+export type AdaptedPublishAttemptState =
+  StatusAdapterResult<PublishAttemptState>
+
+export function adaptPublishStatus(
+  status: unknown
+): AdaptedPublishAttemptState {
+  const rawStatus = normalizeStatus(status)
+  switch (rawStatus) {
+    case "idle":
+      return knownStatus("idle", rawStatus)
+    case "scheduled":
+    case "queued":
+    case "pending":
+      return knownStatus("scheduled", rawStatus)
+    case "publishing":
+    case "processing":
+    case "running":
+      return knownStatus("publishing", rawStatus)
+    case "published":
+    case "completed":
+    case "success":
+      return knownStatus("published", rawStatus)
+    case "failed":
+    case "error":
+      return knownStatus("failed", rawStatus)
+    default:
+      return { kind: "unknown", rawStatus: rawStatus || null }
+  }
+}
 
 export type PublishAttemptViewModel = {
   id: string
   platformId: string
   platformLabel: string
-  state: PublishAttemptState
+  state: AdaptedPublishAttemptState
   scheduledAt?: string | null
   publishedAt?: string | null
   publicUrl?: string | null
   error?: string | null
   canRetry: boolean
+}
+
+function normalizeStatus(status: unknown) {
+  if (typeof status === "string" || typeof status === "number") {
+    return String(status).trim().toLowerCase()
+  }
+  return ""
 }

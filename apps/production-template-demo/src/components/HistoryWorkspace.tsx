@@ -87,11 +87,16 @@ import {
   type PublishRecord,
 } from "@/lib/generationApi"
 import { imageSetLabel } from "@/lib/imageSet"
-import type {
-  ArtifactViewModel,
-  PublishAttemptState,
-  PublishAttemptViewModel,
-  RunState,
+import {
+  adaptPublishStatus,
+  adaptRunStatus,
+  knownStatus,
+  statusIs,
+  type AdaptedPublishAttemptState,
+  type AdaptedRunState,
+  type ArtifactViewModel,
+  type PublishAttemptState,
+  type PublishAttemptViewModel,
 } from "@/lib/productViewModels"
 import { navigate, parsePath, routeHref, usePath } from "@/lib/router"
 import { cn } from "@/lib/utils"
@@ -425,7 +430,7 @@ export function HistoryWorkspace({
   const selectedPublishState = summarizePublishState(publishAttempts)
   const publishCaptionWithHashtags = appendHashtags(publishCaption, hashtags)
   const requiresTitle = selectedPlatforms.includes("youtube")
-  const runState = adaptRunState(detailStatus(detail) || selectedTask?.status)
+  const runState = adaptRunStatus(detailStatus(detail) || selectedTask?.status)
   const scheduledDueAt =
     scheduleMode === "scheduled"
       ? buildScheduledDueAt(dueAt, publishTimezone)
@@ -789,7 +794,9 @@ export function HistoryWorkspace({
 
           <DetailPanel
             artifact={artifact}
-            canPublish={runState === "completed" && artifact?.kind === "video"}
+            canPublish={
+              statusIs(runState, "completed") && artifact?.kind === "video"
+            }
             detail={detail}
             detailError={detailError}
             detailState={detailState}
@@ -958,7 +965,11 @@ function DetailPanel({
   const artifactKind = artifact?.kind ?? historyArtifactKind(result)
   const inputText = readString(input?.text) || readString(input?.script)
   const title = selectedTask.title || buildDefaultTitle(metadata)
-  const runState = adaptRunState(detailStatus(detail) || selectedTask.status)
+  const runState = adaptRunStatus(detailStatus(detail) || selectedTask.status)
+  const failureMessage = historyErrorMessage(result)
+  const runFailed = statusIs(runState, "failed")
+  const unresolvedFailureMessage =
+    runState.kind === "unknown" ? failureMessage : null
   const storyboardFrames = readArray(readRecord(detail?.storyboard)?.frames)
   const templateId = readString(templateInfo?.id)
   const templateName = readString(templateInfo?.name)
@@ -1094,10 +1105,13 @@ function DetailPanel({
         </dl>
       ) : null}
 
-      {runState === "failed" ? (
+      {runFailed || unresolvedFailureMessage ? (
         <InlineError
-          message={historyFailureMessage(result)}
-          title="这次生成没有完成"
+          message={
+            (runFailed ? failureMessage : unresolvedFailureMessage) ||
+            "生成服务返回失败，请回到任务页查看可恢复的子任务。"
+          }
+          title={runFailed ? "这次生成没有完成" : "状态待同步"}
         />
       ) : null}
 
@@ -1171,7 +1185,7 @@ function LibraryRow({
   onSelect: () => void
   onOpenPublish: () => void
   metrics: ContentItemMetrics | null
-  publishState: PublishAttemptState | null
+  publishState: AdaptedPublishAttemptState | null
 }) {
   const result = readRecord(task.result)
   const artifactType = historyArtifactKind(result)
@@ -1180,12 +1194,21 @@ function LibraryRow({
   const isVideo = artifactType === "video"
   const coverUrl = resolveFileUrl(readString(result?.cover_path))
   const videoUrl = resolveFileUrl(readString(result?.video_path))
-  const runState = adaptRunState(task.status)
-  const isFailed = runState === "failed"
+  const runState = adaptRunStatus(task.status)
+  const failureMessage = historyErrorMessage(result)
+  const isFailed = statusIs(runState, "failed")
+  const visibleFailureMessage =
+    isFailed || runState.kind === "unknown" ? failureMessage : null
   const title =
     task.title ||
     (isText ? "未命名长文" : isImageSet ? "未命名图集" : "未命名视频")
-  const metaParts = buildLibraryMeta(artifactType, result, metrics, isFailed)
+  const metaParts = buildLibraryMeta(
+    artifactType,
+    result,
+    metrics,
+    isFailed,
+    visibleFailureMessage
+  )
 
   return (
     <div
@@ -1226,7 +1249,9 @@ function LibraryRow({
           <div
             className={cn(
               "mt-0.5 truncate text-xs",
-              isFailed ? "text-destructive" : "text-muted-foreground"
+              isFailed || visibleFailureMessage
+                ? "text-destructive"
+                : "text-muted-foreground"
             )}
           >
             {metaParts.join(" · ")}
@@ -1246,7 +1271,7 @@ function LibraryRow({
             </a>
           </Button>
         ) : null}
-        {isVideo && runState === "completed" ? (
+        {isVideo && statusIs(runState, "completed") ? (
           <Button
             aria-label="发布视频"
             onClick={onOpenPublish}
@@ -1438,14 +1463,14 @@ function adaptPublishAttempts(
     platforms.map((platform) => [platform.id, platform.label])
   )
   return record.jobs.map((job, index) => {
-    const state = adaptPublishState(job.status)
+    const state = adaptPublishStatus(job.status)
     return {
       id: job.buffer_post_id || `${job.platform}:${index}`,
       platformId: job.platform,
       platformLabel: platformLabels.get(job.platform) || job.platform,
       state,
       scheduledAt: job.due_at || null,
-      publishedAt: state === "published" ? job.updated_at || null : null,
+      publishedAt: statusIs(state, "published") ? job.updated_at || null : null,
       publicUrl: job.public_video_url || null,
       error: job.error || null,
       canRetry: false,
@@ -1453,73 +1478,33 @@ function adaptPublishAttempts(
   })
 }
 
-function adaptPublishState(status: string): PublishAttemptState {
-  switch (status) {
-    case "scheduled":
-    case "queued":
-    case "pending":
-      return "scheduled"
-    case "publishing":
-    case "processing":
-    case "running":
-      return "publishing"
-    case "published":
-    case "completed":
-    case "success":
-      return "published"
-    case "failed":
-    case "error":
-      return "failed"
-    default:
-      return "idle"
-  }
-}
-
-function adaptRunState(status: unknown): RunState {
-  switch (String(status || "")) {
-    case "idle":
-    case "uploading":
-    case "submitting":
-    case "queued":
-    case "running":
-    case "completed":
-    case "failed":
-    case "cancelling":
-    case "cancelled":
-    case "interrupted":
-      return String(status) as RunState
-    case "pending":
-    case "submitted":
-      return "queued"
-    case "processing":
-      return "running"
-    case "partial_failed":
-    case "error":
-      return "failed"
-    default:
-      return "interrupted"
-  }
-}
-
 function summarizePublishState(
   attempts: PublishAttemptViewModel[]
-): PublishAttemptState | null {
-  if (attempts.some((attempt) => attempt.state === "failed")) {
-    return "failed"
-  }
-  if (attempts.some((attempt) => attempt.state === "publishing")) {
-    return "publishing"
-  }
-  if (attempts.some((attempt) => attempt.state === "scheduled")) {
-    return "scheduled"
-  }
+): AdaptedPublishAttemptState | null {
+  const failed = findPublishState(attempts, "failed")
+  if (failed) return failed
+  const publishing = findPublishState(attempts, "publishing")
+  if (publishing) return publishing
+  const scheduled = findPublishState(attempts, "scheduled")
+  if (scheduled) return scheduled
+  const unknown = attempts.find((attempt) => attempt.state.kind === "unknown")
+  if (unknown) return unknown.state
   if (
     attempts.length > 0 &&
-    attempts.every((attempt) => attempt.state === "published")
+    attempts.every((attempt) => statusIs(attempt.state, "published"))
   ) {
-    return "published"
+    return knownStatus("published")
   }
-  return attempts.length > 0 ? "idle" : null
+  return findPublishState(attempts, "idle")
+}
+
+function findPublishState(
+  attempts: PublishAttemptViewModel[],
+  expected: PublishAttemptState
+) {
+  return (
+    attempts.find((attempt) => statusIs(attempt.state, expected))?.state ?? null
+  )
 }
 
 function getPublishDisabledReason({
@@ -1534,7 +1519,7 @@ function getPublishDisabledReason({
   isPublishing,
 }: {
   artifact: ArtifactViewModel | null
-  runState: RunState
+  runState: AdaptedRunState
   selectedPlatforms: string[]
   caption: string
   title: string
@@ -1546,7 +1531,7 @@ function getPublishDisabledReason({
   if (isPublishing) {
     return "正在提交，请稍候。"
   }
-  if (runState !== "completed") {
+  if (!statusIs(runState, "completed")) {
     return "作品完成后才能发布。"
   }
   if (artifact?.kind !== "video") {
@@ -1592,11 +1577,14 @@ function buildLibraryMeta(
   artifactType: ArtifactKind,
   result: Record<string, unknown> | null,
   metrics: ContentItemMetrics | null,
-  isFailed: boolean
+  isFailed: boolean,
+  failureMessage: string | null
 ) {
   const parts = [artifactKindLabel(artifactType)]
-  if (isFailed) {
-    parts.push(readString(result?.error) || "生成失败")
+  if (failureMessage) {
+    parts.push(failureMessage)
+  } else if (isFailed) {
+    parts.push("生成失败")
   } else if (artifactType === "video") {
     const duration = readNumber(result?.duration)
     if (duration !== null) {
@@ -1649,13 +1637,9 @@ function historyArtifactKind(
   return kind === "image_set" || kind === "text" ? kind : "video"
 }
 
-function historyFailureMessage(result: Record<string, unknown> | null) {
+function historyErrorMessage(result: Record<string, unknown> | null) {
   const error = readRecord(result?.error)
-  return (
-    readString(error?.message) ||
-    readString(result?.error) ||
-    "生成服务返回失败，请回到任务页查看可恢复的子任务。"
-  )
+  return readString(error?.message) || readString(result?.error) || null
 }
 
 function buildDefaultTitle(metadata: Record<string, unknown> | null) {

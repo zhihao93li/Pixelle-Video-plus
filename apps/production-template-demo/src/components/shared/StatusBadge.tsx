@@ -1,9 +1,10 @@
 import { statusLabel } from "@/lib/contentItemMeta"
+import type { StatusAdapterResult } from "@/lib/productViewModels"
 import { cn } from "@/lib/utils"
 
 /**
  * 状态徽标：中文 + 语义色，全站唯一来源（DESIGN.md §2.7）。
- * 绿=完成/已发布、红=失败、黄=进行、灰=中性/排队。缺省回落中性 + 原文，防裸奔。
+ * 绿=完成/已发布、红=失败、黄=进行、灰=中性/排队。未知状态不回显原始字符串。
  * StatusBadge = 生成任务/批次状态；ContentStatusBadge = 内容条目生命周期状态。
  */
 
@@ -62,11 +63,29 @@ export function StatusBadge({
   status,
   className,
 }: {
-  status: string
+  status: string | StatusAdapterResult<string>
   className?: string
 }) {
-  const config = STATUS_CONFIG[status] ?? { label: status, tone: "neutral" }
-  return <Pill className={className} label={config.label} tone={config.tone} />
+  const statusKey =
+    typeof status === "string"
+      ? status
+      : status.kind === "known"
+        ? status.rawStatus === "partial_failed"
+          ? "partial_failed"
+          : status.value
+        : null
+  const config = statusKey ? STATUS_CONFIG[statusKey] : null
+  const presentation = config ?? {
+    label: "状态待同步",
+    tone: "neutral" as const,
+  }
+  return (
+    <Pill
+      className={className}
+      label={presentation.label}
+      tone={presentation.tone}
+    />
+  )
 }
 
 // 内容条目状态 → 语义色（标签取 contentItemMeta.statusLabel 的中文）

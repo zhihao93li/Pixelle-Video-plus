@@ -1,4 +1,4 @@
-import { useEffect, type MouseEvent, type ReactNode } from "react"
+import { useEffect, useRef, type MouseEvent, type ReactNode } from "react"
 import {
   AlertCircle,
   Columns3,
@@ -139,11 +139,12 @@ function ProjectSwitcher({
         value={selectedProject.project_id}
       >
         <SelectTrigger
-          aria-label="切换项目"
+          aria-label={`切换项目，当前：${selectedProject.name}`}
           className={cn(
             "w-full",
             compact && "h-11 min-w-0 border-0 bg-muted/50"
           )}
+          title={selectedProject.name}
         >
           <SelectValue placeholder="选择项目">{selectedProject.name}</SelectValue>
         </SelectTrigger>
@@ -252,8 +253,14 @@ export function AppShell({
 }) {
   const { runningCount } = useTaskCenter()
   const projectState = useCurrentProject()
+  const previousPathRef = useRef<string | null>(null)
 
   useEffect(() => {
+    if (previousPathRef.current === null || previousPathRef.current === path) {
+      previousPathRef.current = path
+      return
+    }
+    previousPathRef.current = path
     const frame = window.requestAnimationFrame(() =>
       focusMainContent({ scroll: false })
     )
@@ -322,9 +329,16 @@ export function AppShell({
         </nav>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+      <div className="flex min-w-0 flex-1 flex-col pb-[calc(4.5rem+var(--safe-area-bottom))] lg:pb-0">
         <header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur-sm">
-          <div className="flex h-14 items-center gap-2 px-3 lg:hidden">
+          <div
+            className="flex items-center gap-2 px-3 lg:hidden"
+            style={{
+              minHeight: "calc(3.5rem + var(--safe-area-top))",
+              paddingInline: "max(0.75rem, var(--safe-area-inline))",
+              paddingTop: "var(--safe-area-top)",
+            }}
+          >
             <a
               aria-label="Pixelle 工作台"
               className="flex shrink-0 items-center gap-1.5 text-sm font-semibold"
@@ -350,7 +364,11 @@ export function AppShell({
           id={MAIN_CONTENT_ID}
           tabIndex={-1}
         >
-          <ProjectBoundary projectScoped={projectScoped} state={projectState}>
+          <ProjectBoundary
+            key={projectScoped ? (projectState.projectId ?? "no-project") : "global"}
+            projectScoped={projectScoped}
+            state={projectState}
+          >
             {children}
           </ProjectBoundary>
         </div>
@@ -359,9 +377,12 @@ export function AppShell({
       <nav
         aria-label="主导航"
         className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur-sm lg:hidden"
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        style={{ paddingBottom: "var(--safe-area-bottom)" }}
       >
-        <div className="grid grid-cols-5">
+        <div
+          className="grid grid-cols-5"
+          style={{ paddingInline: "var(--safe-area-inline)" }}
+        >
           {PRIMARY_NAV_ROUTES.map((route) => {
             const active = isNavigationActive(path, route.nav.path)
             const Icon = NAV_ICONS[route.id]

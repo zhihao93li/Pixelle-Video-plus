@@ -15,6 +15,7 @@ import {
   isTerminalStatus,
   type GenerationTask,
 } from "@/lib/generationApi"
+import { adaptRunStatus, runStatusIsActive } from "@/lib/productViewModels"
 
 /**
  * 全局任务中心：本会话（及历史会话）提交的生成任务统一在这里跟踪。
@@ -99,7 +100,7 @@ export function TaskCenterProvider({
       }
       notifiedRef.current.add(key)
       if (task.status === "completed") {
-        toast({ title: "视频生成完成", variant: "success" })
+        toast({ title: "生成完成", variant: "success" })
       } else if (task.status === "failed") {
         toast({
           title: "生成失败",
@@ -203,8 +204,8 @@ export function TaskCenterProvider({
   const value = useMemo<TaskCenterValue>(
     () => ({
       tasks,
-      runningCount: tasks.filter(
-        (item) => !isTerminalStatus(item.task.status)
+      runningCount: tasks.filter((item) =>
+        runStatusIsActive(adaptRunStatus(item.task.status))
       ).length,
       trackTask,
       updateTask,

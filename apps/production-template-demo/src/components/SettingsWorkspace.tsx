@@ -1646,11 +1646,14 @@ function DiagnosticsPanel({
 function StatusMessage({ ok, message }: { ok: boolean; message: string }) {
   return (
     <div
+      aria-atomic="true"
+      aria-live={ok ? "polite" : "assertive"}
       className={
         ok
           ? "rounded-lg border border-success/30 bg-success/10 p-3 text-sm text-success"
           : "rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
       }
+      role={ok ? "status" : "alert"}
     >
       {message}
     </div>

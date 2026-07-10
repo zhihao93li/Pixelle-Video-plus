@@ -51,6 +51,8 @@ import { isRetiredTemplate } from "@/lib/templatePresentation"
 import { cn } from "@/lib/utils"
 
 type LoadState = "loading" | "ready" | "error"
+type ConfigSummaryState = "loading" | "ready" | "stale" | "error"
+type RecipeDefaultsState = "loading" | "ready" | "error"
 
 const FLOW_ENTRIES = new Set(["script_review"])
 
@@ -152,13 +154,26 @@ const FAMILIES: Family[] = [
 
 function RecipeCard({
   customizedSummary,
+  defaultsState,
   isProjectDefault,
   template,
 }: {
   customizedSummary: string | null
+  defaultsState: RecipeDefaultsState
   isProjectDefault: boolean
   template: ProductionTemplate
 }) {
+  const defaultsSummary =
+    defaultsState === "loading"
+      ? "正在读取默认设置…"
+      : defaultsState === "error"
+        ? "默认设置暂时无法读取"
+        : customizedSummary
+          ? `已调整：${customizedSummary}`
+          : template.is_custom
+            ? "沿用我的配方设置"
+            : "沿用出厂设置"
+
   return (
     <article
       className={cn(
@@ -200,13 +215,7 @@ function RecipeCard({
           </div>
           <div className="col-span-2 min-w-0">
             <dt className="text-xs text-muted-foreground">默认设置</dt>
-            <dd className="mt-0.5 line-clamp-1 text-sm">
-              {customizedSummary
-                ? `已调整：${customizedSummary}`
-                : template.is_custom
-                  ? "沿用我的配方设置"
-                  : "沿用出厂设置"}
-            </dd>
+            <dd className="mt-0.5 line-clamp-1 text-sm">{defaultsSummary}</dd>
           </div>
         </dl>
       </div>
@@ -371,9 +380,15 @@ export function CreateGallery() {
   const [error, setError] = useState<string | null>(null)
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
   const [reloadToken, setReloadToken] = useState(0)
+  const [configReloadToken, setConfigReloadToken] = useState(0)
   const [selectedFamilyId, setSelectedFamilyId] = useState<string | null>(null)
   const [newRecipeFamily, setNewRecipeFamily] = useState<string | null>(null)
   const [customized, setCustomized] = useState<Record<string, string>>({})
+  const [configSummaryState, setConfigSummaryState] =
+    useState<ConfigSummaryState>("loading")
+  const [configFailures, setConfigFailures] = useState<Record<string, string>>(
+    {}
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -387,38 +402,11 @@ export function CreateGallery() {
         if (cancelled) {
           return
         }
+        setCustomized({})
+        setConfigFailures({})
+        setConfigSummaryState("loading")
         setTemplates(response.templates)
         setLoadState("ready")
-
-        const visible = response.templates.filter(
-          (template) =>
-            template.enabled &&
-            !isRetiredTemplate(template) &&
-            !isFlowEntry(template)
-        )
-        const results = await Promise.allSettled(
-          visible.map(async (template) => {
-            const config = await getTemplateGenerationConfig(template.id)
-            return [template.id, Object.keys(config.overrides)] as const
-          })
-        )
-        if (cancelled) {
-          return
-        }
-
-        const summary: Record<string, string> = {}
-        for (const result of results) {
-          if (result.status !== "fulfilled") {
-            continue
-          }
-          const [id, keys] = result.value
-          if (keys.length > 0) {
-            summary[id] = keys
-              .map((key) => PART_KEY_LABELS[key] ?? key)
-              .join("、")
-          }
-        }
-        setCustomized(summary)
       } catch (loadError) {
         if (!cancelled) {
           setError(readableError(loadError))
@@ -432,6 +420,72 @@ export function CreateGallery() {
       cancelled = true
     }
   }, [projectId, reloadToken])
+
+  useEffect(() => {
+    if (loadState !== "ready") {
+      return
+    }
+
+    const visible = templates.filter(
+      (template) =>
+        template.enabled &&
+        !isRetiredTemplate(template) &&
+        !isFlowEntry(template)
+    )
+    let cancelled = false
+
+    async function loadConfigSummaries() {
+      if (visible.length === 0) {
+        setCustomized({})
+        setConfigFailures({})
+        setConfigSummaryState("ready")
+        return
+      }
+
+      const results = await Promise.allSettled(
+        visible.map(async (template) => {
+          const config = await getTemplateGenerationConfig(template.id)
+          return [template.id, Object.keys(config.overrides)] as const
+        })
+      )
+      if (cancelled) {
+        return
+      }
+
+      const summary: Record<string, string> = {}
+      const failures: Record<string, string> = {}
+      results.forEach((result, index) => {
+        if (result.status === "rejected") {
+          const failedTemplate = visible[index]
+          failures[failedTemplate.id] = readableError(result.reason)
+          return
+        }
+        const [id, keys] = result.value
+        if (keys.length > 0) {
+          summary[id] = keys
+            .map((key) => PART_KEY_LABELS[key] ?? key)
+            .join("、")
+        }
+      })
+
+      setCustomized(summary)
+      setConfigFailures(failures)
+      const failureCount = Object.keys(failures).length
+      if (failureCount === 0) {
+        setConfigSummaryState("ready")
+      } else {
+        setConfigSummaryState(
+          failureCount === visible.length ? "error" : "stale"
+        )
+      }
+    }
+
+    void loadConfigSummaries()
+
+    return () => {
+      cancelled = true
+    }
+  }, [configReloadToken, loadState, templates])
 
   const productTemplates = useMemo(
     () =>
@@ -464,13 +518,34 @@ export function CreateGallery() {
   const selectedTemplates = productTemplates.filter((template) =>
     selectedFamily.pipelineIds.includes(template.pipeline_id)
   )
+  const selectedConfigFailures = selectedTemplates.flatMap((template) => {
+    const message = configFailures[template.id]
+    return message ? [`${template.display_name}：${message}`] : []
+  })
+  const selectedConfigState =
+    selectedConfigFailures.length === selectedTemplates.length
+      ? "error"
+      : "stale"
+  const selectedConfigError = `${selectedConfigFailures.length} 份配方读取失败：${selectedConfigFailures
+    .slice(0, 2)
+    .join(
+      "；"
+    )}${selectedConfigFailures.length > 2 ? "；还有其他配方未能读取" : ""}`
   const hasAnyEntry = productTemplates.length > 0 || flowTemplates.length > 0
 
   return (
     <PageFrame>
       <WorkspaceHeader
         actions={
-          project ? <Badge variant="outline">{project.name}</Badge> : undefined
+          project ? (
+            <Badge
+              className="max-w-full truncate"
+              title={project.name}
+              variant="outline"
+            >
+              {project.name}
+            </Badge>
+          ) : undefined
         }
         description="先选择成品类型，再用现成配方开始制作；需要长期调整的效果可以保存为自己的配方。"
         title="选择生产方式"
@@ -582,6 +657,33 @@ export function CreateGallery() {
               }
               title={selectedFamily.label}
             >
+              {selectedConfigFailures.length > 0 ? (
+                <AsyncState
+                  action={
+                    <Button
+                      onClick={() => {
+                        setConfigSummaryState("loading")
+                        setConfigFailures({})
+                        setConfigReloadToken((token) => token + 1)
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      重新读取默认设置
+                    </Button>
+                  }
+                  className="mb-4 max-w-none"
+                  description={selectedConfigError}
+                  state={selectedConfigState}
+                  title={
+                    selectedConfigState === "error"
+                      ? "无法读取配方默认设置"
+                      : "部分配方默认设置可能已过期"
+                  }
+                />
+              ) : null}
+
               {newRecipeFamily === selectedFamily.id ? (
                 <NewRecipeForm
                   family={selectedFamily}
@@ -597,6 +699,13 @@ export function CreateGallery() {
                   {selectedTemplates.map((template) => (
                     <RecipeCard
                       customizedSummary={customized[template.id] ?? null}
+                      defaultsState={
+                        configSummaryState === "loading"
+                          ? "loading"
+                          : configFailures[template.id]
+                            ? "error"
+                            : "ready"
+                      }
                       isProjectDefault={template.id === defaultTemplateId}
                       key={template.id}
                       template={template}

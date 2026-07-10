@@ -147,6 +147,8 @@ workflow / provider / runtime 级别的选项（画面 workflow、TTS workflow�
 
 所有生产页面只使用以下用户态：`idle / uploading / submitting / queued / running / completed / failed / cancelling / cancelled / interrupted`。页面不得直接把 raw stage 当成面向用户的状态；技术 stage 放进 TechDetails。
 
+后端状态必须先适配为 `StatusAdapterResult<RunState>` 的 `known | unknown` 判别联合。`ProductionRunViewModel.state` 与 `PublishAttemptViewModel.state` 均使用该适配结果；未知状态统一显示「状态待同步」，不回显 raw status，不推断为运行中、终态或可取消。
+
 每个页面第一次交付必须同时包含：loading、empty、error、stale、ready，以及其业务相关的 submitting、partial failure、terminal 状态。错误必须出现在触发动作所在区域，并给出明确恢复动作。
 
 ### 7.3 设置来源
@@ -158,7 +160,7 @@ workflow / provider / runtime 级别的选项（画面 workflow、TTS workflow�
 - 基准视口：1440×900、1024×768、768×1024、390×844、320×568。
 - `>= 1024px`：224px 桌面侧栏、68px 上下文页头；生成工作区允许双栏。
 - `< 1024px`：顶部项目栏 + 底部五项主导航；禁止把页题和五项导航挤在同一行。
-- `<= 640px`：Sheet 全屏，底部操作区使用 `env(safe-area-inset-bottom)`；主要触控目标至少 44px。
+- `<= 640px`：Sheet 全屏，底部操作区统一使用 `--safe-area-bottom` 语义 token（由 `env(safe-area-inset-bottom)` 注入）；主要触控目标至少 44px。
 - 页面在首次迁移时同时完成浅色、深色、响应式和基础无障碍，不安排二次适配批次。
 - 深浅主题保持同一 teal 品牌色相；状态只使用 success/warning/danger/info 语义 token。
 - 动画仅允许 color、opacity、transform，时长 120–180ms；尊重 `prefers-reduced-motion`，禁止 `transition-all`。

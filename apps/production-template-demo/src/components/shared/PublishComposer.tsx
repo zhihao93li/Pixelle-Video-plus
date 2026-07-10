@@ -30,7 +30,7 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { formatDate } from "@/lib/format"
-import type { PublishAttemptViewModel } from "@/lib/productViewModels"
+import { statusIs, type PublishAttemptViewModel } from "@/lib/productViewModels"
 import { cn } from "@/lib/utils"
 
 type ScheduleMode = "queue" | "scheduled"
@@ -345,16 +345,23 @@ export function PublishAttemptList({
 }
 
 function publishAttemptMeta(attempt: PublishAttemptViewModel) {
-  if (attempt.state === "scheduled" && attempt.scheduledAt) {
-    return `计划于 ${formatDate(attempt.scheduledAt)}`
+  if (attempt.state.kind === "unknown") {
+    return "正在同步平台状态。"
   }
-  if (attempt.state === "published" && attempt.publishedAt) {
-    return `发布于 ${formatDate(attempt.publishedAt)}`
+  if (statusIs(attempt.state, "scheduled")) {
+    return attempt.scheduledAt
+      ? `计划于 ${formatDate(attempt.scheduledAt)}`
+      : "已加入发布队列。"
   }
-  if (attempt.state === "failed") {
+  if (statusIs(attempt.state, "published")) {
+    return attempt.publishedAt
+      ? `发布于 ${formatDate(attempt.publishedAt)}`
+      : "平台已发布。"
+  }
+  if (statusIs(attempt.state, "failed")) {
     return "可调整内容或渠道设置后再次提交。"
   }
-  if (attempt.state === "publishing") {
+  if (statusIs(attempt.state, "publishing")) {
     return "平台正在处理。"
   }
   return "等待提交。"

@@ -26,6 +26,8 @@ export function RecipeSelect({
   triggerClassName?: string
   placeholder?: string
 }) {
+  const selected = templates.find((template) => template.id === value)
+
   return (
     <Select
       onValueChange={(id) => {
@@ -36,8 +38,14 @@ export function RecipeSelect({
       }}
       value={value}
     >
-      <SelectTrigger className={triggerClassName ?? "w-full"}>
-        <SelectValue placeholder={placeholder} />
+      <SelectTrigger
+        aria-label={`${placeholder}，当前：${selected?.display_name ?? "未选择"}`}
+        className={triggerClassName ?? "w-full"}
+        title={selected?.display_name}
+      >
+        <SelectValue placeholder={placeholder}>
+          {selected?.display_name}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         {templates.map((template) => (

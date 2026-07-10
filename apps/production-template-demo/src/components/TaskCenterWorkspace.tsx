@@ -42,10 +42,14 @@ import {
   type GenerationBatch,
   type GenerationBatchItem,
 } from "@/lib/generationApi"
-import type {
-  ProductionRunChildViewModel,
-  ProductionRunViewModel,
-  RunState,
+import {
+  adaptRunStatus,
+  knownStatus,
+  runStatusIsCancellable,
+  statusIs,
+  type ProductionRunChildViewModel,
+  type ProductionRunViewModel,
+  type RunState,
 } from "@/lib/productViewModels"
 import { routeHref } from "@/lib/router"
 import { useTaskCenter, type TrackedTask } from "@/lib/taskCenter"
@@ -54,6 +58,19 @@ import { cn } from "@/lib/utils"
 
 type LoadState = "loading" | "ready" | "error" | "stale"
 type BatchTemplateInfo = { pipelineId: string; displayName: string }
+const ACTIVE_RUN_STATES: readonly RunState[] = [
+  "uploading",
+  "submitting",
+  "queued",
+  "running",
+  "cancelling",
+]
+const TERMINAL_RUN_STATES: readonly RunState[] = [
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+]
 type OperationRun = ProductionRunViewModel & {
   source: "batch" | "task"
   trackedTaskId?: string
@@ -162,12 +179,12 @@ export function TaskCenterWorkspace() {
     : null
 
   const runningCount = runs.filter((run) =>
-    ["uploading", "submitting", "queued", "running", "cancelling"].includes(
-      run.state
-    )
+    statusIn(run.state, ACTIVE_RUN_STATES)
   ).length
-  const completedCount = runs.filter((run) => run.state === "completed").length
-  const failedCount = runs.filter((run) => run.state === "failed").length
+  const completedCount = runs.filter((run) =>
+    statusIs(run.state, "completed")
+  ).length
+  const failedCount = runs.filter((run) => statusIs(run.state, "failed")).length
 
   async function cancelTask(taskId: string) {
     setCancellingId(taskId)
@@ -389,9 +406,7 @@ function RunDetail({
   onCancel: (taskId: string) => void
   onRemove: (taskId: string) => void
 }) {
-  const terminal = ["completed", "failed", "cancelled", "interrupted"].includes(
-    run.state
-  )
+  const terminal = statusIn(run.state, TERMINAL_RUN_STATES)
 
   return (
     <section aria-labelledby="selected-run-heading" className="min-w-0">
@@ -417,7 +432,7 @@ function RunDetail({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {run.state === "completed" ? (
+          {statusIs(run.state, "completed") ? (
             <Button asChild size="sm" variant="outline">
               <a
                 href={routeHref(
@@ -520,8 +535,9 @@ function RunDetail({
           {run.children.length > 0 ? (
             <span className="text-xs text-muted-foreground">
               {
-                run.children.filter((child) => child.state === "completed")
-                  .length
+                run.children.filter((child) =>
+                  statusIs(child.state, "completed")
+                ).length
               }
               /{run.children.length} 完成
             </span>
@@ -603,16 +619,18 @@ function adaptBatchRun(
       ? children.reduce((sum, child) => sum + child.progress, 0) /
         children.length
       : 0
-  const completed = children.filter(
-    (child) => child.state === "completed"
+  const completed = children.filter((child) =>
+    statusIs(child.state, "completed")
   ).length
-  const failed = children.filter((child) => child.state === "failed").length
+  const failed = children.filter((child) =>
+    statusIs(child.state, "failed")
+  ).length
 
   return {
     id: batch.batch_id,
     title: `${template?.displayName ?? "批量生产"} ×${batch.total_count}`,
     artifactKind,
-    state: adaptRunState(batch.status),
+    state: adaptRunStatus(batch.status),
     progress: clampProgress(progress),
     message:
       failed > 0
@@ -633,9 +651,10 @@ function adaptBatchChild(
   batch: GenerationBatch,
   item: GenerationBatchItem
 ): ProductionRunChildViewModel {
-  const state = adaptRunState(item.status)
-  const progress =
-    state === "completed" ? 100 : clampProgress(item.progress?.percentage ?? 0)
+  const state = adaptRunStatus(item.status)
+  const progress = statusIs(state, "completed")
+    ? 100
+    : clampProgress(item.progress?.percentage ?? 0)
   return {
     id: batchChildId(batch.batch_id, item),
     label: getBatchPreviewTitle(item.input, Math.max(0, item.index - 1)),
@@ -644,7 +663,7 @@ function adaptBatchChild(
     message: item.progress?.message || null,
     error: item.error?.message || null,
     artifact: null,
-    canRetry: state === "failed" || state === "cancelled",
+    canRetry: statusIs(state, "failed") || statusIs(state, "cancelled"),
   }
 }
 
@@ -654,57 +673,39 @@ function adaptTrackedRun(
 ): OperationRun {
   const { task } = tracked
   const state =
-    cancellingId === task.task_id ? "cancelling" : adaptRunState(task.status)
+    cancellingId === task.task_id
+      ? knownStatus("cancelling")
+      : adaptRunStatus(task.status)
   return {
     id: task.task_id,
     title: tracked.templateName || "单条生产",
     artifactKind: templateArtifactType(task.pipeline_id),
     state,
-    progress:
-      state === "completed"
-        ? 100
-        : clampProgress(task.progress.percentage ?? 0),
+    progress: statusIs(state, "completed")
+      ? 100
+      : clampProgress(task.progress.percentage ?? 0),
     message: task.progress.message || null,
     error: task.error?.message || null,
     createdAt: tracked.submittedAt || task.created_at,
     updatedAt: task.updated_at,
     children: [],
     artifact: null,
-    canCancel: ["queued", "running", "submitting", "uploading"].includes(state),
+    canCancel: runStatusIsCancellable(state),
     canRetry: false,
     source: "task",
     trackedTaskId: task.task_id,
   }
 }
 
-function adaptRunState(status: string): RunState {
-  switch (status) {
-    case "idle":
-    case "uploading":
-    case "submitting":
-    case "queued":
-    case "running":
-    case "completed":
-    case "failed":
-    case "cancelling":
-    case "cancelled":
-    case "interrupted":
-      return status
-    case "pending":
-    case "submitted":
-      return "queued"
-    case "processing":
-      return "running"
-    case "partial_failed":
-    case "error":
-      return "failed"
-    default:
-      return "interrupted"
-  }
-}
-
 function batchChildId(batchId: string, item: GenerationBatchItem) {
   return `${batchId}:${item.index}`
+}
+
+function statusIn(
+  state: ProductionRunViewModel["state"],
+  expected: readonly RunState[]
+) {
+  return expected.some((value) => statusIs(state, value))
 }
 
 function clampProgress(value: number) {

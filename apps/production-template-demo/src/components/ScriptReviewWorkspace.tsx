@@ -79,6 +79,7 @@ import { LANGUAGE_LABELS, PRESET_LANGUAGES } from "@/lib/languages"
 
 const BAZI_TEMPLATE_NAME = "Bazi Storyboard Oral Script"
 const BAZI_ENGLISH_TEMPLATE_NAME = "Bazi Storyboard Oral Script English"
+type ProjectDefaultsLoadState = "loading" | "ready" | "error"
 
 function validateDraftContent(draft: ScriptReviewDraft): string[] {
   if (draft.selected_for_generation === false) {
@@ -164,6 +165,8 @@ export function ScriptReviewWorkspace() {
   const [templateReloadToken, setTemplateReloadToken] = useState(0)
   const [productionCatalogReloadToken, setProductionCatalogReloadToken] =
     useState(0)
+  const [projectDefaultsReloadToken, setProjectDefaultsReloadToken] =
+    useState(0)
   const [templateError, setTemplateError] = useState<string | null>(null)
   const [draftListError, setDraftListError] = useState<string | null>(null)
   const [draftListState, setDraftListState] =
@@ -171,7 +174,14 @@ export function ScriptReviewWorkspace() {
   const [productionCatalogError, setProductionCatalogError] = useState<
     string | null
   >(null)
-  const [settingsTtsReferenceId, setSettingsTtsReferenceId] = useState("")
+  const [projectDefaultsLoadState, setProjectDefaultsLoadState] =
+    useState<ProjectDefaultsLoadState>("loading")
+  const [projectDefaultsError, setProjectDefaultsError] = useState<
+    string | null
+  >(null)
+  const [voiceDefaultsError, setVoiceDefaultsError] = useState<string | null>(
+    null
+  )
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [activeProjectId, setActiveProjectId] = useState(projectId)
@@ -198,12 +208,13 @@ export function ScriptReviewWorkspace() {
     setProductionCatalogError(null)
     setIsProductionCatalogLoading(true)
     setProductionOverrides({})
+    setProjectDefaultsLoadState("loading")
+    setProjectDefaultsError(null)
+    setVoiceDefaultsError(null)
     setTtsVoiceByLanguage(
       Object.keys(project?.tts_voice_by_language ?? {}).length > 0
         ? { ...(project?.tts_voice_by_language ?? {}) }
-        : settingsTtsReferenceId
-          ? { Chinese: settingsTtsReferenceId }
-          : {}
+        : {}
     )
     setTtsSpeedByLanguage({})
     setSubmittedBatch(null)
@@ -242,6 +253,8 @@ export function ScriptReviewWorkspace() {
     languages.length > 0 &&
     Boolean(currentScriptTemplateName) &&
     Boolean(currentSplitTemplateName) &&
+    projectDefaultsLoadState === "ready" &&
+    !projectDefaultsError &&
     !isInitialLoading &&
     !templateError &&
     !isCreatingDrafts
@@ -331,33 +344,80 @@ export function ScriptReviewWorkspace() {
         }
       })
 
-    void Promise.allSettled([getSettingsConfig()]).then(([settingsResult]) => {
-      if (cancelled) {
-        return
-      }
-      if (settingsResult.status === "fulfilled") {
-        const defaultReferenceId = (
-          settingsResult.value.config?.comfyui?.tts?.fish_audio?.reference_id ??
-          ""
-        ).trim()
-        if (defaultReferenceId) {
-          setSettingsTtsReferenceId(defaultReferenceId)
-          // 与旧版一致：中文默认带入设置里的 Fish reference_id
-          setTtsVoiceByLanguage((current) =>
-            Object.keys(current).length > 0
-              ? current
-              : { Chinese: defaultReferenceId }
-          )
-        }
-      }
-    })
-
     return () => {
       cancelled = true
     }
   }, [templateReloadToken])
 
-  // 项目作用域：草稿集列表随项目切换刷新；首步默认配方/语言/每语言音色取项目默认。
+  useEffect(() => {
+    let cancelled = false
+
+    void Promise.allSettled([getSettingsConfig(), listDraftingProfiles()])
+      .then(([settingsResult, profileResult]) => {
+        if (cancelled) {
+          return
+        }
+
+        if (profileResult.status === "rejected") {
+          throw profileResult.reason
+        }
+
+        const profile =
+          profileResult.value.profiles.find(
+            (item) => item.project_id === projectId
+          ) ?? null
+        if (!profile) {
+          throw new Error(
+            "当前项目没有可用的起草配置，请先到项目设置补全后重试。"
+          )
+        }
+
+        setSourceProfile(profile)
+        setScriptTemplateName(
+          (current) => current || profile.script_template_name
+        )
+        setSplitTemplateName(
+          (current) => current || profile.split_template_name
+        )
+        setScriptModel((current) => current || profile.script_model)
+        setSplitModel((current) => current || profile.split_model)
+        if (Object.keys(profile.language_script_models).length > 0) {
+          setLanguageScriptModels((current) => ({
+            ...profile.language_script_models,
+            ...current,
+          }))
+        }
+        if (settingsResult.status === "fulfilled") {
+          const defaultReferenceId = (
+            settingsResult.value.config?.comfyui?.tts?.fish_audio
+              ?.reference_id ?? ""
+          ).trim()
+          if (defaultReferenceId) {
+            setTtsVoiceByLanguage((current) =>
+              Object.keys(current).length > 0
+                ? current
+                : { Chinese: defaultReferenceId }
+            )
+          }
+          setVoiceDefaultsError(null)
+        } else {
+          setVoiceDefaultsError(readableError(settingsResult.reason))
+        }
+        setProjectDefaultsLoadState("ready")
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          setProjectDefaultsError(readableError(loadError))
+          setProjectDefaultsLoadState("error")
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [projectDefaultsReloadToken, projectId])
+
+  // 项目作用域：草稿集列表随项目切换刷新；最近草稿只作为恢复入口。
   useEffect(() => {
     let cancelled = false
 
@@ -379,37 +439,6 @@ export function ScriptReviewWorkspace() {
         }
       })
 
-    void listDraftingProfiles()
-      .then((response) => {
-        if (cancelled) {
-          return
-        }
-        // 起草配置与项目 1:1：取当前项目的配置
-        const profile =
-          response.profiles.find((item) => item.project_id === projectId) ??
-          null
-        setSourceProfile(profile)
-        if (profile) {
-          setScriptTemplateName(
-            (current) => current || profile.script_template_name
-          )
-          setSplitTemplateName(
-            (current) => current || profile.split_template_name
-          )
-          setScriptModel((current) => current || profile.script_model)
-          setSplitModel((current) => current || profile.split_model)
-          if (Object.keys(profile.language_script_models).length > 0) {
-            setLanguageScriptModels((current) => ({
-              ...profile.language_script_models,
-              ...current,
-            }))
-          }
-        }
-      })
-      .catch(() => {
-        // 配方读取失败不阻塞页面
-      })
-
     return () => {
       cancelled = true
     }
@@ -419,15 +448,25 @@ export function ScriptReviewWorkspace() {
     if (!submittedBatch || isTerminalBatchStatus(submittedBatch.status)) {
       return
     }
+    let cancelled = false
     const timer = window.setInterval(() => {
       void getGenerationBatch(submittedBatch.batch_id)
         .then((response) => {
-          setSubmittedBatch(response)
-          setBatchPollingError(null)
+          if (!cancelled) {
+            setSubmittedBatch(response)
+            setBatchPollingError(null)
+          }
         })
-        .catch((pollError) => setBatchPollingError(readableError(pollError)))
+        .catch((pollError) => {
+          if (!cancelled) {
+            setBatchPollingError(readableError(pollError))
+          }
+        })
     }, 2000)
-    return () => window.clearInterval(timer)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
   }, [submittedBatch])
 
   async function refreshDraftSets() {
@@ -462,6 +501,14 @@ export function ScriptReviewWorkspace() {
     setIsProductionCatalogLoading(true)
     setProductionCatalogError(null)
     setProductionCatalogReloadToken((token) => token + 1)
+  }
+
+  function retryProjectDefaultsLoad() {
+    setProjectDefaultsError(null)
+    setVoiceDefaultsError(null)
+    setProjectDefaultsLoadState("loading")
+    setSourceProfile(null)
+    setProjectDefaultsReloadToken((token) => token + 1)
   }
 
   async function createDrafts() {
@@ -739,6 +786,51 @@ export function ScriptReviewWorkspace() {
         hasDraft={Boolean(draftSet)}
         onStepChange={changeStep}
       />
+
+      {projectDefaultsLoadState === "loading" ? (
+        <AsyncState
+          className="max-w-none"
+          description="正在读取当前项目的起草配置与语音默认值。"
+          state="loading"
+          title="正在读取项目默认设置"
+        />
+      ) : projectDefaultsLoadState === "error" ? (
+        <AsyncState
+          action={
+            <Button
+              onClick={retryProjectDefaultsLoad}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              重新读取项目默认设置
+            </Button>
+          }
+          className="max-w-none"
+          description={projectDefaultsError}
+          state="error"
+          title="无法确认项目默认设置"
+        />
+      ) : null}
+
+      {projectDefaultsLoadState === "ready" && voiceDefaultsError ? (
+        <AsyncState
+          action={
+            <Button
+              onClick={retryProjectDefaultsLoad}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              重新读取语音默认值
+            </Button>
+          }
+          className="max-w-none"
+          description={`${voiceDefaultsError}。项目音色和手动输入仍可继续使用。`}
+          state="stale"
+          title="全局语音默认值暂未同步"
+        />
+      ) : null}
 
       {step === 1 ? (
         <section
