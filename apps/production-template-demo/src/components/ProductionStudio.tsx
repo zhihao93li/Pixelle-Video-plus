@@ -94,6 +94,7 @@ import { useTaskCenter } from "@/lib/taskCenter"
 import { useCurrentProject } from "@/lib/currentProject"
 import { useLocalStorageState } from "@/lib/useLocalStorageState"
 import {
+  apiResourceUrl,
   artifactFileUrl,
   cancelGenerationTask,
   createGenerationBatch,
@@ -1376,6 +1377,21 @@ function StandardInput({
                     ))}
                 </SelectContent>
               </Select>
+              {/* 静态预览图（原版 docs/images 图库）：选择即见；「生成预览」留给带自定义参数的真渲染 */}
+              {(() => {
+                const previewSrc = apiResourceUrl(
+                  resources.frameTemplates.find(
+                    (item) => item.key === advancedSettings.frameTemplate
+                  )?.preview_url
+                )
+                return previewSrc ? (
+                  <img
+                    alt="画面模板样式预览"
+                    className="mt-2 max-h-64 w-auto self-start rounded-md border"
+                    src={previewSrc}
+                  />
+                ) : null
+              })()}
             </Field>
 
             {expertMode && (
@@ -1696,30 +1712,28 @@ function StandardInput({
           title="声音与音乐"
         >
           <div className="grid gap-4 lg:grid-cols-2">
-            {expertMode && (
-              <Field>
-                <FieldLabel>TTS 模式</FieldLabel>
-                <Select
-                  onValueChange={(value) =>
-                    patchAdvanced({
-                      ttsInferenceMode:
-                        value as StandardAdvancedSettings["ttsInferenceMode"],
-                    })
-                  }
-                  value={advancedSettings.ttsInferenceMode}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="local">本地 / Edge Voice</SelectItem>
-                    <SelectItem value="comfyui">ComfyUI workflow</SelectItem>
-                    <SelectItem value="fish">Fish Audio</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FieldDescription>专家模式覆盖项。</FieldDescription>
-              </Field>
-            )}
+            {/* 配音引擎决定音色 ID 的取值方式，常驻显示（2026-07-08 用户反馈，移出专家门控） */}
+            <Field>
+              <FieldLabel>配音引擎</FieldLabel>
+              <Select
+                onValueChange={(value) =>
+                  patchAdvanced({
+                    ttsInferenceMode:
+                      value as StandardAdvancedSettings["ttsInferenceMode"],
+                  })
+                }
+                value={advancedSettings.ttsInferenceMode}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="local">本地 / Edge Voice</SelectItem>
+                  <SelectItem value="comfyui">ComfyUI workflow</SelectItem>
+                  <SelectItem value="fish">Fish Audio</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
 
             <Field>
               <FieldLabel htmlFor="advanced-tts-voice">

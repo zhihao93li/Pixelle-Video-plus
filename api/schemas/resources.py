@@ -45,6 +45,10 @@ class TemplateInfo(BaseModel):
     orientation: str = Field(..., description="Orientation (portrait/landscape/square)")
     path: str = Field(..., description="Full path to template file")
     key: str = Field(..., description="Template key (size/name)")
+    preview_url: str | None = Field(
+        None,
+        description="Static preview image URL (from docs/images), None if unavailable",
+    )
 
 
 class TemplateListResponse(BaseModel):

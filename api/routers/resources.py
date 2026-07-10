@@ -19,6 +19,7 @@ Provides endpoints to discover available workflows, templates, and BGM.
 import re
 from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from loguru import logger
 
 from api.dependencies import PixelleVideoDep
@@ -149,6 +150,41 @@ async def list_image_workflows(pixelle_video: PixelleVideoDep):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+_PREVIEW_EXTENSIONS = (".jpg", ".png", ".webp")
+
+
+def _template_preview_url(key: str) -> str | None:
+    """
+    静态预览图查找：docs/images/{size}/{stem}.jpg|png|webp（Streamlit 原版同源图库）。
+    找不到返回 None，前端据此隐藏预览。
+    """
+    parts = key.split("/")
+    if len(parts) != 2:
+        return None
+    size, filename = parts
+    stem = Path(filename).stem
+    if not re.fullmatch(r"\d+x\d+", size) or not re.fullmatch(r"[\w.-]+", stem):
+        return None
+    base = Path(get_root_path()) / "docs" / "images" / size
+    for ext in _PREVIEW_EXTENSIONS:
+        if (base / f"{stem}{ext}").exists():
+            return f"/resources/templates/preview/{size}/{stem}"
+    return None
+
+
+@router.get("/templates/preview/{size}/{stem}")
+async def get_template_preview(size: str, stem: str):
+    """Serve the static preview image for a frame template (path-traversal safe)."""
+    if not re.fullmatch(r"\d+x\d+", size) or not re.fullmatch(r"[\w.-]+", stem):
+        raise HTTPException(status_code=404, detail="Preview not found")
+    base = Path(get_root_path()) / "docs" / "images" / size
+    for ext in _PREVIEW_EXTENSIONS:
+        candidate = base / f"{stem}{ext}"
+        if candidate.exists():
+            return FileResponse(candidate)
+    raise HTTPException(status_code=404, detail="Preview not found")
+
+
 @router.get("/templates", response_model=TemplateListResponse)
 async def list_templates():
     """
@@ -190,7 +226,8 @@ async def list_templates():
                 height=t.display_info.height,
                 orientation=t.display_info.orientation,
                 path=t.template_path,
-                key=t.template_path
+                key=t.template_path,
+                preview_url=_template_preview_url(t.template_path),
             ))
         
         return TemplateListResponse(templates=templates)

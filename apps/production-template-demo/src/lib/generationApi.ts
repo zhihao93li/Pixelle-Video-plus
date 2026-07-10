@@ -504,6 +504,8 @@ export type ResourceTemplate = {
   orientation: string
   path: string
   key: string
+  /** 静态预览图相对路径（docs/images 同源图库），无则 null */
+  preview_url?: string | null
 }
 
 export type ResourceBgm = {
@@ -1214,6 +1216,14 @@ export function resourceFileUrl(path: string | null | undefined) {
     .map((part) => encodeURIComponent(part))
     .join("/")
   return `${API_BASE_URL.replace(/\/$/, "")}/files/${encodedPath}`
+}
+
+/** 资源相对 URL（如模板 preview_url）拼成完整 API 地址；空值透传 null。 */
+export function apiResourceUrl(path: string | null | undefined) {
+  if (!path) {
+    return null
+  }
+  return `${API_BASE_URL.replace(/\/$/, "")}${path}`
 }
 
 export async function listResourceTemplates() {
