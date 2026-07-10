@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
-    "test:p1": "node --test tests/resultSummary.test.ts tests/generationApi.test.ts tests/scriptReviewDraftFeedback.test.ts tests/productViewModels.test.ts tests/productionSurface.test.ts",
+    "test:p1": "node --test tests/resultSummary.test.ts tests/generationApi.test.ts tests/scriptReviewDraftFeedback.test.ts tests/productViewModels.test.ts tests/productionSurface.test.ts tests/specialPipelineSurface.test.ts tests/settingsWorkspace.test.ts",
     "test:e2e": "playwright test",
     "typecheck": "tsc -b",
     "preview": "vite preview"
