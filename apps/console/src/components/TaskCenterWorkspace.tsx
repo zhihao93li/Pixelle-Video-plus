@@ -100,29 +100,43 @@ export function TaskCenterWorkspace() {
   useEffect(() => {
     let cancelled = false
 
-    void Promise.all([listGenerationBatches(), listTemplates()])
-      .then(([batchResponse, templateResponse]) => {
+    void Promise.allSettled([listGenerationBatches(), listTemplates()])
+      .then(([batchResult, templateResult]) => {
         if (cancelled) {
           return
         }
+
+        if (batchResult.status === "rejected") {
+          setLoadError(readableError(batchResult.reason))
+          setLoadState(
+            batches.length > 0 || tasks.length > 0 ? "stale" : "error"
+          )
+          return
+        }
+
+        const batchResponse = batchResult.value
         const nextTemplateMap: Record<string, BatchTemplateInfo> = {}
-        for (const template of templateResponse.templates) {
-          nextTemplateMap[template.id] = {
-            pipelineId: template.pipeline_id,
-            displayName: template.display_name,
+        if (templateResult.status === "fulfilled") {
+          for (const template of templateResult.value.templates) {
+            nextTemplateMap[template.id] = {
+              pipelineId: template.pipeline_id,
+              displayName: template.display_name,
+            }
           }
+          setTemplateMap(nextTemplateMap)
         }
         setBatches(batchResponse.batches)
-        setTemplateMap(nextTemplateMap)
-        setLoadError(null)
-        setLoadState("ready")
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return
+        if (templateResult.status === "rejected") {
+          setLoadError(
+            `运行列表已读取，但配方名称暂未同步：${readableError(
+              templateResult.reason
+            )}`
+          )
+          setLoadState("stale")
+        } else {
+          setLoadError(null)
+          setLoadState("ready")
         }
-        setLoadError(readableError(error))
-        setLoadState(batches.length > 0 || tasks.length > 0 ? "stale" : "error")
       })
       .finally(() => {
         if (!cancelled) {
@@ -573,24 +587,39 @@ function RunDetail({
                       ) : null}
                       <Progress className="mt-2" value={child.progress} />
                     </div>
-                    {child.canRetry ? (
-                      <Button
-                        disabled={retryingItemIndex !== null}
-                        onClick={() => onRetryChild(child.id)}
-                        size="sm"
-                        variant="outline"
-                      >
-                        {retrying ? (
-                          <Loader2
-                            className="animate-spin"
-                            data-icon="inline-start"
-                          />
-                        ) : (
-                          <RotateCcw data-icon="inline-start" />
-                        )}
-                        重试
-                      </Button>
-                    ) : null}
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      {rawItem?.task_id &&
+                      statusIs(child.state, "completed") ? (
+                        <Button asChild size="sm" variant="outline">
+                          <a
+                            href={routeHref(
+                              `/library?task=${encodeURIComponent(rawItem.task_id)}`
+                            )}
+                          >
+                            <FolderOpen data-icon="inline-start" />
+                            查看产物
+                          </a>
+                        </Button>
+                      ) : null}
+                      {child.canRetry ? (
+                        <Button
+                          disabled={retryingItemIndex !== null}
+                          onClick={() => onRetryChild(child.id)}
+                          size="sm"
+                          variant="outline"
+                        >
+                          {retrying ? (
+                            <Loader2
+                              className="animate-spin"
+                              data-icon="inline-start"
+                            />
+                          ) : (
+                            <RotateCcw data-icon="inline-start" />
+                          )}
+                          重试
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                   {child.error ? (
                     <p className="mt-2 text-xs text-destructive">

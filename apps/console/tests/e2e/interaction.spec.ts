@@ -140,6 +140,31 @@ test.describe("键盘与浏览器历史", () => {
     expect(unhandledApi).toEqual([])
   })
 
+  test("作品库筛选、页码和选中项共同进入 URL", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page, { historyPages: 3 })
+    await preparePage(page)
+    await page.goto(`/#/library?task=${fixtureIds.historyVideoTask}`, {
+      waitUntil: "networkidle",
+    })
+
+    await page.getByRole("combobox", { name: "筛选作品形态" }).click()
+    await page.getByRole("option", { name: "图集", exact: true }).click()
+    await expect(page).toHaveURL(/kind=image_set/)
+    await expect(page).toHaveURL(
+      new RegExp(`task=${fixtureIds.historyImageTask}`)
+    )
+
+    await page.getByRole("combobox", { name: "筛选作品状态" }).click()
+    await page.getByRole("option", { name: "已完成", exact: true }).click()
+    await expect(page).toHaveURL(/status=completed/)
+
+    await page.getByRole("button", { name: "下一页" }).click()
+    await expect(page).toHaveURL(/page=2/)
+    await expect(page).toHaveURL(/kind=image_set/)
+    await expect(page).toHaveURL(/status=completed/)
+    expect(unhandledApi).toEqual([])
+  })
+
   test("项目分区未保存更改会拦截离开，并支持留下或放弃", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page)
     await preparePage(page)

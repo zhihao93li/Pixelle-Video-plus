@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react"
+import { FolderOpen, Loader2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -9,6 +9,7 @@ import { getBatchPreviewTitle } from "@/lib/batchInput"
 import { useExpertMode } from "@/lib/expertMode"
 import type { GenerationBatch, GenerationBatchItem } from "@/lib/generationApi"
 import { adaptRunStatus, statusIs } from "@/lib/productViewModels"
+import { routeHref } from "@/lib/router"
 import { cn } from "@/lib/utils"
 
 /**
@@ -73,6 +74,18 @@ export function BatchStatusCard({
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                   <StatusBadge status={status} />
+                  {item.task_id && statusIs(status, "completed") ? (
+                    <Button asChild size="sm" variant="outline">
+                      <a
+                        href={routeHref(
+                          `/library?task=${encodeURIComponent(item.task_id)}`
+                        )}
+                      >
+                        <FolderOpen data-icon="inline-start" />
+                        查看产物
+                      </a>
+                    </Button>
+                  ) : null}
                   {canRetryBatchItem(item) && (
                     <Button
                       disabled={retryingItemIndex !== null}

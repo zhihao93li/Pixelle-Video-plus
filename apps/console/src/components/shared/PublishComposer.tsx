@@ -3,6 +3,7 @@ import {
   ExternalLink,
   Loader2,
   RefreshCcw,
+  RotateCcw,
   Send,
   XCircle,
 } from "lucide-react"
@@ -93,6 +94,8 @@ export function PublishComposer({
   onCheck,
   onSubmit,
 }: PublishComposerProps) {
+  const hasRetryableAttempt = attempts.some((attempt) => attempt.canRetry)
+
   return (
     <div className="flex min-w-0 flex-col gap-6">
       {attempts.length > 0 ? (
@@ -277,10 +280,16 @@ export function PublishComposer({
           <Button disabled={submitDisabled} onClick={onSubmit}>
             {isPublishing ? (
               <Loader2 className="animate-spin" data-icon="inline-start" />
+            ) : hasRetryableAttempt ? (
+              <RotateCcw data-icon="inline-start" />
             ) : (
               <Send data-icon="inline-start" />
             )}
-            {attempts.length > 0 ? "再次提交发布" : "提交发布"}
+            {hasRetryableAttempt
+              ? "重试失败发布"
+              : attempts.length > 0
+                ? "再次提交发布"
+                : "提交发布"}
           </Button>
         </div>
         {submitDisabled && disabledReason ? (

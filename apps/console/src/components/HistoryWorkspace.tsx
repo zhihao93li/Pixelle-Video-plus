@@ -219,7 +219,7 @@ export function HistoryWorkspace({
     const hadHistory = history !== null
     const activeRequestKey = `${requestKey}:${refreshToken}`
 
-    void Promise.all([
+    void Promise.allSettled([
       listHistoryTasks({
         page,
         pageSize: PAGE_SIZE,
@@ -228,40 +228,48 @@ export function HistoryWorkspace({
         sortOrder,
       }),
       getHistoryStatistics(),
-    ])
-      .then(([taskList, stats]) => {
-        if (cancelled) {
-          return
-        }
-        setHistory(taskList)
-        setStatistics(stats)
+    ]).then(([taskListResult, statisticsResult]) => {
+      if (cancelled) {
+        return
+      }
+      setLoadedRequestKey(activeRequestKey)
+
+      if (taskListResult.status === "rejected") {
+        setHistoryError(readableError(taskListResult.reason))
+        setHistoryState(hadHistory ? "stale" : "error")
+        return
+      }
+
+      const taskList = taskListResult.value
+      setHistory(taskList)
+      if (statisticsResult.status === "fulfilled") {
+        setStatistics(statisticsResult.value)
         setHistoryError(null)
         setHistoryState("ready")
-        setLoadedRequestKey(activeRequestKey)
-
-        const filtered = filterHistoryTasks(
-          taskList.tasks,
-          searchQuery,
-          artifactFilter
+      } else {
+        setHistoryError(
+          `作品列表已读取，但数据摘要暂未同步：${readableError(
+            statisticsResult.reason
+          )}`
         )
-        const nextTaskId =
-          (selectedTaskId &&
-            filtered.some((task) => task.task_id === selectedTaskId) &&
-            selectedTaskId) ||
-          filtered[0]?.task_id ||
-          null
-        if (nextTaskId !== selectedTaskId) {
-          navigate(libraryPath(routeQuery, { task: nextTaskId }))
-        }
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return
-        }
-        setHistoryError(readableError(error))
-        setHistoryState(hadHistory ? "stale" : "error")
-        setLoadedRequestKey(activeRequestKey)
-      })
+        setHistoryState("stale")
+      }
+
+      const filtered = filterHistoryTasks(
+        taskList.tasks,
+        searchQuery,
+        artifactFilter
+      )
+      const nextTaskId =
+        (selectedTaskId &&
+          filtered.some((task) => task.task_id === selectedTaskId) &&
+          selectedTaskId) ||
+        filtered[0]?.task_id ||
+        null
+      if (nextTaskId !== selectedTaskId) {
+        navigate(libraryPath(routeQuery, { task: nextTaskId }))
+      }
+    })
 
     return () => {
       cancelled = true
@@ -1473,7 +1481,7 @@ function adaptPublishAttempts(
       publishedAt: statusIs(state, "published") ? job.updated_at || null : null,
       publicUrl: job.public_video_url || null,
       error: job.error || null,
-      canRetry: false,
+      canRetry: statusIs(state, "failed"),
     }
   })
 }

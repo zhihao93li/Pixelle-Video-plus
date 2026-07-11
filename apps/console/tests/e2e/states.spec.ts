@@ -207,6 +207,247 @@ test.describe("项目边界与页面异步状态", () => {
   })
 })
 
+test.describe("Phase 3 Content 异步状态", () => {
+  test("工作台 loading", async ({ page }) => {
+    await installApiFixtures(page, {
+      contentState: "loading",
+      delayMs: 5_000,
+    })
+    await preparePage(page)
+    await page.goto("/#/board", { waitUntil: "domcontentloaded" })
+
+    await expect(page.getByText("正在读取内容…")).toBeVisible()
+  })
+
+  test("工作台 empty", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page, {
+      contentState: "empty",
+    })
+    await preparePage(page)
+    await page.goto("/#/board", { waitUntil: "networkidle" })
+
+    await expect(page.getByText("工作台还没有内容")).toBeVisible()
+    await expect(page.getByRole("button", { name: "添加第一条内容" })).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("工作台 error", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page, {
+      contentState: "error",
+    })
+    await preparePage(page)
+    await page.goto("/#/board", { waitUntil: "networkidle" })
+
+    await expect(page.getByText("内容读取失败")).toBeVisible()
+    await expect(page.getByRole("button", { name: "重新读取" })).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("工作台 stale 保留上次内容", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page, {
+      contentState: "stale",
+    })
+    await preparePage(page)
+    await page.goto("/#/board", { waitUntil: "networkidle" })
+
+    await expect(page.getByText("猫咪为什么喜欢猫薄荷")).toBeVisible()
+    await page.getByRole("button", { name: "刷新" }).click()
+    await expect(page.getByText("内容可能已过期")).toBeVisible()
+    await expect(page.getByText("猫咪为什么喜欢猫薄荷")).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("内容详情 loading 与 error 都有就地反馈", async ({ page }) => {
+    await installApiFixtures(page, {
+      contentDetailState: "loading",
+      delayMs: 5_000,
+    })
+    await preparePage(page)
+    await page.goto(`/#/board/item/${fixtureIds.contentItem}`, {
+      waitUntil: "domcontentloaded",
+    })
+    await expect(page.getByText("正在读取内容…")).toBeVisible()
+
+    const errorPage = await page.context().newPage()
+    const unhandledApi = await installApiFixtures(errorPage, {
+      contentDetailState: "error",
+    })
+    await preparePage(errorPage)
+    await errorPage.goto(`/#/board/item/${fixtureIds.contentItem}`, {
+      waitUntil: "networkidle",
+    })
+    await expect(errorPage.getByText("内容读取失败")).toBeVisible()
+    await expect(
+      errorPage.getByRole("button", { name: "重新读取" })
+    ).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("内容详情 stale 保留当前阶段和唯一下一步", async ({
+    page,
+  }) => {
+    const unhandledApi = await installApiFixtures(page, {
+      contentDetailState: "stale",
+      contentItemStatus: "drafting",
+    })
+    await preparePage(page)
+    await page.goto(`/#/board/item/${fixtureIds.contentItem}`, {
+      waitUntil: "networkidle",
+    })
+
+    const lifecycle = page
+      .locator("[data-slot=workspace-panel]")
+      .filter({ hasText: "生命周期" })
+      .filter({ visible: true })
+      .first()
+    await expect(lifecycle.getByText("起草中", { exact: true })).toBeVisible()
+    await lifecycle.getByRole("button", { name: "刷新状态" }).click()
+    await expect(page.getByText("内容可能已过期")).toBeVisible()
+    await expect(lifecycle.getByRole("button", { name: "刷新状态" })).toHaveCount(1)
+    expect(unhandledApi).toEqual([])
+  })
+})
+
+test.describe("Phase 3 Operations 异步状态", () => {
+  for (const scenario of [
+    {
+      state: "empty" as const,
+      path: "/tasks",
+      title: "还没有生产运行",
+    },
+    {
+      state: "error" as const,
+      path: "/tasks",
+      title: "无法读取生产运行",
+    },
+  ]) {
+    test(`任务 ${scenario.state}`, async ({ page }) => {
+      const unhandledApi = await installApiFixtures(page, {
+        taskState: scenario.state,
+      })
+      await preparePage(page)
+      await page.goto(`/#${scenario.path}`, { waitUntil: "networkidle" })
+      await expect(page.getByText(scenario.title)).toBeVisible()
+      expect(unhandledApi).toEqual([])
+    })
+  }
+
+  test("任务 loading", async ({ page }) => {
+    await installApiFixtures(page, { taskState: "loading", delayMs: 5_000 })
+    await preparePage(page)
+    await page.goto("/#/tasks", { waitUntil: "domcontentloaded" })
+    await expect(page.getByText("正在读取生产运行")).toBeVisible()
+  })
+
+  test("任务 stale 保留可操作运行", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page, { taskState: "stale" })
+    await preparePage(page)
+    await page.goto("/#/tasks", { waitUntil: "networkidle" })
+
+    const selectedRunHeading = page.getByRole("heading", {
+      name: "图文口播视频 ×3",
+      exact: true,
+    })
+    await expect(selectedRunHeading).toBeVisible()
+    await page.getByRole("button", { name: "刷新生产运行" }).click()
+    await expect(page.getByText("运行列表可能不是最新状态")).toBeVisible()
+    await expect(selectedRunHeading).toBeVisible()
+    await expect(
+      page.getByRole("link", { name: "查看产物", exact: true })
+    ).toHaveCount(2)
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("配方名称失败不阻断生产运行", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page, {
+      productionState: "error",
+    })
+    await preparePage(page)
+    await page.goto("/#/tasks", { waitUntil: "networkidle" })
+
+    await expect(page.getByText("运行列表可能不是最新状态")).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "批量生产 ×3", exact: true })
+    ).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
+  for (const scenario of [
+    { state: "empty" as const, title: "还没有作品" },
+    { state: "error" as const, title: "无法读取作品库" },
+  ]) {
+    test(`作品库 ${scenario.state}`, async ({ page }) => {
+      const unhandledApi = await installApiFixtures(page, {
+        historyState: scenario.state,
+      })
+      await preparePage(page)
+      await page.goto("/#/library", { waitUntil: "networkidle" })
+      await expect(page.getByText(scenario.title)).toBeVisible()
+      expect(unhandledApi).toEqual([])
+    })
+  }
+
+  test("作品库 loading", async ({ page }) => {
+    await installApiFixtures(page, {
+      historyState: "loading",
+      delayMs: 5_000,
+    })
+    await preparePage(page)
+    await page.goto("/#/library", { waitUntil: "domcontentloaded" })
+    await expect(page.getByText("正在读取作品库")).toBeVisible()
+  })
+
+  test("作品库 stale 保留列表与选中项", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page, {
+      historyState: "stale",
+    })
+    await preparePage(page)
+    await page.goto(`/#/library?task=${fixtureIds.historyVideoTask}`, {
+      waitUntil: "networkidle",
+    })
+
+    await page.getByRole("button", { name: "刷新作品库" }).click()
+    await expect(page.getByText("作品列表可能不是最新状态")).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "猫咪尾巴语言", exact: true })
+    ).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
+  for (const scenario of [
+    { state: "scheduled" as const, label: "已排期" },
+    { state: "published" as const, label: "已发布" },
+    { state: "failed" as const, label: "失败" },
+  ]) {
+    test(`发布状态 ${scenario.state} 有明确语义与恢复操作`, async ({
+      page,
+    }) => {
+      const unhandledApi = await installApiFixtures(page, {
+        publishAttemptState: scenario.state,
+      })
+      await preparePage(page)
+      await page.goto(`/#/library?task=${fixtureIds.historyVideoTask}`, {
+        waitUntil: "networkidle",
+      })
+
+      const publishSection = page.locator(
+        'section[aria-labelledby="detail-publish-heading"]'
+      )
+      await expect(
+        publishSection.getByText(scenario.label, { exact: true })
+      ).toBeVisible()
+      if (scenario.state === "failed") {
+        await expect(page.getByText("渠道暂时拒绝了这次发布。")).toBeVisible()
+        await page.getByRole("button", { name: "查看与调整" }).click()
+        await expect(
+          page.getByRole("button", { name: "重试失败发布" })
+        ).toBeVisible()
+      }
+      expect(unhandledApi).toEqual([])
+    })
+  }
+})
+
 const RUN_STATES: ReadonlyArray<{
   state: SeededRunState
   label: string

@@ -205,11 +205,17 @@ test.describe("生产模式与产物", () => {
       page.getByText("部分失败", { exact: true }).first()
     ).toBeVisible()
     await expect(page.getByText("失败 1", { exact: true })).toBeVisible()
+    await expect(
+      page.getByRole("link", { name: "查看产物", exact: true })
+    ).toHaveCount(2)
     const retry = page.getByRole("button", { name: "重试", exact: true })
     await expect(retry).toHaveCount(1)
     await retry.click()
     await expect(page.getByText("失败 0", { exact: true })).toBeVisible()
     await expect(retry).toHaveCount(0)
+    await expect(
+      page.getByRole("link", { name: "查看产物", exact: true })
+    ).toHaveCount(3)
     expect(unhandledApi).toEqual([])
   })
 

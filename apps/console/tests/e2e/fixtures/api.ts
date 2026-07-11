@@ -24,6 +24,13 @@ const STATIC_IMAGE_URLS = [
 export type ApiFixtureOptions = {
   projectState?: "ready" | "loading" | "empty" | "error"
   productionState?: "ready" | "loading" | "empty" | "error" | "resource-error"
+  contentState?: "ready" | "loading" | "empty" | "error" | "stale"
+  contentDetailState?: "ready" | "loading" | "error" | "stale"
+  contentItemStatus?: string
+  taskState?: "ready" | "loading" | "empty" | "error" | "stale"
+  historyState?: "ready" | "loading" | "empty" | "error" | "stale"
+  historyPages?: number
+  publishAttemptState?: "scheduled" | "published" | "failed"
   settingsState?: "ready" | "loading" | "error" | "stale"
   helpState?: "ready" | "loading" | "empty" | "error"
   includeBatch?: boolean
@@ -460,9 +467,10 @@ const historyDetails: Record<string, Record<string, unknown>> = {
 }
 
 function contentItemForOptions(options: ApiFixtureOptions) {
-  if (!options.contentScript) return contentItem
+  if (!options.contentScript && !options.contentItemStatus) return contentItem
   return {
     ...contentItem,
+    status: options.contentItemStatus ?? contentItem.status,
     variants: {
       ...contentItem.variants,
       Chinese: {
@@ -676,11 +684,28 @@ function responseFor(
     }
   }
   if (method === "GET" && path === "/content-items") {
+    const count = requestCounts.get(`${method} ${path}`) ?? 1
+    if (
+      options.contentState === "error" ||
+      (options.contentState === "stale" && count > 2)
+    ) {
+      return { status: 503, body: { detail: "内容服务暂时不可用。" } }
+    }
     return {
-      body: [contentItemForOptions(options)],
+      body:
+        options.contentState === "empty"
+          ? []
+          : [contentItemForOptions(options)],
     }
   }
   if (method === "GET" && path === `/content-items/${CONTENT_ITEM_ID}`) {
+    const count = requestCounts.get(`${method} ${path}`) ?? 1
+    if (
+      options.contentDetailState === "error" ||
+      (options.contentDetailState === "stale" && count > 2)
+    ) {
+      return { status: 503, body: { detail: "内容详情暂时不可用。" } }
+    }
     return { body: contentItemForOptions(options) }
   }
   if (method === "GET" && path === "/generation/templates") {
@@ -853,9 +878,19 @@ function responseFor(
     return { body: runTaskFixture(decodeURIComponent(path.split("/")[3])) }
   }
   if (method === "GET" && path === "/generation/batches") {
+    const count = requestCounts.get(`${method} ${path}`) ?? 1
+    if (
+      options.taskState === "error" ||
+      (options.taskState === "stale" && count > 2)
+    ) {
+      return { status: 503, body: { detail: "运行列表暂时不可用。" } }
+    }
     return {
       body: {
-        batches: options.includeBatch === false ? [] : [generationBatch],
+        batches:
+          options.includeBatch === false || options.taskState === "empty"
+            ? []
+            : [generationBatch],
       },
     }
   }
@@ -888,13 +923,22 @@ function responseFor(
     }
   }
   if (method === "GET" && path === "/history/tasks") {
+    const count = requestCounts.get(`${method} ${path}`) ?? 1
+    if (
+      options.historyState === "error" ||
+      (options.historyState === "stale" && count > 2)
+    ) {
+      return { status: 503, body: { detail: "作品列表暂时不可用。" } }
+    }
+    const tasks = options.historyState === "empty" ? [] : historyTasks
+    const requestedPage = Number(url.searchParams.get("page") ?? "1")
     return {
       body: {
-        tasks: historyTasks,
-        total: historyTasks.length,
-        page: 1,
+        tasks,
+        total: tasks.length,
+        page: Number.isInteger(requestedPage) ? requestedPage : 1,
         page_size: 20,
-        total_pages: 1,
+        total_pages: options.historyPages ?? 1,
       },
     }
   }
@@ -921,11 +965,39 @@ function responseFor(
   }
   if (method === "GET" && /^\/publish\/tasks\/[^/]+\/record$/.test(path)) {
     const taskId = decodeURIComponent(path.split("/")[3] ?? "")
+    const fixtureState = options.publishAttemptState
+    const fixtureRecord = fixtureState
+      ? {
+          task_id: taskId,
+          title: "猫咪尾巴语言",
+          caption: "尾巴位置和摆动速度会表达情绪。",
+          jobs: [
+            {
+              platform: "youtube",
+              status:
+                fixtureState === "scheduled" ? "queued" : fixtureState,
+              buffer_post_id: "buffer-fixture-state",
+              public_video_url:
+                fixtureState === "published"
+                  ? "https://example.invalid/published/state"
+                  : null,
+              due_at: "2026-07-12T09:00:00Z",
+              error:
+                fixtureState === "failed" ? "渠道暂时拒绝了这次发布。" : null,
+              created_at: "2026-07-10T08:20:00Z",
+              updated_at: "2026-07-10T09:01:00Z",
+            },
+          ],
+          created_at: "2026-07-10T08:20:00Z",
+          updated_at: "2026-07-10T09:01:00Z",
+        }
+      : null
     return {
       body: {
         task_id: taskId,
-        record:
-          taskId === HISTORY_IMAGE_TASK_ID
+        record: fixtureRecord
+          ? fixtureRecord
+          : taskId === HISTORY_IMAGE_TASK_ID
             ? {
                 task_id: taskId,
                 title: "猫咪为什么喜欢猫薄荷",
@@ -1210,6 +1282,21 @@ function shouldDelayFixture(
 ) {
   if (method !== "GET") return false
   if (options.projectState === "loading" && path === "/projects") return true
+  if (options.contentState === "loading" && path === "/content-items") {
+    return true
+  }
+  if (
+    options.contentDetailState === "loading" &&
+    /^\/content-items\/[^/]+$/.test(path)
+  ) {
+    return true
+  }
+  if (options.taskState === "loading" && path === "/generation/batches") {
+    return true
+  }
+  if (options.historyState === "loading" && path === "/history/tasks") {
+    return true
+  }
   if (
     options.productionState === "loading" &&
     path === "/generation/templates"
