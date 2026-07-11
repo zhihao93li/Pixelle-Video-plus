@@ -321,6 +321,8 @@ function SpecialWorkspace({
   const {
     batch: submittedBatch,
     setBatch: setSubmittedBatch,
+    cancelBatch: cancelSubmittedBatch,
+    isCancelling: isCancellingBatch,
     retryItem: retryBatchItem,
     retryingItemIndex: retryingBatchIndex,
   } = useBatchPolling()
@@ -731,6 +733,8 @@ function SpecialWorkspace({
               <BatchStatusCard
                 artifactLabel="视频"
                 batch={submittedBatch}
+                isCancelling={isCancellingBatch}
+                onCancel={() => void cancelSubmittedBatch()}
                 onRetryItem={retryBatchItem}
                 retryingItemIndex={retryingBatchIndex}
               />

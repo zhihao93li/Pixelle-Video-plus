@@ -3,6 +3,7 @@ import test from "node:test"
 
 import {
   addRunninghubWorkflow,
+  cancelGenerationBatch,
   cancelGenerationTask,
   checkPublishConfiguration,
   createGenerationBatch,
@@ -51,7 +52,10 @@ type FetchCall = {
 
 function installFetchMock(responseBody: unknown, status = 200) {
   const calls: FetchCall[] = []
-  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+  globalThis.fetch = (async (
+    url: string | URL | Request,
+    init?: RequestInit
+  ) => {
     calls.push({ url: String(url), init })
     return {
       ok: status >= 200 && status < 300,
@@ -64,7 +68,12 @@ function installFetchMock(responseBody: unknown, status = 200) {
 }
 
 test("history list API sends pagination and filter query parameters", async () => {
-  const calls = installFetchMock({ tasks: [], total: 0, page: 2, page_size: 10 })
+  const calls = installFetchMock({
+    tasks: [],
+    total: 0,
+    page: 2,
+    page_size: 10,
+  })
 
   await listHistoryTasks({
     page: 2,
@@ -124,7 +133,11 @@ test("publish APIs send selected platforms and copy without provider choices", a
 })
 
 test("resource APIs read BGM templates and workflows", async () => {
-  const calls = installFetchMock({ bgm_files: [], templates: [], workflows: [] })
+  const calls = installFetchMock({
+    bgm_files: [],
+    templates: [],
+    workflows: [],
+  })
 
   await listResourceBgm()
   await listResourceTemplates()
@@ -255,10 +268,7 @@ test("settings config APIs read and save shared app configuration", async () => 
       },
     })
   )
-  assert.equal(
-    calls[2].url,
-    "http://127.0.0.1:8000/api/settings/config/reset"
-  )
+  assert.equal(calls[2].url, "http://127.0.0.1:8000/api/settings/config/reset")
   assert.equal(calls[2].init?.method, "POST")
 })
 
@@ -267,10 +277,7 @@ test("settings diagnostics API reads redacted readiness checks", async () => {
 
   await getSettingsDiagnostics()
 
-  assert.equal(
-    calls[0].url,
-    "http://127.0.0.1:8000/api/settings/diagnostics"
-  )
+  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/settings/diagnostics")
 })
 
 test("settings action APIs call real backend utilities", async () => {
@@ -330,7 +337,10 @@ test("settings action APIs call real backend utilities", async () => {
     "http://127.0.0.1:8000/api/settings/buffer/channels"
   )
   assert.equal(calls[5].init?.body, JSON.stringify({ api_key: "buffer-key" }))
-  assert.equal(calls[6].url, "http://127.0.0.1:8000/api/help/faq?language=zh_CN")
+  assert.equal(
+    calls[6].url,
+    "http://127.0.0.1:8000/api/help/faq?language=zh_CN"
+  )
 })
 
 test("asset upload API sends multipart form data without JSON content type", async () => {
@@ -362,7 +372,10 @@ test("asset upload API sends multipart form data without JSON content type", asy
 })
 
 test("generic production template task API sends asset template input and metadata", async () => {
-  const calls = installFetchMock({ success: true, generation_task_id: "task-1" })
+  const calls = installFetchMock({
+    success: true,
+    generation_task_id: "task-1",
+  })
 
   await createGenerationTemplateTask(
     "pipeline_asset_based_base_v1",
@@ -442,12 +455,18 @@ test("generation task cancel API uses task-scoped delete route", async () => {
 
   await cancelGenerationTask("task-1")
 
-  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/generation/tasks/task-1")
+  assert.equal(
+    calls[0].url,
+    "http://127.0.0.1:8000/api/generation/tasks/task-1"
+  )
   assert.equal(calls[0].init?.method, "DELETE")
 })
 
 test("template enabled API PUTs the toggle to the enabled route", async () => {
-  const calls = installFetchMock({ id: "pipeline_asset_based_base_v1", enabled: false })
+  const calls = installFetchMock({
+    id: "pipeline_asset_based_base_v1",
+    enabled: false,
+  })
 
   await setTemplateEnabled("pipeline_asset_based_base_v1", false)
 
@@ -460,7 +479,11 @@ test("template enabled API PUTs the toggle to the enabled route", async () => {
 })
 
 test("generation batch APIs persist real task batches", async () => {
-  const calls = installFetchMock({ batches: [], batch_id: "batch-1", items: [] })
+  const calls = installFetchMock({
+    batches: [],
+    batch_id: "batch-1",
+    items: [],
+  })
 
   await createGenerationBatch({
     templateId: "pipeline_standard_base_v1",
@@ -474,6 +497,7 @@ test("generation batch APIs persist real task batches", async () => {
     idempotencyKey: "batch-key",
   })
   await getGenerationBatch("batch-1")
+  await cancelGenerationBatch("batch-1")
   await retryGenerationBatchItem("batch-1", 2)
   await listGenerationBatches()
 
@@ -499,10 +523,15 @@ test("generation batch APIs persist real task batches", async () => {
   )
   assert.equal(
     calls[2].url,
+    "http://127.0.0.1:8000/api/generation/batches/batch-1"
+  )
+  assert.equal(calls[2].init?.method, "DELETE")
+  assert.equal(
+    calls[3].url,
     "http://127.0.0.1:8000/api/generation/batches/batch-1/items/2/retry"
   )
-  assert.equal(calls[2].init?.method, "POST")
-  assert.equal(calls[3].url, "http://127.0.0.1:8000/api/generation/batches")
+  assert.equal(calls[3].init?.method, "POST")
+  assert.equal(calls[4].url, "http://127.0.0.1:8000/api/generation/batches")
 })
 
 test("script review APIs persist drafts and submit reviewed tasks", async () => {

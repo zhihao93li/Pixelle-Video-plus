@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for your interest in contributing to Pixelle-Video!
+Thank you for contributing to Pixelle.
 
 ---
 
@@ -18,8 +18,8 @@ Thank you for your interest in contributing to Pixelle-Video!
 
 ```bash
 # Clone your fork
-git clone https://github.com/your-username/Pixelle-Video.git
-cd Pixelle-Video
+git clone https://github.com/your-username/Pixelle-Video-plus.git
+cd Pixelle-Video-plus
 
 # Install development dependencies
 uv sync
@@ -40,11 +40,10 @@ pytest
 
 ## Submit Issues
 
-Having problems or feature suggestions? Please submit at [GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues).
+Having problems or feature suggestions? Please submit at [GitHub Issues](https://github.com/zhihao93li/Pixelle-Video-plus/issues).
 
 ---
 
 ## Code of Conduct
 
 Please be friendly and respectful. We are committed to fostering an inclusive community environment.
-

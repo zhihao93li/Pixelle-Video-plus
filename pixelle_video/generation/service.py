@@ -2,6 +2,7 @@ import asyncio
 import os
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Callable
 
 from pixelle_video.generation.quality import build_asset_manifest, run_quality_review
@@ -15,6 +16,10 @@ from pixelle_video.generation.schemas import (
     GenerationResult,
     GenerationTask,
 )
+from pixelle_video.generation.task_store import (
+    load_generation_tasks,
+    save_generation_task,
+)
 from pixelle_video.models.progress import ProgressEvent
 
 
@@ -23,6 +28,7 @@ class GenerationService:
         self,
         pipeline_registry: PipelineRegistry,
         task_id_factory: Callable[[], str] | None = None,
+        storage_dir: Path | None = None,
     ):
         self.pipeline_registry = pipeline_registry
         self._task_id_factory = task_id_factory or (lambda: str(uuid.uuid4()))
@@ -30,6 +36,9 @@ class GenerationService:
         self._futures: dict[str, asyncio.Task] = {}
         self._idempotency_index: dict[str, str] = {}
         self._progress_callbacks: dict[str, Callable[[GenerationTask], None]] = {}
+        self._storage_dir = storage_dir
+        self._shutting_down = False
+        self._restore_tasks()
 
     def submit(
         self,
@@ -51,6 +60,7 @@ class GenerationService:
             progress=GenerationProgress(stage=entry_spec.start_stage, percentage=0.0),
         )
         self._tasks[task_id] = task
+        self._persist_task(task)
 
         if request.idempotency_key:
             self._idempotency_index[request.idempotency_key] = task_id
@@ -80,7 +90,7 @@ class GenerationService:
 
     def cancel_task(self, task_id: str) -> GenerationTask:
         task = self.get_task(task_id)
-        if task.status in {"completed", "failed", "cancelled"}:
+        if task.status in {"completed", "failed", "cancelled", "interrupted"}:
             return task
 
         future = self._futures.get(task_id)
@@ -89,11 +99,20 @@ class GenerationService:
 
         task.status = "cancelled"
         task.updated_at = datetime.now()
+        self._notify_progress(task)
         return task
 
     async def shutdown(self) -> None:
-        for future in self._futures.values():
+        self._shutting_down = True
+        for task_id, future in self._futures.items():
             if not future.done():
+                task = self.get_task(task_id)
+                self._set_interrupted(
+                    task,
+                    message="生成服务停止，任务未能继续执行。",
+                    exception_type="GenerationServiceShutdown",
+                )
+                self._notify_progress(task)
                 future.cancel()
         if self._futures:
             await asyncio.gather(*self._futures.values(), return_exceptions=True)
@@ -111,9 +130,7 @@ class GenerationService:
                 f"Pipeline {request.pipeline_id!r} does not support entry {request.entry!r}"
             ) from None
 
-        missing = [
-            field.name for field in entry.required_fields if field.name not in request.input
-        ]
+        missing = [field.name for field in entry.required_fields if field.name not in request.input]
         if missing:
             fields = ", ".join(missing)
             raise ValueError(
@@ -144,8 +161,15 @@ class GenerationService:
             self._notify_progress(task)
 
         except asyncio.CancelledError:
-            task.status = "cancelled"
-            task.updated_at = datetime.now()
+            if self._shutting_down:
+                self._set_interrupted(
+                    task,
+                    message="生成服务停止，任务未能继续执行。",
+                    exception_type="GenerationServiceShutdown",
+                )
+            else:
+                task.status = "cancelled"
+                task.updated_at = datetime.now()
             self._notify_progress(task)
         except Exception as exc:
             task.status = "failed"
@@ -203,9 +227,52 @@ class GenerationService:
         self._notify_progress(task)
 
     def _notify_progress(self, task: GenerationTask) -> None:
+        self._persist_task(task)
         callback = self._progress_callbacks.get(task.task_id)
         if callback:
             callback(task)
+
+    def _persist_task(self, task: GenerationTask) -> None:
+        if self._storage_dir is not None:
+            save_generation_task(task, self._storage_dir)
+
+    def _restore_tasks(self) -> None:
+        if self._storage_dir is None:
+            return
+        for task in load_generation_tasks(self._storage_dir):
+            if task.status in {"pending", "running"}:
+                self._set_interrupted(
+                    task,
+                    message="生成服务重启，任务未能继续执行。",
+                    exception_type="GenerationServiceRestart",
+                )
+                save_generation_task(task, self._storage_dir)
+            self._tasks[task.task_id] = task
+            if task.request.idempotency_key:
+                self._idempotency_index[task.request.idempotency_key] = task.task_id
+
+    @staticmethod
+    def _set_interrupted(
+        task: GenerationTask,
+        *,
+        message: str,
+        exception_type: str,
+    ) -> None:
+        task.status = "interrupted"
+        task.progress = GenerationProgress(
+            stage="interrupted",
+            percentage=task.progress.percentage,
+            message=message,
+            current=task.progress.current,
+            total=task.progress.total,
+            detail=task.progress.detail,
+        )
+        task.error = GenerationError(
+            layer="runtime",
+            message=message,
+            exception_type=exception_type,
+        )
+        task.updated_at = datetime.now()
 
     def _to_generation_result(self, task: GenerationTask, pipeline_result) -> GenerationResult:
         artifact_type = self._get_result_value(pipeline_result, "artifact_type")
@@ -299,10 +366,9 @@ class GenerationService:
         )
 
     def _to_video_result(self, task: GenerationTask, pipeline_result) -> GenerationResult:
-        video_path = (
-            self._get_result_value(pipeline_result, "video_path")
-            or self._get_result_value(pipeline_result, "final_video_path")
-        )
+        video_path = self._get_result_value(
+            pipeline_result, "video_path"
+        ) or self._get_result_value(pipeline_result, "final_video_path")
         if not video_path:
             raise ValueError("Pipeline completed without a video_path")
 
@@ -366,9 +432,7 @@ class GenerationService:
 def generation_request_from_legacy_video_request(request_body) -> GenerationRequest:
     entry: EntryId = "topic" if request_body.mode == "generate" else "script"
     input_payload = (
-        {"topic": request_body.text}
-        if entry == "topic"
-        else {"script": request_body.text}
+        {"topic": request_body.text} if entry == "topic" else {"script": request_body.text}
     )
 
     params = {

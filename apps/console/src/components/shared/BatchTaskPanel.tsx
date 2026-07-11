@@ -1,17 +1,21 @@
 import { BatchStatusCard } from "@/components/shared/BatchStatusCard"
 import type { GenerationBatch } from "@/lib/generationApi"
 
-/** 阶段 2 的统一批任务入口；后续 ENG-03 可在这里替换为批次 ViewModel。 */
+/** 统一批任务轨：进度、取消、失败项重试和结果入口。 */
 export function BatchTaskPanel({
   artifactLabel,
   batch,
   onRetryItem,
   retryingItemIndex,
+  isCancelling,
+  onCancel,
 }: {
   artifactLabel?: string | null
   batch: GenerationBatch | null
   onRetryItem: (itemIndex: number) => void
   retryingItemIndex: number | null
+  isCancelling: boolean
+  onCancel: () => void
 }) {
   return (
     <aside
@@ -22,6 +26,8 @@ export function BatchTaskPanel({
         artifactLabel={artifactLabel}
         batch={batch}
         className="min-h-[420px] xl:h-[calc(100svh-10.25rem)] xl:min-h-[640px] xl:overflow-y-auto"
+        isCancelling={isCancelling}
+        onCancel={onCancel}
         onRetryItem={onRetryItem}
         retryingItemIndex={retryingItemIndex}
       />

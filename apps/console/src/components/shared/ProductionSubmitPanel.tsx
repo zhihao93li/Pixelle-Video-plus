@@ -158,6 +158,8 @@ export function ProductionSubmitPanel({
     let cancelled = false
 
     async function load() {
+      setIsLoading(true)
+      setLoadError(null)
       try {
         const response = await listTemplates(projectId)
         if (cancelled) {
@@ -171,14 +173,21 @@ export function ProductionSubmitPanel({
             template.product_entry === "generate" &&
             template.input_requirements.includes(requiredInput)
         )
-        if (!usable.some((template) => template.id === templateId)) {
-          const fallback =
-            usable.find((template) => template.id === response.default_template) ??
-            usable[0]
-          if (fallback) {
-            onTemplateChange(fallback.id)
-          }
+        if (usable.some((template) => template.id === templateId)) {
+          return
         }
+        const defaultTemplate = usable.find(
+          (template) => template.id === response.default_template
+        )
+        if (!templateId && defaultTemplate) {
+          onTemplateChange(defaultTemplate.id)
+          return
+        }
+        setLoadError(
+          templateId
+            ? "当前生产模板不存在或不支持这个输入类型，请重新选择。"
+            : "当前项目没有可用于这个输入类型的默认生产模板。"
+        )
       } catch (error) {
         if (!cancelled) {
           setLoadError(readableError(error))
@@ -306,7 +315,7 @@ export function ProductionSubmitPanel({
         </p>
       </div>
 
-      {loadError && <InlineError title="模板读取失败" message={loadError} />}
+      {loadError && <InlineError title="生产模板不可用" message={loadError} />}
 
       {isLoading ? (
         <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
@@ -323,7 +332,10 @@ export function ProductionSubmitPanel({
               )}
             </span>
             <RecipeSelect
-              onChange={(template) => onTemplateChange(template.id)}
+              onChange={(template) => {
+                setLoadError(null)
+                onTemplateChange(template.id)
+              }}
               placeholder="选择生产配方"
               templates={compatible}
               value={templateId}

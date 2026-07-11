@@ -3,7 +3,7 @@ import { expect, test } from "playwright/test"
 import { preparePage } from "./fixtures/app"
 import { fixtureIds, installApiFixtures } from "./fixtures/api"
 
-test.describe("Phase 4 专用生产", () => {
+test.describe("专用生产", () => {
   test("保留精确配方身份，切换模式不带入旧草稿", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page)
     await preparePage(page)
@@ -83,7 +83,7 @@ test.describe("Phase 4 专用生产", () => {
   })
 })
 
-test.describe("Phase 4 文案审核", () => {
+test.describe("文案审核", () => {
   test("首步只突出选题与语言，第二步按选题和语言折叠编辑", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       scriptReviewState: "save-error",
@@ -132,7 +132,7 @@ test.describe("Phase 4 文案审核", () => {
   })
 })
 
-test.describe("Phase 4 设置中心", () => {
+test.describe("设置中心", () => {
   test("诊断服务失败不阻断设置表单", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       settingsDiagnosticsState: "error",

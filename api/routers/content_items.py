@@ -28,6 +28,7 @@ from pixelle_video.content.store import (
     load_item,
     save_item,
 )
+from pixelle_video.generation.task_store import load_generation_task
 from pixelle_video.utils.os_util import get_data_path
 
 router = APIRouter(prefix="/content-items", tags=["Content Items"])
@@ -38,6 +39,7 @@ def _default_project_id() -> str:
     ensure_migrated()
     project = get_default_project()
     return project.project_id if project else "PetWoods"
+
 
 # 可被测试覆盖的存量草稿目录（None 时回落到 data/script-review-drafts/）。
 SCRIPT_REVIEW_DIR: Path | None = None
@@ -100,7 +102,12 @@ async def list_content_items(
 ):
     # 触发一次幂等迁移（存量条目归拢到默认项目）；无 project 参数返回全部。
     ensure_migrated()
-    return list_items(status=status, limit=limit, project=project)
+    items = list_items(limit=1000, project=project)
+    reconciled = [_reconcile_production_state(item) for item in items]
+    if status:
+        wanted = {part.strip() for part in status.split(",") if part.strip()}
+        reconciled = [item for item in reconciled if item.status in wanted]
+    return reconciled[:limit]
 
 
 @router.post("", response_model=list[ContentItem])
@@ -145,7 +152,7 @@ async def get_content_item(item_id: str):
     item = load_item(item_id)
     if item is None:
         raise HTTPException(status_code=404, detail=f"未找到内容条目：{item_id}")
-    return item
+    return _reconcile_production_state(item)
 
 
 @router.patch("/{item_id}", response_model=ContentItem)
@@ -203,6 +210,8 @@ async def transition_content_item(item_id: str, request: ContentItemTransitionRe
 
     previous = item.status
     item.status = request.to
+    if request.to == "producing":
+        item.automation.pop("production_failure", None)
     item.updated_at = now_iso()
     detail = {"from": previous, "to": request.to}
     if request.detail:
@@ -210,6 +219,81 @@ async def transition_content_item(item_id: str, request: ContentItemTransitionRe
     item.add_event("status_changed", request.actor, detail)
     save_item(item)
     return item
+
+
+def _reconcile_production_state(item: ContentItem) -> ContentItem:
+    """Resolve a producing item from canonical persisted generation tasks."""
+    if item.status != "producing":
+        return item
+
+    task_ids = [str(task_id) for task_id in item.links.get("task_ids", []) if task_id]
+    if not task_ids:
+        return item
+
+    tasks = [load_generation_task(task_id) for task_id in task_ids]
+    known_tasks = [task for task in tasks if task is not None]
+    if not known_tasks:
+        return item
+
+    latest_batch_id = next(
+        (str(batch_id) for batch_id in reversed(item.links.get("batch_ids", [])) if batch_id),
+        None,
+    )
+    current_tasks = (
+        [task for task in known_tasks if task.request.metadata.get("batch_id") == latest_batch_id]
+        if latest_batch_id
+        else known_tasks
+    )
+    if not current_tasks:
+        return item
+
+    statuses = {task.status for task in current_tasks}
+    if statuses == {"completed"}:
+        _apply_reconciled_transition(
+            item,
+            "produced",
+            "produced",
+            {"task_ids": [task.task_id for task in current_tasks]},
+        )
+        item.automation.pop("production_failure", None)
+        save_item(item)
+    elif statuses.issubset({"completed", "failed", "cancelled", "interrupted"}) and any(
+        status in {"failed", "cancelled", "interrupted"} for status in statuses
+    ):
+        failed_tasks = [task for task in current_tasks if task.status in {"failed", "interrupted"}]
+        message = next(
+            (task.error.message for task in failed_tasks if task.error),
+            "生产任务未完成，可检查设置后重试。",
+        )
+        item.automation["production_failure"] = {
+            "message": message,
+            "task_ids": [task.task_id for task in current_tasks],
+        }
+        _apply_reconciled_transition(
+            item,
+            "confirmed",
+            "production_failed",
+            {"message": message},
+        )
+        save_item(item)
+
+    return item
+
+
+def _apply_reconciled_transition(
+    item: ContentItem,
+    target: str,
+    event_type: str,
+    detail: dict,
+) -> None:
+    previous = item.status
+    item.status = target
+    item.updated_at = now_iso()
+    item.add_event(
+        event_type,
+        "system",
+        {"from": previous, "to": target, **detail},
+    )
 
 
 @router.delete("/{item_id}")
@@ -272,7 +356,9 @@ def _import_from_draft_sets(
                     script=(payload or {}).get("script", ""),
                     narrations=list((payload or {}).get("narrations", []) or []),
                 )
-            languages = draft.get("selected_languages") or list(language_drafts.keys()) or set_languages
+            languages = (
+                draft.get("selected_languages") or list(language_drafts.keys()) or set_languages
+            )
             title = draft.get("title") or draft.get("topic") or "未命名选题"
 
             item = new_content_item(
@@ -315,9 +401,7 @@ async def _import_from_history(
             linked_task_ids.add(task_id)
 
     try:
-        listing = await history.get_task_list(
-            page=1, page_size=1000, status="completed"
-        )
+        listing = await history.get_task_list(page=1, page_size=1000, status="completed")
     except Exception as error:  # noqa: BLE001 - 存量导入不应因历史读失败而中断
         logger.warning(f"导入历史任务失败：{error}")
         return [], 0

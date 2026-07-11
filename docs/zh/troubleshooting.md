@@ -94,7 +94,7 @@ uv sync
 
 仍有问题？
 
-1. 查看项目 [GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues)
+1. 查看项目 [GitHub Issues](https://github.com/zhihao93li/Pixelle-Video-plus/issues)
 2. 提交新的 Issue 描述你的问题
 3. 包含错误日志和配置信息以便快速定位
 
@@ -105,4 +105,3 @@ uv sync
 日志文件位于项目根目录：
 - `api_server.log` - API 服务日志
 - `test_output.log` - 测试日志
-

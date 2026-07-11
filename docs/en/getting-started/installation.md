@@ -1,134 +1,51 @@
 # Installation
 
-This page will guide you through installing Pixelle-Video.
+## Requirements
 
----
+- Python 3.11+
+- Node.js 20+
+- `uv`
+- FFmpeg and FFprobe
+- macOS, Linux, or Windows
 
-## System Requirements
+A compatible GPU and model installation are required only when using a local ComfyUI service.
 
-### Required
-
-- **Python**: 3.10 or higher
-- **Operating System**: Windows, macOS, or Linux
-- **Package Manager**: uv (recommended) or pip
-
-### Optional
-
-- **GPU**: NVIDIA GPU with 6GB+ VRAM recommended for local ComfyUI
-- **Network**: Stable internet connection for LLM API and image generation services
-
----
-
-## 🪟 Windows All-in-One Package (Recommended for Windows Users)
-
-**No need to install Python, uv, or ffmpeg - ready to use out of the box!**
-
-### Download and Install
-
-1. Visit [GitHub Releases](https://github.com/AIDC-AI/Pixelle-Video/releases/latest) to download the latest version
-2. Download the latest Windows All-in-One Package and extract it to any directory
-3. Double-click `start.bat` to launch the Web interface
-4. Your browser will automatically open `http://localhost:8501`
-
-!!! success "Installation Complete!"
-    The package includes all dependencies, no need to manually install any environment. On first use, you only need to configure API keys in "⚙️ System Configuration" to get started.
-
-!!! tip "Next Steps"
-    After installation, check out the [Configuration Guide](configuration.md) to set up LLM and image generation services, then see [Quick Start](quick-start.md) to create your first video.
-
----
-
-## Install from Source (For macOS / Linux Users or Users Who Need Customization)
-
-### Step 1: Clone the Repository
+## Install Source Dependencies
 
 ```bash
-git clone https://github.com/AIDC-AI/Pixelle-Video.git
-cd Pixelle-Video
+git clone https://github.com/zhihao93li/Pixelle-Video-plus.git
+cd Pixelle-Video-plus
+uv sync --extra dev
+cd apps/console
+npm install
 ```
 
-### Step 2: Install Dependencies
-
-!!! tip "Recommended: Use uv"
-    This project uses `uv` as the package manager, which is faster and more reliable than traditional pip.
-
-#### Using uv (Recommended)
+Copy the example configuration:
 
 ```bash
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install project dependencies (uv will create a virtual environment automatically)
-uv sync
+cp config.example.yaml config.yaml
 ```
 
-#### Using pip
+Credentials and service URLs can also be entered in the console Settings area.
+
+## Verify the Installation
+
+From the repository root:
 
 ```bash
-# Create virtual environment
-python -m venv venv
-
-# Activate virtual environment
-# Windows:
-venv\Scripts\activate
-# macOS/Linux:
-source venv/bin/activate
-
-# Install dependencies
-pip install -e .
+uv run python -c "from api.app import app; print(app.title)"
+uv run ffmpeg -version
 ```
 
----
-
-## Verify Installation
-
-Run the following command to verify the installation:
+From `apps/console`:
 
 ```bash
-# Using uv
-uv run streamlit run web/app.py
-
-# Or using pip (activate virtual environment first)
-streamlit run web/app.py
+npm run typecheck
+npm run build
 ```
 
-Your browser should automatically open `http://localhost:8501` and display the Pixelle-Video web interface.
+Continue with the [quick start](quick-start.md).
 
-!!! success "Installation Successful!"
-    If you can see the web interface, the installation was successful! Next, check out the [Configuration Guide](configuration.md) to set up your services.
+## Optional Surface
 
----
-
-## Optional: Install ComfyUI (Local Deployment)
-
-If you want to run image generation locally, you'll need to install ComfyUI:
-
-### Quick Install
-
-```bash
-# Clone ComfyUI
-git clone https://github.com/comfyanonymous/ComfyUI.git
-cd ComfyUI
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### Start ComfyUI
-
-```bash
-python main.py
-```
-
-ComfyUI runs on `http://127.0.0.1:8188` by default.
-
-!!! info "ComfyUI Models"
-    ComfyUI requires downloading model files to work. Please refer to the [ComfyUI documentation](https://github.com/comfyanonymous/ComfyUI) for information on downloading and configuring models.
-
----
-
-## Next Steps
-
-- [Configuration](configuration.md) - Configure LLM and image generation services
-- [Quick Start](quick-start.md) - Create your first video
-
+`web/app.py` is a standalone Streamlit utility for the Windows bundle and low-level capability diagnostics. The React console is the production product surface.

@@ -30,7 +30,7 @@ import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
 import { WorkspacePanel } from "@/components/shared/WorkspacePanel"
 import { AddContentDialog } from "@/components/AddContentDialog"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { BOARD_COLUMNS } from "@/lib/contentItemMeta"
+import { BOARD_COLUMNS, contentProductionFailure } from "@/lib/contentItemMeta"
 import { formatDate, readableError } from "@/lib/format"
 import { languageLabel } from "@/lib/languages"
 import { navigate, routeHref } from "@/lib/router"
@@ -44,10 +44,8 @@ import { useCurrentProject } from "@/lib/currentProject"
 import { useTaskCenter } from "@/lib/taskCenter"
 import { cn } from "@/lib/utils"
 import {
-  getTask,
   importExistingContentItems,
   listContentItems,
-  transitionContentItem,
   type ContentItem,
 } from "@/lib/generationApi"
 
@@ -61,13 +59,11 @@ function ItemCard({
   selected,
   selectable,
   onToggleSelect,
-  failed,
 }: {
   item: ContentItem
   selected: boolean
   selectable: boolean
   onToggleSelect: () => void
-  failed: boolean
 }) {
   const taskCenter = useTaskCenter()
   const taskIds = item.links.task_ids ?? []
@@ -77,6 +73,7 @@ function ItemCard({
           .map((id) => taskCenter.getTask(id)?.task.progress?.percentage ?? 0)
           .reduce((sum, value, _index, list) => sum + value / list.length, 0)
       : null
+  const productionFailure = contentProductionFailure(item)
 
   return (
     <article
@@ -111,7 +108,9 @@ function ItemCard({
         <div className="line-clamp-2 text-sm font-medium">{item.title}</div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <ContentStatusBadge status={item.status} />
-          {failed ? <Badge variant="destructive">生产失败</Badge> : null}
+          {productionFailure ? (
+            <Badge variant="destructive">生产失败</Badge>
+          ) : null}
           {item.languages.map((language) => {
             const variant = item.variants[language]
             const isConfirmed = variant?.status === "confirmed"
@@ -125,7 +124,7 @@ function ItemCard({
             )
           })}
         </div>
-        {progress != null && !failed ? (
+        {progress != null && !productionFailure ? (
           <Progress className="mt-3" value={progress} />
         ) : null}
         <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -153,14 +152,12 @@ type BoardColumn = (typeof BOARD_COLUMNS)[number]
 
 function LifecycleLane({
   column,
-  failedItemIds,
   items,
   onSchedule,
   onToggleSelect,
   selectedIds,
 }: {
   column: BoardColumn
-  failedItemIds: Set<string>
   items: ContentItem[]
   onSchedule?: () => void
   onToggleSelect: (itemId: string) => void
@@ -195,7 +192,6 @@ function LifecycleLane({
       ) : null}
       {items.map((item) => (
         <ItemCard
-          failed={failedItemIds.has(item.item_id)}
           item={item}
           key={item.item_id}
           onToggleSelect={() => onToggleSelect(item.item_id)}
@@ -224,7 +220,6 @@ export function WorkbenchBoard() {
   const [activeColumnKey, setActiveColumnKey] = useState(BOARD_COLUMNS[0].key)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
-  const [failedItemIds, setFailedItemIds] = useState<Set<string>>(new Set())
   const [produceOpen, setProduceOpen] = useState(false)
   const [produceTemplateId, setProduceTemplateId] = useState("")
   const [produceOverrides, setProduceOverrides] = useState<ProductionOverrides>(
@@ -232,73 +227,22 @@ export function WorkbenchBoard() {
   )
   const [producing, setProducing] = useState(false)
 
-  const reconcileProducing = useCallback(
-    async (current: ContentItem[]): Promise<boolean> => {
-      const inProduction = current.filter((item) => item.status === "producing")
-      const failed = new Set<string>()
-      let changed = false
-      for (const item of inProduction) {
-        const taskIds = item.links.task_ids ?? []
-        if (taskIds.length === 0) {
-          continue
-        }
-        const settled = await Promise.allSettled(
-          taskIds.map((id) => getTask(id))
-        )
-        const tasks = settled
-          .filter(
-            (
-              result
-            ): result is PromiseFulfilledResult<
-              Awaited<ReturnType<typeof getTask>>
-            > => result.status === "fulfilled"
-          )
-          .map((result) => result.value)
-        if (tasks.length < taskIds.length) {
-          continue
-        }
-        if (tasks.every((task) => task.status === "completed")) {
-          try {
-            await transitionContentItem(item.item_id, "produced", {}, "system")
-            changed = true
-          } catch {
-            // 状态可能已被其它路径推进，忽略
-          }
-        } else if (tasks.some((task) => task.status === "failed")) {
-          failed.add(item.item_id)
-        }
-      }
-      setFailedItemIds(failed)
-      return changed
-    },
-    []
-  )
-
-  const refresh = useCallback(
-    async (options: { reconcile?: boolean } = {}) => {
-      try {
-        const query = { limit: 500, project: projectId ?? undefined }
-        let list = await listContentItems(query)
-        if (options.reconcile) {
-          const changed = await reconcileProducing(list)
-          if (changed) {
-            list = await listContentItems(query)
-          }
-        }
-        setItems(list)
-        setError(null)
-      } catch (refreshError) {
-        setError(readableError(refreshError))
-      } finally {
-        setLoading(false)
-      }
-    },
-    [reconcileProducing, projectId]
-  )
+  const refresh = useCallback(async () => {
+    try {
+      const query = { limit: 500, project: projectId ?? undefined }
+      const list = await listContentItems(query)
+      setItems(list)
+      setError(null)
+    } catch (refreshError) {
+      setError(readableError(refreshError))
+    } finally {
+      setLoading(false)
+    }
+  }, [projectId])
 
   useEffect(() => {
     async function tick() {
-      await refresh({ reconcile: true })
+      await refresh()
     }
     void tick()
     const interval = window.setInterval(() => {
@@ -452,7 +396,7 @@ export function WorkbenchBoard() {
               aria-label="刷新"
               className="size-11 lg:size-7"
               disabled={loading}
-              onClick={() => void refresh({ reconcile: true })}
+              onClick={() => void refresh()}
               size="icon-sm"
               variant="outline"
             >
@@ -473,11 +417,7 @@ export function WorkbenchBoard() {
       {error && hasItems ? (
         <AsyncState
           action={
-            <Button
-              onClick={() => void refresh({ reconcile: true })}
-              size="sm"
-              variant="outline"
-            >
+            <Button onClick={() => void refresh()} size="sm" variant="outline">
               重新读取
             </Button>
           }
@@ -498,11 +438,7 @@ export function WorkbenchBoard() {
       ) : error && !hasItems ? (
         <AsyncState
           action={
-            <Button
-              onClick={() => void refresh({ reconcile: true })}
-              size="sm"
-              variant="outline"
-            >
+            <Button onClick={() => void refresh()} size="sm" variant="outline">
               重新读取
             </Button>
           }
@@ -570,7 +506,6 @@ export function WorkbenchBoard() {
             </div>
             <LifecycleLane
               column={activeColumn}
-              failedItemIds={failedItemIds}
               items={activeColumnItems}
               onSchedule={
                 activeColumn.key === "ready" && producedColumn.length > 0
@@ -593,7 +528,6 @@ export function WorkbenchBoard() {
                 return (
                   <LifecycleLane
                     column={column}
-                    failedItemIds={failedItemIds}
                     items={columnItems}
                     key={column.key}
                     onSchedule={

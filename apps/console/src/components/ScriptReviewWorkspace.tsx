@@ -54,6 +54,7 @@ import { useCurrentProject } from "@/lib/currentProject"
 import { useTaskCenter } from "@/lib/taskCenter"
 import { readableError } from "@/lib/format"
 import {
+  cancelGenerationBatch,
   getGenerationBatch,
   getSettingsConfig,
   getTask,
@@ -156,6 +157,7 @@ export function ScriptReviewWorkspace() {
   const [isCreatingDrafts, setIsCreatingDrafts] = useState(false)
   const [isSavingDrafts, setIsSavingDrafts] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isCancellingBatch, setIsCancellingBatch] = useState(false)
   const [retryingBatchItemIndex, setRetryingBatchItemIndex] = useState<
     number | null
   >(null)
@@ -669,6 +671,24 @@ export function ScriptReviewWorkspace() {
       setError(readableError(retryError))
     } finally {
       setRetryingBatchItemIndex(null)
+    }
+  }
+
+  async function cancelSubmittedBatch() {
+    if (!submittedBatch || isCancellingBatch) {
+      return
+    }
+    setIsCancellingBatch(true)
+    setError(null)
+    setNotice(null)
+    setBatchPollingError(null)
+    try {
+      setSubmittedBatch(await cancelGenerationBatch(submittedBatch.batch_id))
+      setNotice("已请求取消未完成的批次任务。")
+    } catch (cancelError) {
+      setError(readableError(cancelError))
+    } finally {
+      setIsCancellingBatch(false)
     }
   }
 
@@ -1421,6 +1441,8 @@ export function ScriptReviewWorkspace() {
                     : null
                 }
                 batch={submittedBatch}
+                isCancelling={isCancellingBatch}
+                onCancel={() => void cancelSubmittedBatch()}
                 onRetryItem={(itemIndex) => void retryBatchItem(itemIndex)}
                 retryingItemIndex={retryingBatchItemIndex}
               />

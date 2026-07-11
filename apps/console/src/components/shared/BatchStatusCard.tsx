@@ -1,14 +1,29 @@
-import { FolderOpen, Loader2 } from "lucide-react"
+import { FolderOpen, Loader2, XCircle } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { StatusBadge } from "@/components/shared/StatusBadge"
 import { TechDetails } from "@/components/shared/feedback"
 import { getBatchPreviewTitle } from "@/lib/batchInput"
 import { useExpertMode } from "@/lib/expertMode"
 import type { GenerationBatch, GenerationBatchItem } from "@/lib/generationApi"
-import { adaptRunStatus, statusIs } from "@/lib/productViewModels"
+import {
+  adaptRunStatus,
+  runStatusIsCancellable,
+  statusIs,
+} from "@/lib/productViewModels"
 import { routeHref } from "@/lib/router"
 import { cn } from "@/lib/utils"
 
@@ -21,6 +36,8 @@ export function BatchStatusCard({
   batch,
   onRetryItem,
   retryingItemIndex,
+  isCancelling = false,
+  onCancel,
   artifactLabel,
   bare = false,
   className,
@@ -28,6 +45,8 @@ export function BatchStatusCard({
   batch: GenerationBatch | null
   onRetryItem: (itemIndex: number) => void
   retryingItemIndex: number | null
+  isCancelling?: boolean
+  onCancel?: () => void
   /** 产物形态徽标文案（视频/图集/长文/产线）；不传则不显示。 */
   artifactLabel?: string | null
   /** true 时只渲染内容（不套 Card），供任务中心行内展开复用。 */
@@ -41,11 +60,41 @@ export function BatchStatusCard({
     </div>
   ) : (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge status={adaptRunStatus(batch.status)} />
-        {artifactLabel && <Badge variant="outline">{artifactLabel}</Badge>}
-        <Badge variant="outline">{batch.total_count} 条</Badge>
-        <Badge variant="outline">失败 {batch.failed_count}</Badge>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge status={adaptRunStatus(batch.status)} />
+          {artifactLabel && <Badge variant="outline">{artifactLabel}</Badge>}
+          <Badge variant="outline">{batch.total_count} 条</Badge>
+          <Badge variant="outline">失败 {batch.failed_count}</Badge>
+        </div>
+        {onCancel && runStatusIsCancellable(adaptRunStatus(batch.status)) ? (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button disabled={isCancelling} size="sm" variant="destructive">
+                {isCancelling ? (
+                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                ) : (
+                  <XCircle data-icon="inline-start" />
+                )}
+                取消批次
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>取消这个生产批次？</AlertDialogTitle>
+                <AlertDialogDescription>
+                  已完成的任务会保留，其余正在处理的任务将请求停止。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>继续运行</AlertDialogCancel>
+                <AlertDialogAction onClick={onCancel}>
+                  取消批次
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : null}
       </div>
       {expertMode ? (
         <TechDetails

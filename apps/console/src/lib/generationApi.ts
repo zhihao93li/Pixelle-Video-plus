@@ -9,11 +9,7 @@ export const API_BASE_URL =
   "http://127.0.0.1:8000/api"
 
 export type GenerationStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
+  "pending" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
 
 export type ProductionTemplate = {
   id: string
@@ -634,7 +630,9 @@ export type CloneProductionTemplateInput = {
   fixedParamsPatch?: Record<string, unknown>
 }
 
-export async function cloneProductionTemplate(input: CloneProductionTemplateInput) {
+export async function cloneProductionTemplate(
+  input: CloneProductionTemplateInput
+) {
   return fetchJson<ProductionTemplate>("/generation/templates", {
     method: "POST",
     body: JSON.stringify({
@@ -714,7 +712,16 @@ export async function getGenerationBatch(batchId: string) {
   return fetchJson<GenerationBatch>(`/generation/batches/${batchId}`)
 }
 
-export async function retryGenerationBatchItem(batchId: string, itemIndex: number) {
+export async function cancelGenerationBatch(batchId: string) {
+  return fetchJson<GenerationBatch>(`/generation/batches/${batchId}`, {
+    method: "DELETE",
+  })
+}
+
+export async function retryGenerationBatchItem(
+  batchId: string,
+  itemIndex: number
+) {
   return fetchJson<GenerationBatch>(
     `/generation/batches/${batchId}/items/${itemIndex}/retry`,
     { method: "POST" }
@@ -731,24 +738,29 @@ export async function listScriptReviewTemplates() {
   )
 }
 
-export async function createScriptReviewDraftSet(input: ScriptReviewCreateInput) {
-  return fetchJson<ScriptReviewDraftSet>("/generation/script-review/draft-sets", {
-    method: "POST",
-    body: JSON.stringify({
-      topics: input.topics,
-      languages: input.languages,
-      project_id: input.projectId ?? null,
-      drafting_profile_id: input.draftingProfileId ?? null,
-      script_template_name: input.scriptTemplateName || null,
-      split_template_name: input.splitTemplateName || null,
-      script_model: input.scriptModel || null,
-      split_model: input.splitModel || null,
-      language_script_templates: input.languageScriptTemplates ?? {},
-      language_script_models: input.languageScriptModels ?? {},
-      metadata: input.metadata ?? {},
-      idempotency_key: input.idempotencyKey ?? null,
-    }),
-  })
+export async function createScriptReviewDraftSet(
+  input: ScriptReviewCreateInput
+) {
+  return fetchJson<ScriptReviewDraftSet>(
+    "/generation/script-review/draft-sets",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        topics: input.topics,
+        languages: input.languages,
+        project_id: input.projectId ?? null,
+        drafting_profile_id: input.draftingProfileId ?? null,
+        script_template_name: input.scriptTemplateName || null,
+        split_template_name: input.splitTemplateName || null,
+        script_model: input.scriptModel || null,
+        split_model: input.splitModel || null,
+        language_script_templates: input.languageScriptTemplates ?? {},
+        language_script_models: input.languageScriptModels ?? {},
+        metadata: input.metadata ?? {},
+        idempotency_key: input.idempotencyKey ?? null,
+      }),
+    }
+  )
 }
 
 export async function listScriptReviewDraftSets(projectId?: string) {
@@ -1072,7 +1084,9 @@ export async function listHistoryTasks({
   }
   params.set("sort_by", sortBy)
   params.set("sort_order", sortOrder)
-  return fetchJson<HistoryTaskListResponse>(`/history/tasks?${params.toString()}`)
+  return fetchJson<HistoryTaskListResponse>(
+    `/history/tasks?${params.toString()}`
+  )
 }
 
 export async function getHistoryTaskDetail(taskId: string) {
@@ -1231,14 +1245,20 @@ export async function listResourceTemplates() {
 }
 
 export async function listResourceMediaWorkflows() {
-  return fetchJson<{ workflows: ResourceWorkflow[] }>("/resources/workflows/media")
+  return fetchJson<{ workflows: ResourceWorkflow[] }>(
+    "/resources/workflows/media"
+  )
 }
 
 export async function listResourceTtsWorkflows() {
-  return fetchJson<{ workflows: ResourceWorkflow[] }>("/resources/workflows/tts")
+  return fetchJson<{ workflows: ResourceWorkflow[] }>(
+    "/resources/workflows/tts"
+  )
 }
 
-export function artifactFileUrl(artifact: GenerationArtifact | null | undefined) {
+export function artifactFileUrl(
+  artifact: GenerationArtifact | null | undefined
+) {
   if (!artifact) {
     return null
   }
@@ -1264,7 +1284,12 @@ export function fileUrlFromPath(path: string | null | undefined) {
 }
 
 export function isTerminalStatus(status: GenerationStatus) {
-  return status === "completed" || status === "failed" || status === "cancelled"
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "interrupted"
+  )
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -1295,7 +1320,11 @@ async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
   const data = text ? safeJson(text) : null
 
   if (!response.ok) {
-    throw new ApiError(errorMessage(data, response.statusText), response.status, data)
+    throw new ApiError(
+      errorMessage(data, response.statusText),
+      response.status,
+      data
+    )
   }
 
   return data as T
@@ -1340,7 +1369,6 @@ function outputRelativePath(path: string) {
 
   return null
 }
-
 
 // ---------------------------------------------------------------------------
 // 起草配方（DraftingProfile）与 Prompt 模板自助管理
@@ -1396,17 +1424,23 @@ export type PromptTemplateWriteInput = {
 }
 
 export async function createPromptTemplate(input: PromptTemplateWriteInput) {
-  return fetchJson<{ kind: string; name: string }>("/drafting/prompt-templates", {
-    method: "POST",
-    body: JSON.stringify(input),
-  })
+  return fetchJson<{ kind: string; name: string }>(
+    "/drafting/prompt-templates",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    }
+  )
 }
 
 export async function updatePromptTemplate(input: PromptTemplateWriteInput) {
-  return fetchJson<{ kind: string; name: string }>("/drafting/prompt-templates", {
-    method: "PUT",
-    body: JSON.stringify(input),
-  })
+  return fetchJson<{ kind: string; name: string }>(
+    "/drafting/prompt-templates",
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }
+  )
 }
 
 export async function deletePromptTemplate(kind: string, name: string) {

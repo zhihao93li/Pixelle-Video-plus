@@ -7,8 +7,7 @@ flowchart LR
     Console[React Console] --> API[FastAPI]
     Codex[Codex Plugin] --> API
     API --> Content[Projects and Content]
-    API --> Tasks[Task Manager]
-    API --> Generation[Generation Registry]
+    API --> Generation[Generation Registry and Task Store]
     Generation --> Pipelines[Pipelines]
     Pipelines --> Services[LLM / TTS / Media / Publish]
 ```
@@ -29,6 +28,7 @@ flowchart LR
 ## Boundaries
 
 - Every production request is compiled through the recipe registry before entering a pipeline.
+- Canonical generation tasks are persisted by `pixelle_video/generation`; terminal state survives service restarts.
 - The frontend does not interpret raw backend states; states are adapted into shared ViewModels.
 - Projects, tasks, artifacts, and publishing state belong to backend persistence.
 - API, console, and agent interfaces share the same business contracts and do not copy state machines.

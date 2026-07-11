@@ -24,6 +24,7 @@ from loguru import logger
 from ops.service import OpsService
 from pixelle_video.config import ConfigManager, config_manager
 from pixelle_video.generation import GenerationService
+from pixelle_video.generation.task_store import task_directory
 from pixelle_video.service import PixelleVideoCore
 
 # Global Pixelle-Video instance
@@ -35,17 +36,17 @@ _ops_service_instance: OpsService = None
 async def get_pixelle_video() -> PixelleVideoCore:
     """
     Get Pixelle-Video core instance (dependency injection)
-    
+
     Returns:
         PixelleVideoCore instance
     """
     global _pixelle_video_instance
-    
+
     if _pixelle_video_instance is None:
         _pixelle_video_instance = PixelleVideoCore()
         await _pixelle_video_instance.initialize()
         logger.info("✅ Pixelle-Video initialized for API")
-    
+
     return _pixelle_video_instance
 
 
@@ -62,8 +63,9 @@ async def shutdown_pixelle_video():
         logger.info("Shutting down Pixelle-Video...")
         await _pixelle_video_instance.cleanup()
         _pixelle_video_instance = None
-    
+
     from pixelle_video.services.frame_html import HTMLFrameGenerator
+
     await HTMLFrameGenerator.close_browser()
 
 
@@ -76,6 +78,7 @@ async def get_generation_service(
     if _generation_service_instance is None:
         _generation_service_instance = GenerationService(
             pipeline_registry=pixelle_video.pipeline_registry,
+            storage_dir=task_directory(),
         )
         logger.info("✅ Generation Service initialized for API")
 

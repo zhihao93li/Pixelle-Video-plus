@@ -128,6 +128,11 @@ class FakeBatchGenerationService:
         except KeyError:
             raise KeyError(task_id) from None
 
+    def cancel_task(self, task_id):
+        task = self.get_task(task_id)
+        task.status = "cancelled"
+        return task
+
 
 def test_generation_pipelines_endpoint_lists_registered_manifests():
     app.dependency_overrides[get_pixelle_video] = get_fake_pixelle_video
@@ -315,9 +320,7 @@ def test_generation_batch_endpoint_persists_batch_and_continues_item_failures(tm
     assert payload["items"][1]["status"] == "failed"
     assert "script" in payload["items"][1]["error"]["message"]
     assert fake_batch_service.requests[0].entry == "script"
-    assert fake_batch_service.requests[0].input == {
-        "script": "Cats need clean water daily."
-    }
+    assert fake_batch_service.requests[0].input == {"script": "Cats need clean water daily."}
     assert (tmp_path / f"{payload['batch_id']}.json").exists()
     assert get_response.status_code == 200
     assert get_response.json()["batch_id"] == payload["batch_id"]
@@ -362,9 +365,110 @@ def test_generation_batch_item_retry_resubmits_failed_item(tmp_path):
     assert payload["items"][0]["metadata"]["retry_count"] == 1
     assert payload["items"][0]["metadata"]["retry_of_task_id"] == "batch-task-1"
     assert len(fake_batch_service.requests) == 2
-    assert fake_batch_service.requests[1].input == {
-        "script": "Cats need clean water daily."
-    }
+    assert fake_batch_service.requests[1].input == {"script": "Cats need clean water daily."}
+
+
+def test_generation_batch_cancel_stops_only_unfinished_items(tmp_path):
+    fake_batch_service = FakeBatchGenerationService()
+
+    async def get_fake_batch_generation_service():
+        return fake_batch_service
+
+    previous_dir = generation_router.GENERATION_BATCH_DIR
+    generation_router.GENERATION_BATCH_DIR = tmp_path
+    app.dependency_overrides[get_generation_service] = get_fake_batch_generation_service
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/api/generation/batches",
+            json={
+                "template_id": "pipeline_standard_base_v1",
+                "items": [
+                    {"input": {"script": "First."}},
+                    {"input": {"script": "Second."}},
+                ],
+            },
+        )
+        batch_id = create_response.json()["batch_id"]
+        fake_batch_service.tasks["batch-task-1"].status = "completed"
+        cancel_response = client.delete(f"/api/generation/batches/{batch_id}")
+    finally:
+        app.dependency_overrides.clear()
+        generation_router.GENERATION_BATCH_DIR = previous_dir
+
+    assert cancel_response.status_code == 200
+    payload = cancel_response.json()
+    assert payload["status"] == "cancelled"
+    assert [item["status"] for item in payload["items"]] == [
+        "completed",
+        "cancelled",
+    ]
+
+
+def test_generation_batch_exposes_missing_canonical_task_state(tmp_path):
+    fake_batch_service = FakeBatchGenerationService()
+
+    async def get_fake_batch_generation_service():
+        return fake_batch_service
+
+    previous_dir = generation_router.GENERATION_BATCH_DIR
+    generation_router.GENERATION_BATCH_DIR = tmp_path
+    app.dependency_overrides[get_generation_service] = get_fake_batch_generation_service
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/api/generation/batches",
+            json={
+                "template_id": "pipeline_standard_base_v1",
+                "items": [{"input": {"script": "First."}}],
+            },
+        )
+        batch_id = create_response.json()["batch_id"]
+        fake_batch_service.tasks.clear()
+        get_response = client.get(f"/api/generation/batches/{batch_id}")
+    finally:
+        app.dependency_overrides.clear()
+        generation_router.GENERATION_BATCH_DIR = previous_dir
+
+    assert get_response.status_code == 200
+    item = get_response.json()["items"][0]
+    assert item["status"] == "interrupted"
+    assert item["error"]["exception_type"] == "GenerationTaskStateMissing"
+
+
+def test_generation_batch_preserves_persisted_terminal_item_without_task_state(tmp_path):
+    fake_batch_service = FakeBatchGenerationService()
+
+    async def get_fake_batch_generation_service():
+        return fake_batch_service
+
+    previous_dir = generation_router.GENERATION_BATCH_DIR
+    generation_router.GENERATION_BATCH_DIR = tmp_path
+    app.dependency_overrides[get_generation_service] = get_fake_batch_generation_service
+
+    try:
+        client = TestClient(app)
+        create_response = client.post(
+            "/api/generation/batches",
+            json={
+                "template_id": "pipeline_standard_base_v1",
+                "items": [{"input": {"script": "First."}}],
+            },
+        )
+        batch_id = create_response.json()["batch_id"]
+        fake_batch_service.tasks["batch-task-1"].status = "completed"
+        completed_response = client.get(f"/api/generation/batches/{batch_id}")
+        fake_batch_service.tasks.clear()
+        restored_response = client.get(f"/api/generation/batches/{batch_id}")
+    finally:
+        app.dependency_overrides.clear()
+        generation_router.GENERATION_BATCH_DIR = previous_dir
+
+    assert completed_response.json()["items"][0]["status"] == "completed"
+    assert restored_response.json()["items"][0]["status"] == "completed"
+    assert restored_response.json()["items"][0]["error"] is None
 
 
 def test_script_review_batch_item_retry_preserves_params(tmp_path):
@@ -380,7 +484,7 @@ def test_script_review_batch_item_retry_preserves_params(tmp_path):
     generation_router._save_batch(
         {
             "batch_id": batch_id,
-            "template_id": "pixelle_script_review_v1",
+            "template_id": "pipeline_standard_base_v1",
             "status": "failed",
             "created_at": "2026-07-03T00:00:00",
             "updated_at": "2026-07-03T00:00:00",
@@ -424,17 +528,13 @@ def test_script_review_batch_item_retry_preserves_params(tmp_path):
     assert fake_batch_service.requests[0].params["tts_inference_mode"] == "fish"
 
 
-def test_script_review_draft_set_endpoint_generates_and_persists_drafts(
-    tmp_path, monkeypatch
-):
+def test_script_review_draft_set_endpoint_generates_and_persists_drafts(tmp_path, monkeypatch):
     from pathlib import Path as _Path
 
     import pixelle_video.content.drafting_profiles as drafting_profiles
     import pixelle_video.content.projects as projects
 
-    monkeypatch.setattr(
-        projects, "get_data_path", lambda *parts: str(tmp_path / _Path(*parts))
-    )
+    monkeypatch.setattr(projects, "get_data_path", lambda *parts: str(tmp_path / _Path(*parts)))
     monkeypatch.setattr(
         drafting_profiles,
         "_profiles_path",
@@ -472,17 +572,11 @@ def test_script_review_draft_set_endpoint_generates_and_persists_drafts(
     assert payload["status"] == "drafted"
     assert payload["topics"] == ["Cat hydration"]
     assert payload["languages"] == ["English"]
-    assert payload["draft_settings"]["language_script_templates"] == {
-        "English": "custom"
-    }
-    assert payload["draft_settings"]["language_script_models"] == {
-        "English": "model-en"
-    }
+    assert payload["draft_settings"]["language_script_templates"] == {"English": "custom"}
+    assert payload["draft_settings"]["language_script_models"] == {"English": "model-en"}
     # 每个草稿集记录项目归属（迁移生成的默认项目）
     assert payload["draft_settings"]["project_id"]
-    assert payload["drafts"][0]["language_script_models"] == {
-        "English": "model-en"
-    }
+    assert payload["drafts"][0]["language_script_models"] == {"English": "model-en"}
     assert payload["drafts"][0]["language_drafts"]["English"]["narrations"] == [
         "Cats need clean water every day.",
         "Bowls should be refreshed.",
@@ -544,8 +638,7 @@ def test_script_review_submit_endpoint_creates_real_generation_tasks(tmp_path):
     assert submit_response.status_code == 200
     payload = submit_response.json()
     assert payload["draft_set"]["status"] == "submitted"
-    # R1: 审核提交走生产模板体系，batch 记录真实使用的生产模板
-    # 骨架化后默认模板 = 标准骨架
+    # 审核提交走生产模板体系，batch 记录真实使用的生产模板。
     assert payload["batch"]["template_id"] == "pipeline_standard_base_v1"
     assert payload["batch"]["submitted_count"] == 1
     assert payload["batch"]["items"][0]["task_id"] == "batch-task-1"
@@ -625,18 +718,14 @@ def test_script_review_submit_honors_template_id_and_rejects_invalid(tmp_path):
         payload = submit_response.json()
         assert payload["batch"]["template_id"] == "pipeline_standard_base_v1"
         request = fake_batch_service.requests[0]
-        assert (
-            request.params["frame_template"] == "1080x1920/image_default.html"
-        )
+        assert request.params["frame_template"] == "1080x1920/image_default.html"
 
         # 不支持 script 输入或不存在的模板必须被拒绝
         rejected = _submit_script_review(
             client, draft_set_id, {"template_id": "pixelle_i2v_basic_v1"}
         )
         assert rejected.status_code == 400
-        unknown = _submit_script_review(
-            client, draft_set_id, {"template_id": "no_such_template"}
-        )
+        unknown = _submit_script_review(client, draft_set_id, {"template_id": "no_such_template"})
         assert unknown.status_code == 400
     finally:
         app.dependency_overrides.clear()
@@ -649,12 +738,8 @@ def test_script_review_submit_uses_template_default_overrides(tmp_path, monkeypa
     from pixelle_video.generation import template_overrides
 
     overrides_path = tmp_path / "production-template-overrides.json"
-    monkeypatch.setattr(
-        template_overrides, "_overrides_path", lambda: str(overrides_path)
-    )
-    template_overrides.save_overrides(
-        "pipeline_standard_base_v1", {"bgm_volume": 0.35}
-    )
+    monkeypatch.setattr(template_overrides, "_overrides_path", lambda: str(overrides_path))
+    template_overrides.save_overrides("pipeline_standard_base_v1", {"bgm_volume": 0.35})
 
     fake_batch_service = FakeBatchGenerationService()
 
@@ -777,7 +862,7 @@ def test_video_async_endpoint_uses_generation_service_and_preserves_split_mode()
 
 
 def test_batch_retry_preserves_whitelisted_params():
-    """R1 遗漏回归：重试必须还原当次提交的白名单覆盖（如每语言 Fish 音色）。"""
+    """重试必须还原当次提交的白名单覆盖（如每语言 Fish 音色）。"""
     request = generation_router._compile_batch_retry_request(
         batch={"template_id": "pipeline_standard_base_v1"},
         item={
@@ -798,20 +883,6 @@ def test_batch_retry_preserves_whitelisted_params():
     assert request.params["split_mode"] == "line"
     assert "not_whitelisted_key" not in request.params
     assert request.metadata["production_template"]["id"] == "pipeline_standard_base_v1"
-
-
-def test_batch_retry_keeps_legacy_script_review_branch():
-    """R1 之前持久化的占位模板批次仍按旧方式直拼，保证历史数据可重试。"""
-    request = generation_router._compile_batch_retry_request(
-        batch={"template_id": "pixelle_script_review_v1"},
-        item={
-            "input": {"script": "遗留批次文案。"},
-            "params": {"tts_voice": "voice-legacy"},
-        },
-        metadata={"source": "retry-test"},
-    )
-    assert request.pipeline_id == "standard"
-    assert request.params["tts_voice"] == "voice-legacy"
 
 
 def test_prompt_template_default_ignores_custom_file_ordering():

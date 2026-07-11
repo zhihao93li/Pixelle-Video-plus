@@ -1,7 +1,11 @@
-import type { ContentVariantStatus } from "@/lib/generationApi"
+import type { ContentItem, ContentVariantStatus } from "@/lib/generationApi"
 
 /** 内容工作台看板列定义：列名 → 包含的条目状态。archived 不在看板显示。 */
-export const BOARD_COLUMNS: Array<{ key: string; label: string; statuses: string[] }> = [
+export const BOARD_COLUMNS: Array<{
+  key: string
+  label: string
+  statuses: string[]
+}> = [
   { key: "idea", label: "选题池", statuses: ["idea"] },
   { key: "draft", label: "草稿", statuses: ["drafting", "draft_ready"] },
   { key: "review", label: "待确认", statuses: ["pending_review", "confirmed"] },
@@ -18,6 +22,7 @@ export const STATUS_LABELS: Record<string, string> = {
   confirmed: "已确认",
   producing: "生产中",
   produced: "已出片",
+  production_failed: "生产未完成",
   scheduled: "已排期",
   published: "已发布",
   measured: "已复盘",
@@ -48,6 +53,15 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
 
 export function eventTypeLabel(type: string) {
   return EVENT_TYPE_LABELS[type] ?? type
+}
+
+export function contentProductionFailure(item: ContentItem): string | null {
+  const failure = item.automation.production_failure
+  if (!failure || typeof failure !== "object") {
+    return null
+  }
+  const message = (failure as Record<string, unknown>).message
+  return typeof message === "string" && message.trim() ? message.trim() : null
 }
 
 export const ACTOR_LABELS: Record<string, string> = {

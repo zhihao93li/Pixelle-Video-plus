@@ -7,8 +7,7 @@ flowchart LR
     Console[React Console] --> API[FastAPI]
     Codex[Codex Plugin] --> API
     API --> Content[Projects and Content]
-    API --> Tasks[Task Manager]
-    API --> Generation[Generation Registry]
+    API --> Generation[Generation Registry and Task Store]
     Generation --> Pipelines[Pipelines]
     Pipelines --> Services[LLM / TTS / Media / Publish]
 ```
@@ -29,6 +28,7 @@ flowchart LR
 ## 关键边界
 
 - 所有正式生成先经过配方注册与编译，再进入具体管线。
+- 正式生成任务在 `pixelle_video/generation` 持久化；服务重启不丢失终态。
 - 前端不解释原始后端状态，状态先适配成统一 ViewModel。
 - 项目、任务、产物和发布状态由后端持久化层拥有。
 - API、控制台和 Agent 共用同一业务合同，不复制状态机。

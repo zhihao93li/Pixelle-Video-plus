@@ -93,6 +93,8 @@ export function TaskCenterWorkspace() {
     batch: polledBatch,
     setBatch: setPolledBatch,
     error: pollingError,
+    cancelBatch,
+    isCancelling: isCancellingBatch,
     retryItem,
     retryingItemIndex,
   } = useBatchPolling()
@@ -389,7 +391,9 @@ export function TaskCenterWorkspace() {
           {selectedRun ? (
             <RunDetail
               cancellingId={cancellingId}
+              isCancellingBatch={isCancellingBatch}
               onCancel={(taskId) => void cancelTask(taskId)}
+              onCancelBatch={() => void cancelBatch()}
               onRemove={removeTask}
               onRetryChild={retryChild}
               retryingItemIndex={retryingItemIndex}
@@ -408,16 +412,20 @@ function RunDetail({
   selectedBatch,
   retryingItemIndex,
   cancellingId,
+  isCancellingBatch,
   onRetryChild,
   onCancel,
+  onCancelBatch,
   onRemove,
 }: {
   run: OperationRun
   selectedBatch: GenerationBatch | null
   retryingItemIndex: number | null
   cancellingId: string | null
+  isCancellingBatch: boolean
   onRetryChild: (childId: string) => void
   onCancel: (taskId: string) => void
+  onCancelBatch: () => void
   onRemove: (taskId: string) => void
 }) {
   const terminal = statusIn(run.state, TERMINAL_RUN_STATES)
@@ -460,15 +468,20 @@ function RunDetail({
               </a>
             </Button>
           ) : null}
-          {run.canCancel && run.trackedTaskId ? (
+          {run.canCancel && (run.trackedTaskId || selectedBatch) ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button
-                  disabled={cancellingId === run.trackedTaskId}
+                  disabled={
+                    selectedBatch
+                      ? isCancellingBatch
+                      : cancellingId === run.trackedTaskId
+                  }
                   size="sm"
                   variant="destructive"
                 >
-                  {cancellingId === run.trackedTaskId ? (
+                  {(selectedBatch && isCancellingBatch) ||
+                  cancellingId === run.trackedTaskId ? (
                     <Loader2
                       className="animate-spin"
                       data-icon="inline-start"
@@ -489,7 +502,13 @@ function RunDetail({
                 <AlertDialogFooter>
                   <AlertDialogCancel>继续运行</AlertDialogCancel>
                   <AlertDialogAction
-                    onClick={() => onCancel(run.trackedTaskId!)}
+                    onClick={() => {
+                      if (selectedBatch) {
+                        onCancelBatch()
+                      } else if (run.trackedTaskId) {
+                        onCancel(run.trackedTaskId)
+                      }
+                    }}
                   >
                     取消运行
                   </AlertDialogAction>
@@ -670,7 +689,7 @@ function adaptBatchRun(
     updatedAt: batch.updated_at,
     children,
     artifact: null,
-    canCancel: false,
+    canCancel: runStatusIsCancellable(adaptRunStatus(batch.status)),
     canRetry: children.some((child) => child.canRetry),
     source: "batch",
   }

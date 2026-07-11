@@ -8,19 +8,23 @@ import api.routers.content_items as content_items_router
 import pixelle_video.content.drafting_profiles as drafting_profiles
 import pixelle_video.content.projects as projects
 import pixelle_video.content.store as content_store
+import pixelle_video.generation.task_store as task_store
 from api.app import app
 from api.dependencies import get_pixelle_video
+from pixelle_video.generation.schemas import (
+    GenerationError,
+    GenerationProgress,
+    GenerationRequest,
+    GenerationTask,
+)
+from pixelle_video.generation.task_store import save_generation_task
 
 BASE = "/api/content-items"
 
 
 class FakeHistory:
     async def get_task_list(self, page=1, page_size=20, status=None, **kwargs):
-        return {
-            "tasks": [
-                {"task_id": "task-1", "title": "历史成片作品", "status": "completed"}
-            ]
-        }
+        return {"tasks": [{"task_id": "task-1", "title": "历史成片作品", "status": "completed"}]}
 
 
 class FakePublish:
@@ -45,14 +49,13 @@ def isolated_storage(tmp_path, monkeypatch):
         content_items_router, "SCRIPT_REVIEW_DIR", tmp_path / "script-review-drafts"
     )
     # 隔离项目存储（list/create 会触发迁移）；ops.db 探测走 tmp → 缺失 → 回退分支
-    monkeypatch.setattr(
-        projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts))
-    )
+    monkeypatch.setattr(projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts)))
     monkeypatch.setattr(
         drafting_profiles,
         "_profiles_path",
         lambda: str(tmp_path / "drafting-profiles.json"),
     )
+    monkeypatch.setattr(task_store, "GENERATION_TASK_DIR", tmp_path / "generation-tasks")
     yield
 
 
@@ -176,9 +179,7 @@ def test_patch_merges_links_and_metrics(client):
     assert patched["metrics"]["likes"] == 12
     assert patched["links"]["task_ids"] == ["t1"]
 
-    patched2 = client.patch(
-        f"{BASE}/{item_id}", json={"metrics": {"favorites": 3}}
-    ).json()
+    patched2 = client.patch(f"{BASE}/{item_id}", json={"metrics": {"favorites": 3}}).json()
     # 浅合并保留已有 metrics
     assert patched2["metrics"]["likes"] == 12
     assert patched2["metrics"]["favorites"] == 3
@@ -219,10 +220,68 @@ def test_invalid_transition_rejected(client):
 
 def test_unknown_status_rejected(client):
     item = client.post(BASE, json={"titles": ["选题"]}).json()[0]
-    response = client.post(
-        f"{BASE}/{item['item_id']}/transition", json={"to": "nonsense"}
-    )
+    response = client.post(f"{BASE}/{item['item_id']}/transition", json={"to": "nonsense"})
     assert response.status_code == 400
+
+
+def test_producing_item_reconciles_from_persisted_completed_tasks(client):
+    item = client.post(
+        BASE,
+        json={"titles": ["待出片内容"], "initial_status": "confirmed"},
+    ).json()[0]
+    batch_id = "batch-complete"
+    task = _generation_task("task-complete", batch_id, "completed")
+    save_generation_task(task)
+    client.post(f"{BASE}/{item['item_id']}/transition", json={"to": "producing"})
+    client.patch(
+        f"{BASE}/{item['item_id']}",
+        json={"links": {"task_ids": [task.task_id], "batch_ids": [batch_id]}},
+    )
+
+    reconciled = client.get(f"{BASE}/{item['item_id']}").json()
+    assert reconciled["status"] == "produced"
+    assert reconciled["events"][-1]["type"] == "produced"
+
+
+def test_failed_production_returns_to_confirmed_with_visible_error(client):
+    item = client.post(
+        BASE,
+        json={"titles": ["生产失败内容"], "initial_status": "confirmed"},
+    ).json()[0]
+    batch_id = "batch-failed"
+    task = _generation_task("task-failed", batch_id, "failed")
+    save_generation_task(task)
+    client.post(f"{BASE}/{item['item_id']}/transition", json={"to": "producing"})
+    client.patch(
+        f"{BASE}/{item['item_id']}",
+        json={"links": {"task_ids": [task.task_id], "batch_ids": [batch_id]}},
+    )
+
+    reconciled = client.get(BASE).json()[0]
+    assert reconciled["status"] == "confirmed"
+    assert reconciled["automation"]["production_failure"]["message"] == "render failed"
+    assert reconciled["events"][-1]["type"] == "production_failed"
+
+
+def _generation_task(task_id: str, batch_id: str, status: str) -> GenerationTask:
+    return GenerationTask(
+        task_id=task_id,
+        pipeline_id="standard",
+        entry="script",
+        status=status,
+        progress=GenerationProgress(stage=status, percentage=100),
+        request=GenerationRequest(
+            pipeline_id="standard",
+            entry="script",
+            input={"script": "test"},
+            metadata={"batch_id": batch_id},
+        ),
+        error=(
+            GenerationError(layer="runtime", message="render failed")
+            if status == "failed"
+            else None
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

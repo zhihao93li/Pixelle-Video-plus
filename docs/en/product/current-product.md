@@ -32,7 +32,7 @@ flowchart LR
     Agent[Codex Plugin] --> API
     API --> Content[Content and Projects]
     API --> Generation[Generation Registry and Service]
-    API --> Tasks[Task Manager]
+    API --> Tasks[Generation Task Store]
     Generation --> Pipelines[Production Pipelines]
     Pipelines --> Services[LLM / TTS / Image / Video / Storage]
     Tasks --> History[History and Artifacts]
@@ -43,7 +43,7 @@ flowchart LR
 | --- | --- | --- |
 | Product UI | `apps/console/src` | Routing, interaction, and ViewModel rendering |
 | API | `api/routers`, `api/schemas` | HTTP contracts and validation |
-| Tasks | `api/tasks` | Task lifecycle and progress |
+| Production Tasks | `pixelle_video/generation` | Task identity, durable state, progress, and restart semantics |
 | Content | `pixelle_video/content` | Projects, content items, and drafting profiles |
 | Generation | `pixelle_video/generation` | Recipe resolution, overrides, execution, and quality |
 | Pipelines | `pixelle_video/pipelines` | Video, asset, image-set, text, and workflow pipelines |
@@ -62,6 +62,9 @@ flowchart LR
 - Raw backend states are adapted to shared ViewModels before rendering.
 - Unknown states remain unknown; they are not silently classified as running or complete.
 - Failures remain observable and cannot be hidden behind default values or fake success.
+- Production task state is durable. A restart preserves terminal tasks and marks unfinished work as `interrupted` for an explicit retry.
+- Cancelling a batch stops only unfinished child tasks; completed artifacts remain available.
+- Content production state advances on the backend from canonical production tasks. The UI never writes lifecycle transitions merely to reconcile a view.
 
 ## Verification
 

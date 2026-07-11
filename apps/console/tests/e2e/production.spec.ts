@@ -219,6 +219,41 @@ test.describe("生产模式与产物", () => {
     expect(unhandledApi).toEqual([])
   })
 
+  test("运行中批次可以在当前页取消", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page, {
+      enableBatchSubmission: true,
+      batchSubmissionState: "running",
+    })
+    await preparePage(page)
+    await page.goto(`/#/create/generate/${fixtureIds.videoTemplate}`, {
+      waitUntil: "networkidle",
+    })
+
+    await page.getByRole("radio", { name: "批量", exact: true }).click()
+    await page
+      .getByLabel("文案列表", { exact: true })
+      .fill("猫薄荷\n第一条完整文案")
+    await page
+      .locator("button:visible")
+      .filter({ hasText: "批量生成 1 条视频" })
+      .click()
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "确认提交" })
+      .click()
+
+    await page.getByRole("button", { name: "取消批次" }).click()
+    const cancelDialog = page.getByRole("alertdialog")
+    await expect(cancelDialog).toBeVisible()
+    await cancelDialog.getByRole("button", { name: "取消批次" }).click()
+
+    await expect(
+      page.getByText("已取消", { exact: true }).first()
+    ).toBeVisible()
+    await expect(page.getByRole("button", { name: "取消批次" })).toHaveCount(0)
+    expect(unhandledApi).toEqual([])
+  })
+
   test("asset_based 只显示单条素材表面，选文件后可提交", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       submissionDelayMs: 350,

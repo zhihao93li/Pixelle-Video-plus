@@ -207,7 +207,7 @@ test.describe("项目边界与页面异步状态", () => {
   })
 })
 
-test.describe("Phase 3 Content 异步状态", () => {
+test.describe("内容工作台异步状态", () => {
   test("工作台 loading", async ({ page }) => {
     await installApiFixtures(page, {
       contentState: "loading",
@@ -308,7 +308,7 @@ test.describe("Phase 3 Content 异步状态", () => {
   })
 })
 
-test.describe("Phase 3 Operations 异步状态", () => {
+test.describe("任务与作品异步状态", () => {
   for (const scenario of [
     {
       state: "empty" as const,

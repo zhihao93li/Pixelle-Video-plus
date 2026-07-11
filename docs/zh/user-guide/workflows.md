@@ -6,7 +6,7 @@
 
 ## 工作流简介
 
-Pixelle-Video 基于 ComfyUI 架构，支持自定义工作流。
+Pixelle 可以调用兼容的 ComfyUI 工作流完成 TTS 和媒体生成。
 
 ---
 
@@ -64,4 +64,3 @@ Pixelle-Video 基于 ComfyUI 架构，支持自定义工作流。
 ---
 
 ## 更多信息
-

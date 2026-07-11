@@ -1,141 +1,74 @@
 # API 概览
 
-Pixelle-Video 提供 Python SDK 和 HTTP REST API 两种方式。
-
----
-
-## Python SDK
-
-### PixelleVideoCore
-
-主要服务类，提供视频生成功能。
-
-```python
-from pixelle_video.service import PixelleVideoCore
-
-pixelle = PixelleVideoCore()
-await pixelle.initialize()
-```
-
-### generate_video()
-
-生成视频的主要方法。
-
-**参数**:
-
-- `text` (str): 主题或完整文案
-- `mode` (str): 生成模式 ("generate" 或 "fixed")
-- `n_scenes` (int): 分镜数量
-- `title` (str, optional): 视频标题
-- `tts_workflow` (str): TTS 工作流
-- `media_workflow` (str): 媒体生成工作流（图像或视频）
-- `frame_template` (str): 视频模板
-- `template_params` (dict, optional): 模板自定义参数
-- `bgm_path` (str, optional): BGM 文件路径
-- `bgm_volume` (float): BGM 音量 (0.0-1.0)
-
-**返回**: `VideoResult` 对象
-
----
-
-## HTTP REST API
-
-启动 API 服务器：
+启动 FastAPI：
 
 ```bash
-uv run uvicorn api.app:app --host 0.0.0.0 --port 8000
+uv run uvicorn api.app:app --host 127.0.0.1 --port 8000
 ```
 
-### 视频生成 - 同步
+以下路径以 `/api` 为前缀。OpenAPI 文档位于 `/docs`。
 
-`POST /api/video/generate/sync`
+## 项目与配方
 
-同步生成视频，等待完成后返回结果。适合小视频（< 30 秒）。
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/projects` | 读取项目和默认项目 |
+| `GET` | `/generation/templates?project=<id>` | 读取项目可用配方与默认配方 |
+| `GET` | `/generation/templates/{template_id}` | 读取配方详情 |
 
-**请求体**:
+## 提交单条任务
+
+`POST /generation/templates/{template_id}/tasks`
 
 ```json
 {
-  "text": "为什么要养成阅读习惯",
-  "mode": "generate",
-  "n_scenes": 5,
-  "frame_template": "1080x1920/image_default.html",
-  "template_params": {
-    "accent_color": "#3498db",
-    "background": "https://example.com/custom-bg.jpg"
+  "input": {
+    "script": "Cats need clean water every day."
   },
-  "title": "阅读的力量"
+  "metadata": {
+    "project_id": "project-id",
+    "source": "api"
+  },
+  "idempotency_key": "content-id:revision-3"
 }
 ```
 
-**响应**:
+响应包含 `generation_task_id` 和完整初始任务。`input` 的必填字段和允许覆盖项由所选配方决定。
+
+## 提交批次
+
+`POST /generation/batches`
 
 ```json
 {
-  "success": true,
-  "message": "Success",
-  "video_url": "http://localhost:8000/api/files/xxx/final.mp4",
-  "duration": 45.5,
-  "file_size": 12345678
+  "template_id": "pipeline_standard_base_v1",
+  "metadata": {"project_id": "project-id"},
+  "idempotency_key": "batch-2026-07-11",
+  "items": [
+    {"input": {"script": "First script."}},
+    {"input": {"script": "Second script."}}
+  ]
 }
 ```
 
-### 视频生成 - 异步
+批次允许单项校验失败；响应会逐项返回任务身份或结构化错误。
 
-`POST /api/video/generate/async`
+## 查询、取消与重试
 
-异步生成视频，立即返回任务 ID。适合大视频。
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/generation/tasks/{task_id}` | 查询正式生成任务 |
+| `GET` | `/generation/tasks/{task_id}/result` | 读取完成结果 |
+| `DELETE` | `/generation/tasks/{task_id}` | 取消未完成单条任务 |
+| `GET` | `/generation/batches` | 列出批次 |
+| `GET` | `/generation/batches/{batch_id}` | 查询批次与子任务 |
+| `DELETE` | `/generation/batches/{batch_id}` | 取消尚未完成的子任务 |
+| `POST` | `/generation/batches/{batch_id}/items/{index}/retry` | 重试失败或取消的单项 |
 
-**响应**:
+取消批次不会删除已完成结果。任务状态持久化；服务重启后未完成任务成为 `interrupted`，需要明确重试。
 
-```json
-{
-  "success": true,
-  "message": "Task created successfully",
-  "task_id": "abc123"
-}
-```
+## 状态与错误
 
-### 查询任务状态
+任务状态：`pending | running | completed | failed | cancelled | interrupted`。
 
-`GET /api/tasks/{task_id}`
-
-**响应**:
-
-```json
-{
-  "task_id": "abc123",
-  "status": "completed",
-  "result": {
-    "video_url": "http://localhost:8000/api/files/xxx/final.mp4",
-    "duration": 45.5,
-    "file_size": 12345678
-  }
-}
-```
-
----
-
-## 请求参数说明
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `text` | string | 是 | 主题或完整文案 |
-| `mode` | string | 否 | `"generate"` (AI 生成) 或 `"fixed"` (固定文案) |
-| `n_scenes` | int | 否 | 分镜数量 (1-20)，仅 generate 模式有效 |
-| `title` | string | 否 | 视频标题（不填则自动生成） |
-| `frame_template` | string | 否 | 模板路径，如 `1080x1920/image_default.html` |
-| `template_params` | object | 否 | 模板自定义参数（颜色、背景等） |
-| `media_workflow` | string | 否 | 媒体工作流（图像或视频生成） |
-| `tts_workflow` | string | 否 | TTS 工作流 |
-| `ref_audio` | string | 否 | 声音克隆参考音频路径 |
-| `prompt_prefix` | string | 否 | 图像风格前缀 |
-| `bgm_path` | string | 否 | BGM 文件路径 |
-| `bgm_volume` | float | 否 | BGM 音量 (0.0-1.0，默认 0.3) |
-
----
-
-## 更多信息
-
-API 文档也可通过 Swagger UI 访问：`http://localhost:8000/docs`
-
+错误包含失败层级、消息、异常类型和可选详情。调用方不得把未知状态归类为运行中或成功，也不得用本地占位结果覆盖后端错误。

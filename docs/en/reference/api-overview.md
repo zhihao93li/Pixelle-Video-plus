@@ -1,141 +1,74 @@
 # API Overview
 
-Pixelle-Video provides both Python SDK and HTTP REST API.
-
----
-
-## Python SDK
-
-### PixelleVideoCore
-
-Main service class providing video generation functionality.
-
-```python
-from pixelle_video.service import PixelleVideoCore
-
-pixelle = PixelleVideoCore()
-await pixelle.initialize()
-```
-
-### generate_video()
-
-Primary method for generating videos.
-
-**Parameters**:
-
-- `text` (str): Topic or complete script
-- `mode` (str): Generation mode ("generate" or "fixed")
-- `n_scenes` (int): Number of scenes
-- `title` (str, optional): Video title
-- `tts_workflow` (str): TTS workflow
-- `media_workflow` (str): Media generation workflow (image or video)
-- `frame_template` (str): Video template
-- `template_params` (dict, optional): Custom template parameters
-- `bgm_path` (str, optional): BGM file path
-- `bgm_volume` (float): BGM volume (0.0-1.0)
-
-**Returns**: `VideoResult` object
-
----
-
-## HTTP REST API
-
-Start the API server:
+Start FastAPI:
 
 ```bash
-uv run uvicorn api.app:app --host 0.0.0.0 --port 8000
+uv run uvicorn api.app:app --host 127.0.0.1 --port 8000
 ```
 
-### Video Generation - Synchronous
+The routes below use the `/api` prefix. OpenAPI documentation is available at `/docs`.
 
-`POST /api/video/generate/sync`
+## Projects and Recipes
 
-Generate video synchronously, waits until completion. Suitable for small videos (< 30 seconds).
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/projects` | Read projects and the default project |
+| `GET` | `/generation/templates?project=<id>` | Read available and default recipes for a project |
+| `GET` | `/generation/templates/{template_id}` | Read recipe details |
 
-**Request Body**:
+## Submit One Task
+
+`POST /generation/templates/{template_id}/tasks`
 
 ```json
 {
-  "text": "Why you should develop a reading habit",
-  "mode": "generate",
-  "n_scenes": 5,
-  "frame_template": "1080x1920/image_default.html",
-  "template_params": {
-    "accent_color": "#3498db",
-    "background": "https://example.com/custom-bg.jpg"
+  "input": {
+    "script": "Cats need clean water every day."
   },
-  "title": "The Power of Reading"
+  "metadata": {
+    "project_id": "project-id",
+    "source": "api"
+  },
+  "idempotency_key": "content-id:revision-3"
 }
 ```
 
-**Response**:
+The response contains `generation_task_id` and the complete initial task. Required input fields and allowed overrides are defined by the selected recipe.
+
+## Submit a Batch
+
+`POST /generation/batches`
 
 ```json
 {
-  "success": true,
-  "message": "Success",
-  "video_url": "http://localhost:8000/api/files/xxx/final.mp4",
-  "duration": 45.5,
-  "file_size": 12345678
+  "template_id": "pipeline_standard_base_v1",
+  "metadata": {"project_id": "project-id"},
+  "idempotency_key": "batch-2026-07-11",
+  "items": [
+    {"input": {"script": "First script."}},
+    {"input": {"script": "Second script."}}
+  ]
 }
 ```
 
-### Video Generation - Asynchronous
+A batch can contain item-level validation failures. Each item returns either a canonical task identity or a structured error.
 
-`POST /api/video/generate/async`
+## Read, Cancel, and Retry
 
-Generate video asynchronously, returns task ID immediately. Suitable for large videos.
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/generation/tasks/{task_id}` | Read a canonical generation task |
+| `GET` | `/generation/tasks/{task_id}/result` | Read a completed result |
+| `DELETE` | `/generation/tasks/{task_id}` | Cancel one unfinished task |
+| `GET` | `/generation/batches` | List batches |
+| `GET` | `/generation/batches/{batch_id}` | Read a batch and its children |
+| `DELETE` | `/generation/batches/{batch_id}` | Cancel unfinished child tasks |
+| `POST` | `/generation/batches/{batch_id}/items/{index}/retry` | Retry one failed or cancelled item |
 
-**Response**:
+Cancelling a batch does not remove completed results. Task state is durable; unfinished tasks become `interrupted` after a service restart and require an explicit retry.
 
-```json
-{
-  "success": true,
-  "message": "Task created successfully",
-  "task_id": "abc123"
-}
-```
+## States and Errors
 
-### Query Task Status
+Task states are `pending | running | completed | failed | cancelled | interrupted`.
 
-`GET /api/tasks/{task_id}`
-
-**Response**:
-
-```json
-{
-  "task_id": "abc123",
-  "status": "completed",
-  "result": {
-    "video_url": "http://localhost:8000/api/files/xxx/final.mp4",
-    "duration": 45.5,
-    "file_size": 12345678
-  }
-}
-```
-
----
-
-## Request Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `text` | string | Yes | Topic or complete script |
-| `mode` | string | No | `"generate"` (AI generates) or `"fixed"` (use text as-is) |
-| `n_scenes` | int | No | Number of scenes (1-20), only used in generate mode |
-| `title` | string | No | Video title (auto-generated if not provided) |
-| `frame_template` | string | No | Template path, e.g., `1080x1920/image_default.html` |
-| `template_params` | object | No | Custom template parameters (colors, backgrounds, etc.) |
-| `media_workflow` | string | No | Media workflow (image or video generation) |
-| `tts_workflow` | string | No | TTS workflow |
-| `ref_audio` | string | No | Reference audio path for voice cloning |
-| `prompt_prefix` | string | No | Image style prefix |
-| `bgm_path` | string | No | BGM file path |
-| `bgm_volume` | float | No | BGM volume (0.0-1.0, default 0.3) |
-
----
-
-## More Information
-
-API documentation is also available via Swagger UI: `http://localhost:8000/docs`
-
+Errors include a failure layer, message, exception type, and optional detail. Clients must not classify unknown states as running or successful, and must not replace backend failures with local placeholder results.

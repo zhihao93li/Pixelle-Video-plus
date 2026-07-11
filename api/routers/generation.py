@@ -210,7 +210,9 @@ class ScriptReviewSubmitResponse(BaseModel):
 @router.get("/pipelines", response_model=PipelineListResponse)
 async def list_generation_pipelines(pixelle_video: PixelleVideoDep):
     manifests = pixelle_video.pipeline_registry.list_manifests()
-    default_pipeline = "standard" if "standard" in pixelle_video.pipeline_registry.pipeline_ids() else None
+    default_pipeline = (
+        "standard" if "standard" in pixelle_video.pipeline_registry.pipeline_ids() else None
+    )
 
     return PipelineListResponse(
         default_pipeline=default_pipeline,
@@ -263,9 +265,7 @@ def _template_generation_config_response(
         overridable_keys=overridable,
         overrides=load_overrides(template.id),
         effective_params={
-            key: value
-            for key, value in template.fixed_params.items()
-            if key in OVERRIDABLE_PARAMS
+            key: value for key, value in template.fixed_params.items() if key in OVERRIDABLE_PARAMS
         },
     )
 
@@ -481,14 +481,18 @@ async def upload_generation_assets(files: list[UploadFile] = File(...)):
 
 
 def _resolve_project_id(explicit: str | None) -> str:
-    """当前项目 id：显式 > 默认项目 > 'PetWoods' 兜底（旧客户端不传时行为不变）。"""
-    from pixelle_video.content.projects import ensure_migrated, get_default_project
+    """Resolve a real project scope; never invent or silently substitute one."""
+    from pixelle_video.content.projects import ensure_migrated, get_default_project, get_project
 
     ensure_migrated()
     if explicit:
+        if get_project(explicit) is None:
+            raise HTTPException(status_code=400, detail=f"Unknown project: {explicit}")
         return explicit
     project = get_default_project()
-    return project.project_id if project else "PetWoods"
+    if project is None:
+        raise HTTPException(status_code=409, detail="No default project is configured.")
+    return project.project_id
 
 
 def _default_template_for_project(project_id: str | None) -> str | None:
@@ -620,10 +624,7 @@ async def submit_generation_batch(
 
 @router.get("/batches", response_model=GenerationBatchListResponse)
 async def list_generation_batches(generation_service: GenerationServiceDep):
-    batches = [
-        _hydrate_batch(batch, generation_service)
-        for batch in _load_batches()
-    ]
+    batches = [_hydrate_batch(batch, generation_service) for batch in _load_batches()]
     for batch in batches:
         _save_batch(batch)
     return GenerationBatchListResponse(
@@ -639,6 +640,32 @@ async def get_generation_batch(
     batch = _load_batch(batch_id)
     if batch is None:
         raise HTTPException(status_code=404, detail=f"Generation batch not found: {batch_id}")
+    batch = _hydrate_batch(batch, generation_service)
+    _save_batch(batch)
+    return batch
+
+
+@router.delete("/batches/{batch_id}", response_model=GenerationBatchResponse)
+async def cancel_generation_batch(
+    batch_id: str,
+    generation_service: GenerationServiceDep,
+):
+    batch = _load_batch(batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail=f"Generation batch not found: {batch_id}")
+
+    batch = _hydrate_batch(batch, generation_service)
+    for item in batch.get("items", []):
+        if item.get("status") not in {"pending", "submitted", "running"}:
+            continue
+        task_id = item.get("task_id")
+        if not task_id:
+            continue
+        task = generation_service.cancel_task(task_id)
+        item["status"] = task.status
+        item["progress"] = task.progress.model_dump(mode="json")
+        item["error"] = task.error.model_dump(mode="json") if task.error else None
+
     batch = _hydrate_batch(batch, generation_service)
     _save_batch(batch)
     return batch
@@ -660,7 +687,9 @@ async def retry_generation_batch_item(
     batch = _hydrate_batch(batch, generation_service)
     item = _find_batch_item(batch, item_index)
     if item is None:
-        raise HTTPException(status_code=404, detail=f"Generation batch item not found: {item_index}")
+        raise HTTPException(
+            status_code=404, detail=f"Generation batch item not found: {item_index}"
+        )
     if item.get("status") not in {"failed", "cancelled"}:
         raise HTTPException(
             status_code=409,
@@ -717,12 +746,10 @@ async def list_script_review_templates():
     return ScriptReviewTemplateListResponse(
         default_languages=list(DEFAULT_REVIEW_LANGUAGES),
         script_templates=[
-            _prompt_template_response(template)
-            for template in load_prompt_templates("script")
+            _prompt_template_response(template) for template in load_prompt_templates("script")
         ],
         split_templates=[
-            _prompt_template_response(template)
-            for template in load_prompt_templates("split")
+            _prompt_template_response(template) for template in load_prompt_templates("split")
         ],
     )
 
@@ -768,12 +795,8 @@ async def create_script_review_draft_set(
     split_template_name = request_body.split_template_name or (
         profile.split_template_name if profile else None
     )
-    script_model = request_body.script_model or (
-        profile.script_model if profile else None
-    ) or None
-    split_model = request_body.split_model or (
-        profile.split_model if profile else None
-    ) or None
+    script_model = request_body.script_model or (profile.script_model if profile else None) or None
+    split_model = request_body.split_model or (profile.split_model if profile else None) or None
     language_script_models = {
         **(profile.language_script_models if profile else {}),
         **request_body.language_script_models,
@@ -838,8 +861,7 @@ async def create_script_review_draft_set(
             "script_model": script_model or "",
             "split_model": split_model or "",
             "language_script_templates": {
-                language: "custom"
-                for language in request_body.language_script_templates
+                language: "custom" for language in request_body.language_script_templates
             },
             "language_script_models": language_script_models,
         },
@@ -860,8 +882,7 @@ async def list_script_review_draft_sets(project: str | None = None):
         draft_sets = [
             draft_set
             for draft_set in draft_sets
-            if (draft_set.get("draft_settings", {}).get("project_id") or default_project)
-            == project
+            if (draft_set.get("draft_settings", {}).get("project_id") or default_project) == project
         ]
     return ScriptReviewDraftSetListResponse(
         draft_sets=sorted(
@@ -876,7 +897,9 @@ async def list_script_review_draft_sets(project: str | None = None):
 async def get_script_review_draft_set(draft_set_id: str):
     draft_set = _load_script_review_draft_set(draft_set_id)
     if draft_set is None:
-        raise HTTPException(status_code=404, detail=f"Script review draft set not found: {draft_set_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Script review draft set not found: {draft_set_id}"
+        )
     return draft_set
 
 
@@ -887,7 +910,9 @@ async def update_script_review_draft_set(
 ):
     draft_set = _load_script_review_draft_set(draft_set_id)
     if draft_set is None:
-        raise HTTPException(status_code=404, detail=f"Script review draft set not found: {draft_set_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Script review draft set not found: {draft_set_id}"
+        )
     draft_set["drafts"] = request_body.drafts
     draft_set["metadata"] = {
         **(draft_set.get("metadata") or {}),
@@ -910,14 +935,12 @@ async def submit_script_review_draft_set_tasks(
 ):
     draft_set = _load_script_review_draft_set(draft_set_id)
     if draft_set is None:
-        raise HTTPException(status_code=404, detail=f"Script review draft set not found: {draft_set_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Script review draft set not found: {draft_set_id}"
+        )
 
     drafts = request_body.drafts if request_body.drafts is not None else draft_set.get("drafts", [])
-    selected_drafts = [
-        draft
-        for draft in drafts
-        if draft.get("selected_for_generation", True)
-    ]
+    selected_drafts = [draft for draft in drafts if draft.get("selected_for_generation", True)]
     validation_errors: list[str] = []
     for draft in selected_drafts:
         validation_errors.extend(validate_draft_translation_counts(draft))
@@ -946,9 +969,7 @@ async def submit_script_review_draft_set_tasks(
     registry = build_default_production_template_registry()
     template_id = (
         request_body.template_id
-        or _default_template_for_project(
-            draft_set.get("draft_settings", {}).get("project_id")
-        )
+        or _default_template_for_project(draft_set.get("draft_settings", {}).get("project_id"))
         or "pipeline_standard_base_v1"
     )
     try:
@@ -1029,7 +1050,9 @@ async def get_generation_task(task_id: str, generation_service: GenerationServic
     try:
         return generation_service.get_task(task_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Generation task not found: {task_id}") from None
+        raise HTTPException(
+            status_code=404, detail=f"Generation task not found: {task_id}"
+        ) from None
 
 
 @router.get("/tasks/{task_id}/result", response_model=GenerationResult)
@@ -1037,7 +1060,9 @@ async def get_generation_task_result(task_id: str, generation_service: Generatio
     try:
         return generation_service.get_result(task_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Generation task not found: {task_id}") from None
+        raise HTTPException(
+            status_code=404, detail=f"Generation task not found: {task_id}"
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
@@ -1047,7 +1072,9 @@ async def cancel_generation_task(task_id: str, generation_service: GenerationSer
     try:
         return generation_service.cancel_task(task_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Generation task not found: {task_id}") from None
+        raise HTTPException(
+            status_code=404, detail=f"Generation task not found: {task_id}"
+        ) from None
 
 
 def _asset_upload_dir() -> Path:
@@ -1143,10 +1170,7 @@ def _load_script_review_draft_sets() -> list[dict]:
             draft_set = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if (
-            not isinstance(draft_set, dict)
-            or draft_set.get("draft_set_id") != path.stem
-        ):
+        if not isinstance(draft_set, dict) or draft_set.get("draft_set_id") != path.stem:
             continue
         draft_sets.append(draft_set)
     return draft_sets
@@ -1161,6 +1185,15 @@ def _hydrate_batch(batch: dict, generation_service) -> dict:
         try:
             task = generation_service.get_task(task_id)
         except KeyError:
+            if item.get("status") in {"completed", "failed", "cancelled", "interrupted"}:
+                continue
+            item["status"] = "interrupted"
+            item["error"] = {
+                "layer": "persistence",
+                "message": "找不到这条生产任务的持久状态，请重新提交。",
+                "exception_type": "GenerationTaskStateMissing",
+            }
+            updated = True
             continue
         item["status"] = task.status
         item["progress"] = task.progress.model_dump(mode="json")
@@ -1184,20 +1217,7 @@ def _find_batch_item(batch: dict, item_index: int) -> dict | None:
 
 
 def _compile_batch_retry_request(*, batch: dict, item: dict, metadata: dict) -> GenerationRequest:
-    # 遗留兼容：R1 之前持久化的审核批次 template_id 为占位模板，按旧方式直拼请求。
-    if batch.get("template_id") == "pixelle_script_review_v1":
-        script = str((item.get("input") or {}).get("script") or "").strip()
-        if not script:
-            raise ValueError("Script review batch item is missing script text.")
-        return GenerationRequest(
-            pipeline_id="standard",
-            entry="script",
-            input={"script": script},
-            params=dict(item.get("params") or {}),
-            metadata=metadata,
-        )
-
-    # 重试必须还原当次提交的白名单覆盖（如每语言 Fish 音色）：
+    # 重试还原当次提交的白名单覆盖（如每语言 Fish 音色）：
     # 它们保存在 item.params 里，合并进 input 交由 compile_request 按白名单过滤。
     registry = build_default_production_template_registry()
     return registry.compile_request(
@@ -1302,13 +1322,17 @@ def _submit_generation_jobs_as_batch(
 def _batch_status(statuses: list[str]) -> str:
     if not statuses:
         return "empty"
-    terminal = {"completed", "failed", "cancelled"}
+    terminal = {"completed", "failed", "cancelled", "interrupted"}
     if any(status not in terminal for status in statuses):
         return "running"
     if all(status == "completed" for status in statuses):
         return "completed"
     if all(status == "failed" for status in statuses):
         return "failed"
+    if all(status in {"completed", "cancelled"} for status in statuses):
+        return "cancelled"
+    if all(status == "interrupted" for status in statuses):
+        return "interrupted"
     return "partial_failed"
 
 
@@ -1373,5 +1397,7 @@ def _clean_string_items(items: list[str], field_name: str) -> list[str]:
             cleaned.append(value)
             seen.add(value)
     if not cleaned:
-        raise HTTPException(status_code=400, detail=f"{field_name} must contain at least one value.")
+        raise HTTPException(
+            status_code=400, detail=f"{field_name} must contain at least one value."
+        )
     return cleaned

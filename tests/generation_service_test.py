@@ -48,9 +48,7 @@ class SuccessfulPipeline:
                 extra_info="voice ready",
             )
         )
-        kwargs["progress_callback"](
-            ProgressEvent(event_type="compose_video", progress=1.0)
-        )
+        kwargs["progress_callback"](ProgressEvent(event_type="compose_video", progress=1.0))
         return _video_result()
 
 
@@ -81,10 +79,14 @@ class DetailedProgressPipeline:
         return _video_result()
 
 
-def _service_for_pipeline(pipeline):
+def _service_for_pipeline(pipeline, storage_dir=None):
     manifest = build_default_pipeline_manifests()[0]
     registry = build_pipeline_registry([manifest], pipelines={"standard": pipeline})
-    return GenerationService(pipeline_registry=registry, task_id_factory=lambda: "gen-task-1")
+    return GenerationService(
+        pipeline_registry=registry,
+        task_id_factory=lambda: "gen-task-1",
+        storage_dir=storage_dir,
+    )
 
 
 def _service_for_asset_pipeline(pipeline):
@@ -130,6 +132,60 @@ async def test_generation_service_runs_pipeline_and_returns_structured_result():
             "progress_callback": pipeline.calls[0]["progress_callback"],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_generation_service_restores_completed_tasks_and_idempotency(tmp_path):
+    request = GenerationRequest(
+        pipeline_id="standard",
+        entry="script",
+        input={"script": "Scene one."},
+        idempotency_key="stable-request",
+    )
+    first = _service_for_pipeline(SuccessfulPipeline(), tmp_path)
+    completed = await first.wait_for_task(first.submit(request).task_id)
+    assert completed.status == "completed"
+
+    restored = _service_for_pipeline(SuccessfulPipeline(), tmp_path)
+    assert restored.get_task(completed.task_id).status == "completed"
+    assert restored.submit(request).task_id == completed.task_id
+
+
+@pytest.mark.asyncio
+async def test_generation_service_marks_inflight_tasks_interrupted_after_restart(tmp_path):
+    first = _service_for_pipeline(SuccessfulPipeline(), tmp_path)
+    task = first.submit(
+        GenerationRequest(
+            pipeline_id="standard",
+            entry="script",
+            input={"script": "Scene one."},
+        )
+    )
+
+    restored = _service_for_pipeline(SuccessfulPipeline(), tmp_path).get_task(task.task_id)
+    assert restored.status == "interrupted"
+    assert restored.error is not None
+    assert restored.error.exception_type == "GenerationServiceRestart"
+    await first.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_generation_service_marks_inflight_tasks_interrupted_on_graceful_shutdown(tmp_path):
+    service = _service_for_pipeline(SuccessfulPipeline(), tmp_path)
+    task = service.submit(
+        GenerationRequest(
+            pipeline_id="standard",
+            entry="script",
+            input={"script": "Scene one."},
+        )
+    )
+
+    await service.shutdown()
+
+    interrupted = service.get_task(task.task_id)
+    assert interrupted.status == "interrupted"
+    assert interrupted.error is not None
+    assert interrupted.error.exception_type == "GenerationServiceShutdown"
 
 
 @pytest.mark.asyncio
@@ -279,10 +335,7 @@ async def test_generation_result_includes_quality_review_and_asset_manifest(tmp_
     assert completed.result is not None
     metadata = completed.result.metadata
     assert metadata["quality_review"]["status"] == "failed"
-    assert {
-        check["id"]
-        for check in metadata["quality_review"]["checks"]
-    } >= {
+    assert {check["id"] for check in metadata["quality_review"]["checks"]} >= {
         "file_exists",
         "video_playable",
         "audio_present",
@@ -290,10 +343,7 @@ async def test_generation_result_includes_quality_review_and_asset_manifest(tmp_
         "file_size_bytes",
         "black_frame_sample",
     }
-    asset_roles = {
-        asset["role"]
-        for asset in metadata["asset_manifest"]["assets"]
-    }
+    asset_roles = {asset["role"] for asset in metadata["asset_manifest"]["assets"]}
     assert {
         "final_video",
         "narration_audio",

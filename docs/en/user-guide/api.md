@@ -1,42 +1,19 @@
 # API Usage
 
-Pixelle-Video provides a complete Python API for easy integration into your projects.
+Production capabilities are exposed through FastAPI. After starting the server, the interactive contract is available at `http://127.0.0.1:8000/docs`.
 
----
+## Basic Flow
 
-## Quick Start
+1. Read projects with `GET /api/projects`.
+2. Read available recipes with `GET /api/generation/templates?project=<project_id>`.
+3. Submit a single task or batch through a recipe.
+4. Poll the canonical generation task or batch state.
+5. Read artifacts from the task result, then use library and publishing APIs.
 
-```python
-from pixelle_video.service import PixelleVideoCore
-import asyncio
+Every production request must carry a real project identity and pass through recipe compilation. Clients must not assemble internal pipeline parameters directly.
 
-async def main():
-    # Initialize
-    pixelle = PixelleVideoCore()
-    await pixelle.initialize()
-    
-    # Generate video
-    result = await pixelle.generate_video(
-        text="Why develop a reading habit",
-        mode="generate",
-        n_scenes=5
-    )
-    
-    print(f"Video generated: {result.video_path}")
+## State Handling
 
-# Run
-asyncio.run(main())
-```
+Task terminal states are `completed`, `failed`, `cancelled`, and `interrupted`. A service restart preserves terminal tasks and marks unfinished work as `interrupted`. Clients must show backend errors and must not infer success or write content lifecycle transitions merely to reconcile a view.
 
----
-
-## API Reference
-
-For detailed API documentation, see [API Overview](../reference/api-overview.md).
-
----
-
-## Examples
-
-For more usage examples, check the `examples/` directory in the project.
-
+See the [API overview](../reference/api-overview.md) for routes and request examples.

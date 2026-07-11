@@ -93,24 +93,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Pixelle-Video API",
     description="""
-    ## Pixelle-Video - AI Video Generation Platform API
-    
-    ### Features
-    - 🤖 **LLM**: Large language model integration
-    - 🔊 **TTS**: Text-to-speech synthesis
-    - 🎨 **Image**: AI image generation
-    - 📝 **Content**: Automated content generation
-    - 🎬 **Video**: End-to-end video generation
-    
-    ### Video Generation Modes
-    - **Sync**: `/api/video/generate/sync` - For small videos (< 30s)
-    - **Async**: `/api/video/generate/async` - For large videos with task tracking
-    
-    ### Getting Started
+    ## Pixelle content production API
+
+    The production contract is project-scoped and recipe-driven. It supports
+    video, image-set, and text artifacts, plus persisted single and batch tasks.
+
+    ### Getting started
     1. Check health: `GET /health`
-    2. Generate narrations: `POST /api/content/narration`
-    3. Generate video: `POST /api/video/generate/sync` or `/async`
-    4. Track task progress: `GET /api/tasks/{task_id}`
+    2. Read projects: `GET /api/projects`
+    3. Read recipes: `GET /api/generation/templates`
+    4. Submit a task: `POST /api/generation/templates/{template_id}/tasks`
+    5. Track it: `GET /api/generation/tasks/{task_id}`
     """,
     version="0.1.0",
     docs_url=api_config.docs_url,

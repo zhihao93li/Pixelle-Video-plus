@@ -6,7 +6,7 @@ How to create custom video templates.
 
 ## Template Introduction
 
-Video templates use HTML to define the layout and style of video frames. Pixelle-Video provides multiple preset templates covering different video dimensions and style requirements.
+Video templates use HTML to define the layout and style of video frames. Pixelle provides multiple presets for different dimensions and visual styles.
 
 ---
 
@@ -406,4 +406,4 @@ Ensure the template's `body` size matches the target video dimensions:
 
 ## More Information
 
-For template development questions, feel free to ask in [GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues).
+For template development questions, use [GitHub Issues](https://github.com/zhihao93li/Pixelle-Video-plus/issues).

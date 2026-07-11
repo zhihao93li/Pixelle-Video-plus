@@ -4,7 +4,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EntryId = Literal["topic", "script", "scenes", "assets", "audio", "video"]
-GenerationStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
+GenerationStatus = Literal[
+    "pending",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    "interrupted",
+]
 GenerationErrorLayer = Literal[
     "input",
     "config",

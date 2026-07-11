@@ -32,7 +32,7 @@ flowchart LR
     Agent[Codex Plugin] --> API
     API --> Content[Content and Projects]
     API --> Generation[Generation Registry and Service]
-    API --> Tasks[Task Manager]
+    API --> Tasks[生成任务存储]
     Generation --> Pipelines[Production Pipelines]
     Pipelines --> Services[LLM / TTS / Image / Video / Storage]
     Tasks --> History[History and Artifacts]
@@ -43,7 +43,7 @@ flowchart LR
 | --- | --- | --- |
 | 产品界面 | `apps/console/src` | 路由、交互、ViewModel 展示 |
 | API | `api/routers`、`api/schemas` | HTTP 合同和权限边界 |
-| 异步任务 | `api/tasks` | 任务生命周期与进度 |
+| 正式生成任务 | `pixelle_video/generation` | 任务身份、持久状态、运行进度与重启语义 |
 | 内容与项目 | `pixelle_video/content` | 项目、内容条目、起草配置 |
 | 生产注册与编译 | `pixelle_video/generation` | 配方解析、覆盖合并、运行与质量 |
 | 生产管线 | `pixelle_video/pipelines` | 视频、素材、图集、长文和工作流管线 |
@@ -55,7 +55,7 @@ flowchart LR
 
 - 项目与内容事实由后端持久化层拥有，前端本地状态不能充当业务真源。
 - 配方注册、有效参数和覆盖合并由 `pixelle_video/generation` 拥有。
-- 任务身份、状态和恢复语义由 `api/tasks` 与生成服务拥有。
+- 正式生成任务的身份、状态和恢复语义由 `pixelle_video/generation` 拥有。
 - 产物和历史由生成结果与历史服务拥有。
 - 发布资格和发布尝试由发布服务拥有。
 - UI 只保存草稿交互状态，例如未提交输入、展开状态和 URL 筛选。
@@ -80,6 +80,10 @@ idle → uploading → submitting → queued → running
 ```
 
 未知后端状态必须被标记为未知，不能被静默归类。
+
+任务状态持久化到后端数据目录。服务重启不会丢失终态；未完成任务会成为 `interrupted`，由用户明确重试。取消批次只取消尚未完成的子任务，已完成产物继续保留。
+
+内容条目的生产状态由后端读取正式生成任务后推进。前端不得为了刷新看板而反向修改生命周期。
 
 ## 代码约束
 

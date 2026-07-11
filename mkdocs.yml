@@ -1,10 +1,8 @@
-site_name: Pixelle-Video
-site_description: AI Video Creator - Generate a short video in 3 minutes
+site_name: Pixelle
+site_description: Project-scoped AI content production workspace
 site_author: Pixelle.AI
-site_url: https://AIDC-AI.github.io/Pixelle-Video/
-
-repo_name: AIDC-AI/Pixelle-Video
-repo_url: https://github.com/AIDC-AI/Pixelle-Video
+repo_name: zhihao93li/Pixelle-Video-plus
+repo_url: https://github.com/zhihao93li/Pixelle-Video-plus
 edit_uri: edit/main/docs/
 
 copyright: Copyright &copy; 2025 Pixelle.AI
@@ -78,11 +76,6 @@ plugins:
             API Usage: API 使用
             Workflows: 工作流定制
             Templates: 模板开发
-            Gallery: 示例库
-            Tutorials: 教程
-            Your First Video: 生成你的第一个视频
-            Custom Style: 自定义视觉风格
-            Voice Cloning: 声音克隆
             Reference: 参考
             API Overview: API 概览
             Config Schema: 配置文件详解
@@ -143,11 +136,6 @@ nav:
     - API Usage: user-guide/api.md
     - Workflows: user-guide/workflows.md
     - Templates: user-guide/templates.md
-  - Gallery: gallery/index.md
-  - Tutorials:
-    - Your First Video: tutorials/your-first-video.md
-    - Custom Style: tutorials/custom-style.md
-    - Voice Cloning: tutorials/voice-cloning.md
   - Reference:
     - API Overview: reference/api-overview.md
     - Config Schema: reference/config-schema.md
@@ -161,7 +149,7 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/AIDC-AI/Pixelle-Video
+      link: https://github.com/zhihao93li/Pixelle-Video-plus
       name: GitHub Repository
 
 extra_css:

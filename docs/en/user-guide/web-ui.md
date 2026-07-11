@@ -20,7 +20,7 @@ The generation workspace keeps input and current overrides on the left. The righ
 
 ## Tasks
 
-Tasks are grouped by submission run. The list shows overall state and progress; details show child tasks, failure reasons, and available cancel or retry actions.
+Tasks are grouped by submission run. The list shows overall state and progress; details show child tasks, failure reasons, and available cancel or retry actions. Cancelling a batch stops only unfinished children; completed results remain available.
 
 ## Library
 
@@ -43,3 +43,5 @@ Each configuration section saves independently. Unsaved changes are marked and p
 ## State and Recovery
 
 Loading failures, empty data, and stale data are separate states. Errors appear near the affected action with an explicit recovery path; they are never presented as empty lists or successful results.
+
+Completed and failed task states survive a service restart. Work that was still in progress becomes interrupted and requires an explicit retry.

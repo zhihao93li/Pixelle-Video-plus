@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢你对 Pixelle-Video 的贡献兴趣！
+感谢你参与 Pixelle。
 
 ---
 
@@ -18,8 +18,8 @@
 
 ```bash
 # 克隆你的 fork
-git clone https://github.com/your-username/Pixelle-Video.git
-cd Pixelle-Video
+git clone https://github.com/your-username/Pixelle-Video-plus.git
+cd Pixelle-Video-plus
 
 # 安装开发依赖
 uv sync
@@ -40,11 +40,10 @@ pytest
 
 ## 提交 Issue
 
-遇到问题或有功能建议？请在 [GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues) 提交。
+遇到问题或有功能建议？请在 [GitHub Issues](https://github.com/zhihao93li/Pixelle-Video-plus/issues) 提交。
 
 ---
 
 ## 行为准则
 
 请保持友好和尊重，我们致力于营造包容的社区环境。
-

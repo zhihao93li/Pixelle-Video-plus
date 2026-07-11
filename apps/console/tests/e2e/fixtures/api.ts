@@ -38,6 +38,7 @@ export type ApiFixtureOptions = {
   scriptReviewState?: "ready" | "create-error" | "save-error" | "submit-error"
   includeBatch?: boolean
   enableBatchSubmission?: boolean
+  batchSubmissionState?: "partial_failed" | "running"
   includeSecondProject?: boolean
   projectName?: string
   contentScript?: string
@@ -332,6 +333,28 @@ const completedGenerationBatch = {
     status: "completed",
     progress: generationProgress(100, "产物已经生成", "completed"),
     error: null,
+  })),
+}
+
+const runningGenerationBatch = {
+  ...generationBatch,
+  status: "running",
+  failed_count: 0,
+  items: generationBatch.items.map((item) => ({
+    ...item,
+    status: "running",
+    progress: generationProgress(42, "正在生成产物"),
+    error: null,
+  })),
+}
+
+const cancelledGenerationBatch = {
+  ...runningGenerationBatch,
+  status: "cancelled",
+  items: runningGenerationBatch.items.map((item) => ({
+    ...item,
+    status: "cancelled",
+    progress: generationProgress(42, "任务已取消", "cancelled"),
   })),
 }
 
@@ -934,7 +957,31 @@ function responseFor(
     path === "/generation/batches" &&
     options.enableBatchSubmission
   ) {
-    return { body: generationBatch }
+    return {
+      body:
+        options.batchSubmissionState === "running"
+          ? runningGenerationBatch
+          : generationBatch,
+    }
+  }
+  if (
+    method === "GET" &&
+    path === `/generation/batches/${generationBatch.batch_id}` &&
+    options.enableBatchSubmission
+  ) {
+    return {
+      body:
+        options.batchSubmissionState === "running"
+          ? runningGenerationBatch
+          : generationBatch,
+    }
+  }
+  if (
+    method === "DELETE" &&
+    path === `/generation/batches/${generationBatch.batch_id}` &&
+    options.enableBatchSubmission
+  ) {
+    return { body: cancelledGenerationBatch }
   }
   if (
     method === "POST" &&

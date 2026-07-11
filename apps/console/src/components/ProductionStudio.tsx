@@ -367,6 +367,8 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
   const {
     batch: submittedBatch,
     setBatch: setSubmittedBatch,
+    cancelBatch: cancelSubmittedBatch,
+    isCancelling: isCancellingBatch,
     retryItem: retryBatchItem,
     retryingItemIndex: retryingBatchIndex,
   } = useBatchPolling()
@@ -1026,6 +1028,8 @@ export function GenerateWorkspace({ templateId }: { templateId?: string }) {
                   <BatchTaskPanel
                     artifactLabel={artifactKindLabel(nonVideoArtifact)}
                     batch={submittedBatch}
+                    isCancelling={isCancellingBatch}
+                    onCancel={() => void cancelSubmittedBatch()}
                     onRetryItem={retryBatchItem}
                     retryingItemIndex={retryingBatchIndex}
                   />
@@ -2071,7 +2075,7 @@ function StandardInput({
                       )}
                     </div>
 
-                    {/* 生图提示词三项：专家行（批准 mock），标签与配方页零件表一致 */}
+                    {/* 生图提示词三项：专家行，标签与配方页零件表一致 */}
                     {expertMode && (
                       <div className="grid gap-4 lg:grid-cols-2">
                         <Field>

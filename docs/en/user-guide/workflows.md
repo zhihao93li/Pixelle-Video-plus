@@ -6,7 +6,7 @@ How to customize ComfyUI workflows to achieve specific functionality.
 
 ## Workflow Introduction
 
-Pixelle-Video is built on the ComfyUI architecture and supports custom workflows.
+Pixelle can call compatible ComfyUI workflows for TTS and media generation.
 
 ---
 
@@ -64,4 +64,3 @@ Located in `workflows/selfhost/` or `workflows/runninghub/`
 ---
 
 ## More Information
-

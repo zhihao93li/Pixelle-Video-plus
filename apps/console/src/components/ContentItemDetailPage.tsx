@@ -46,6 +46,7 @@ import { draftSetProvenance, formatDate, readableError } from "@/lib/format"
 import { languageLabel } from "@/lib/languages"
 import {
   ACTOR_LABELS,
+  contentProductionFailure,
   eventTypeLabel,
   VARIANT_STATUS_LABELS,
 } from "@/lib/contentItemMeta"
@@ -307,6 +308,7 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
     new Set([...item.languages, ...Object.keys(item.variants)])
   )
   const isReviewing = item.status === "pending_review"
+  const productionFailure = contentProductionFailure(item)
   const allConfirmed =
     item.languages.length > 0 &&
     item.languages.every((lang) => item.variants[lang]?.status === "confirmed")
@@ -679,6 +681,9 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
       ) : null}
 
       {error && <InlineError title="操作失败" message={error} />}
+      {productionFailure ? (
+        <InlineError message={productionFailure} title="上次生产未完成" />
+      ) : null}
 
       <div className="sticky top-[calc(6.5rem+0.5rem)] z-20 lg:hidden">
         <ContentLifecyclePanel

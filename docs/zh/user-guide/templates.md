@@ -6,7 +6,7 @@
 
 ## 模板简介
 
-视频模板使用 HTML 定义视频画面的布局和样式。Pixelle-Video 提供了多种预设模板，覆盖不同的视频尺寸和风格需求。
+视频模板使用 HTML 定义视频画面的布局和样式。Pixelle 提供多种尺寸和视觉风格预设。
 
 ---
 
@@ -404,4 +404,4 @@ templates/
 
 ## 更多信息
 
-如有模板开发相关问题，欢迎在 [GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues) 中提问。
+如有模板开发相关问题，请使用 [GitHub Issues](https://github.com/zhihao93li/Pixelle-Video-plus/issues)。

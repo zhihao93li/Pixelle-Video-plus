@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 import api.routers.generation as generation_router
 import pixelle_video.content.drafting_profiles as drafting_profiles
@@ -49,9 +50,15 @@ def test_none_project_uses_builtin_default():
     assert generation_router._default_template_for_project(None) == BUILTIN_DEFAULT
 
 
-def test_resolve_project_id_prefers_explicit():
-    projects.create_project(name="C")
-    assert generation_router._resolve_project_id("explicit-id") == "explicit-id"
+def test_resolve_project_id_prefers_valid_explicit_project():
+    project = projects.create_project(name="C")
+    assert generation_router._resolve_project_id(project.project_id) == project.project_id
     # 不传时回退到默认项目（迁移已建）
     resolved = generation_router._resolve_project_id(None)
     assert resolved is not None
+
+
+def test_resolve_project_id_rejects_unknown_explicit_project():
+    with pytest.raises(HTTPException) as error:
+        generation_router._resolve_project_id("does-not-exist")
+    assert error.value.status_code == 400

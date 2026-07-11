@@ -62,7 +62,9 @@ export function isTerminalBatchStatus(status: string): boolean {
   return (
     status === "completed" ||
     status === "failed" ||
-    status === "partial_failed"
+    status === "partial_failed" ||
+    status === "cancelled" ||
+    status === "interrupted"
   )
 }
 
