@@ -87,6 +87,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [llmModels, setLlmModels] = useState<string[]>([])
   const [activeCount, setActiveCount] = useState<number | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [auxiliaryErrors, setAuxiliaryErrors] = useState<
+    Partial<Record<"content" | "models", string>>
+  >({})
   const [reloadToken, setReloadToken] = useState(0)
 
   // 分区块编辑态
@@ -102,6 +105,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const [productionTemplateId, setProductionTemplateId] = useState(NONE)
   const [publishPlatformIds, setPublishPlatformIds] = useState<string[]>([])
   const [savingSection, setSavingSection] = useState<string | null>(null)
+  const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({})
   const [peek, setPeek] = useState<{ kind: PromptKind; name: string } | null>(
     null
   )
@@ -189,7 +193,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           setLoadError(readableError(error))
         }
       })
-    // 进行中内容数（失败静默）
+    // 进行中内容数是辅助信息，失败不阻断编辑，但必须显式告知。
     void listContentItems({ project: projectId, limit: 500 })
       .then((items) => {
         if (!cancelled) {
@@ -199,15 +203,27 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 !["published", "measured", "archived"].includes(item.status)
             ).length
           )
+          setAuxiliaryErrors((current) => {
+            const next = { ...current }
+            delete next.content
+            return next
+          })
         }
       })
-      .catch(() => {})
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setAuxiliaryErrors((current) => ({
+            ...current,
+            content: readableError(error),
+          }))
+        }
+      })
     return () => {
       cancelled = true
     }
   }, [projectId, reloadToken])
 
-  // 模型下拉可选项（拉不到回落文本框）
+  // 模型目录失败时保留文本输入，同时显式标记辅助数据未同步。
   useEffect(() => {
     let cancelled = false
     void getSettingsConfig()
@@ -221,16 +237,33 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       .then((models) => {
         if (models && !cancelled) {
           setLlmModels(models.models)
+          setAuxiliaryErrors((current) => {
+            const next = { ...current }
+            delete next.models
+            return next
+          })
         }
       })
-      .catch(() => {})
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setAuxiliaryErrors((current) => ({
+            ...current,
+            models: readableError(error),
+          }))
+        }
+      })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [reloadToken])
 
   async function saveSection(section: string, action: () => Promise<void>) {
     setSavingSection(section)
+    setSectionErrors((current) => {
+      const next = { ...current }
+      delete next[section]
+      return next
+    })
     try {
       await action()
       if (section === "basic") {
@@ -286,9 +319,11 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       toast({ title: "已保存", variant: "success" })
       await refreshProjects()
     } catch (error) {
+      const message = readableError(error)
+      setSectionErrors((current) => ({ ...current, [section]: message }))
       toast({
         title: "保存失败",
-        description: readableError(error),
+        description: message,
         variant: "error",
       })
     } finally {
@@ -624,6 +659,18 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
           title="项目详情可能不是最新状态"
         />
       ) : null}
+      {Object.keys(auxiliaryErrors).length > 0 ? (
+        <AsyncState
+          action={
+            <Button onClick={refresh} size="sm" variant="outline">
+              重新读取
+            </Button>
+          }
+          description={Object.values(auxiliaryErrors).join("；")}
+          state="stale"
+          title="部分辅助信息未同步"
+        />
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="flex flex-col gap-4">
@@ -632,6 +679,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             <SectionHeader
               busy={savingSection === "basic"}
               dirty={basicDirty}
+              error={sectionErrors.basic}
               onSave={() =>
                 void saveSection("basic", async () => {
                   if (!basic.name.trim()) {
@@ -681,6 +729,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               busy={savingSection === "drafting"}
               disabled={!profile}
               dirty={draftingDirty}
+              error={sectionErrors.drafting}
               onSave={() =>
                 void saveSection("drafting", async () => {
                   if (!profile) {
@@ -808,6 +857,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             <SectionHeader
               busy={savingSection === "languages"}
               dirty={languagesDirty}
+              error={sectionErrors.languages}
               onSave={() =>
                 void saveSection("languages", async () => {
                   if (languages.length === 0) {
@@ -890,6 +940,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             <SectionHeader
               busy={savingSection === "defaults"}
               dirty={defaultsDirty}
+              error={sectionErrors.defaults}
               onSave={() =>
                 void saveSection("defaults", async () => {
                   await updateProject(project.project_id, {
@@ -1024,12 +1075,14 @@ function SectionHeader({
   busy,
   dirty,
   disabled,
+  error,
 }: {
   title: string
   onSave: () => void
   busy: boolean
   dirty: boolean
   disabled?: boolean
+  error?: string
 }) {
   return (
     <div>
@@ -1050,6 +1103,7 @@ function SectionHeader({
       <p className="mt-1 text-right text-xs text-muted-foreground">
         {dirty ? "有未保存更改" : "没有未保存更改"}
       </p>
+      {error ? <InlineError message={error} title="保存失败" /> : null}
     </div>
   )
 }

@@ -1,22 +1,19 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import {
   ArrowLeft,
   Check,
   Circle,
-  Copy,
-  Download,
   Layers,
   Loader2,
   Play,
+  RefreshCw,
   RotateCcw,
   Send,
-  Video,
 } from "lucide-react"
 
 import { AdvancedGroup } from "@/components/shared/AdvancedGroup"
 import { AsyncState } from "@/components/shared/AsyncState"
 import { BatchStatusCard } from "@/components/shared/BatchStatusCard"
-import { EmptyState } from "@/components/shared/EmptyState"
 import { FileDropzone } from "@/components/shared/FileDropzone"
 import {
   Fact,
@@ -26,7 +23,7 @@ import {
   TechDetails,
 } from "@/components/shared/feedback"
 import { PageFrame } from "@/components/shared/PageFrame"
-import { StatusBadge } from "@/components/shared/StatusBadge"
+import { SingleTaskPanel } from "@/components/shared/SingleTaskPanel"
 import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
 import { WorkspacePanel } from "@/components/shared/WorkspacePanel"
 import { Badge } from "@/components/ui/badge"
@@ -40,7 +37,6 @@ import {
   FieldSet,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -62,7 +58,6 @@ import {
   readableError,
   voiceLabel,
 } from "@/lib/format"
-import { useExpertMode } from "@/lib/expertMode"
 import {
   artifactFileUrl,
   cancelGenerationTask,
@@ -84,6 +79,7 @@ import {
   runStatusIsActive,
   runStatusIsCancellable,
 } from "@/lib/productViewModels"
+import { productionRunViewModel } from "@/lib/productionRunAdapters"
 import {
   buildAssetItems,
   buildProgressRuntimeItems,
@@ -114,7 +110,7 @@ import { cn } from "@/lib/utils"
 
 export type { SpecialPipelineMode } from "@/lib/specialPipelineSurface"
 
-type LoadState = "loading" | "ready" | "error"
+type LoadState = "loading" | "ready" | "error" | "stale"
 
 const FORM_ID = "special-production-form"
 
@@ -130,23 +126,49 @@ export function SpecialPipelinesWorkspace({
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(true)
+  const cachedTemplatesRef = useRef<{
+    projectId?: string
+    templates: ProductionTemplate[]
+  } | null>(null)
 
   useEffect(() => {
     let cancelled = false
 
     async function load() {
-      setLoadState("loading")
+      const cached =
+        cachedTemplatesRef.current?.projectId === (projectId ?? undefined)
+          ? cachedTemplatesRef.current
+          : null
+      if (!cached) {
+        setTemplates([])
+        setLoadState("loading")
+      }
+      setIsRefreshing(true)
       setLoadError(null)
       try {
         const response = await listTemplates(projectId ?? undefined)
         if (!cancelled) {
           setTemplates(response.templates)
+          cachedTemplatesRef.current = {
+            projectId: projectId ?? undefined,
+            templates: response.templates,
+          }
           setLoadState("ready")
         }
       } catch (error) {
         if (!cancelled) {
           setLoadError(readableError(error))
-          setLoadState("error")
+          if (cached) {
+            setTemplates(cached.templates)
+            setLoadState("stale")
+          } else {
+            setLoadState("error")
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setIsRefreshing(false)
         }
       }
     }
@@ -159,7 +181,7 @@ export function SpecialPipelinesWorkspace({
 
   const resolution = useMemo(
     () =>
-      loadState === "ready"
+      loadState === "ready" || loadState === "stale"
         ? resolveSpecialTemplate(templates, initialMode, templateId)
         : null,
     [initialMode, loadState, templateId, templates]
@@ -240,6 +262,9 @@ export function SpecialPipelinesWorkspace({
       key={resolution.template.id}
       mode={initialMode}
       projectId={projectId ?? undefined}
+      isRefreshing={isRefreshing}
+      loadError={loadState === "stale" ? loadError : null}
+      onReload={() => setReloadToken((value) => value + 1)}
       template={resolution.template}
       templates={templates}
     />
@@ -249,11 +274,17 @@ export function SpecialPipelinesWorkspace({
 function SpecialWorkspace({
   mode,
   projectId,
+  isRefreshing,
+  loadError,
+  onReload,
   template,
   templates,
 }: {
   mode: SpecialPipelineMode
   projectId?: string
+  isRefreshing: boolean
+  loadError: string | null
+  onReload: () => void
   template: ProductionTemplate
   templates: ProductionTemplate[]
 }) {
@@ -524,6 +555,16 @@ function SpecialWorkspace({
       <WorkspaceHeader
         actions={
           <>
+            <Button
+              aria-label="刷新专用配方"
+              disabled={isRefreshing}
+              onClick={onReload}
+              size="icon-sm"
+              type="button"
+              variant="outline"
+            >
+              <RefreshCw className={cn(isRefreshing && "animate-spin")} />
+            </Button>
             <Button asChild className="hidden lg:inline-flex" variant="outline">
               <a href={routeHref(`/create/recipes/${template.id}`)}>
                 调整配方默认
@@ -551,6 +592,26 @@ function SpecialWorkspace({
           </span>
         }
       />
+
+      {loadError ? (
+        <AsyncState
+          action={
+            <Button
+              disabled={isRefreshing}
+              onClick={onReload}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {isRefreshing ? <Loader2 className="animate-spin" /> : null}
+              重新读取
+            </Button>
+          }
+          description={loadError}
+          state="stale"
+          title="专用配方可能不是最新状态"
+        />
+      ) : null}
 
       <WorkspacePanel
         description="切换会打开独立链接，当前页未提交的素材不会带到新模式。"
@@ -682,6 +743,7 @@ function SpecialWorkspace({
             <RunInspector
               inputChecks={inputChecks}
               isCancellingTask={isCancellingTask}
+              isSubmitting={isSubmitting}
               onCancelTask={cancelCurrentTask}
               onRetryResult={() => {
                 setResultFetchError(null)
@@ -1174,6 +1236,7 @@ function PromptField({
 function RunInspector({
   inputChecks,
   isCancellingTask,
+  isSubmitting,
   onCancelTask,
   onRetryResult,
   result,
@@ -1184,6 +1247,7 @@ function RunInspector({
 }: {
   inputChecks: Array<{ label: string; complete: boolean }>
   isCancellingTask: boolean
+  isSubmitting: boolean
   onCancelTask: () => void
   onRetryResult: () => void
   result: GenerationResult | null
@@ -1192,7 +1256,14 @@ function RunInspector({
   taskActionError: string | null
   template: ProductionTemplate
 }) {
-  if (!task && !result) {
+  const run = productionRunViewModel({
+    isSubmitting,
+    result,
+    task,
+    template,
+  })
+
+  if (!run) {
     return (
       <aside className="lg:sticky lg:top-5 lg:self-start">
         <WorkspacePanel
@@ -1233,128 +1304,6 @@ function RunInspector({
     )
   }
 
-  return (
-    <aside className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-5 lg:self-start">
-      <TaskStatusPanel
-        isCancellingTask={isCancellingTask}
-        onCancelTask={onCancelTask}
-        task={task}
-        taskActionError={taskActionError}
-      />
-      <ResultPanel
-        onRetryResult={onRetryResult}
-        result={result}
-        resultFetchError={resultFetchError}
-        task={task}
-        template={template}
-      />
-    </aside>
-  )
-}
-
-function TaskStatusPanel({
-  isCancellingTask,
-  onCancelTask,
-  task,
-  taskActionError,
-}: {
-  isCancellingTask: boolean
-  onCancelTask: () => void
-  task: GenerationTask | null
-  taskActionError: string | null
-}) {
-  const toast = useToast()
-  const expertMode = useExpertMode()
-  if (!task) {
-    return null
-  }
-  const runtimeItems = buildProgressRuntimeItems(task.progress.detail)
-
-  return (
-    <WorkspacePanel
-      description="离开页面后，任务仍会在「任务」中继续运行。"
-      title="任务状态"
-    >
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-3">
-          <StatusBadge status={task.status} />
-          <div className="flex items-center gap-2">
-            {expertMode ? (
-              <Button
-                aria-label="复制任务 ID"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(task.task_id)
-                  toast({ title: "任务 ID 已复制", variant: "success" })
-                }}
-                size="icon-sm"
-                type="button"
-                variant="outline"
-              >
-                <Copy />
-              </Button>
-            ) : null}
-            {runStatusIsCancellable(adaptRunStatus(task.status)) ? (
-              <Button
-                disabled={isCancellingTask}
-                onClick={onCancelTask}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                {isCancellingTask ? <Loader2 className="animate-spin" /> : null}
-                取消任务
-              </Button>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="rounded-lg bg-muted/40 p-3">
-          <div className="flex items-center justify-between gap-3 text-sm">
-            <span className="font-medium">{progressLabel(task)}</span>
-            <span className="text-xs text-muted-foreground">
-              {Math.round(task.progress.percentage)}%
-            </span>
-          </div>
-          <Progress className="mt-3" value={task.progress.percentage} />
-        </div>
-
-        {task.status === "failed" && task.error ? (
-          <InlineError message={task.error.message} title="任务失败" />
-        ) : null}
-        {taskActionError ? (
-          <InlineError message={taskActionError} title="任务操作失败" />
-        ) : null}
-
-        <TechDetails
-          items={[
-            { label: "任务 ID", value: task.task_id },
-            { label: "生成链路", value: task.pipeline_id },
-            { label: "当前阶段", value: task.progress.stage },
-            ...runtimeItems,
-            {
-              label: "失败层级",
-              value: task.status === "failed" ? task.error?.layer : null,
-            },
-          ]}
-        />
-      </div>
-    </WorkspacePanel>
-  )
-}
-
-function ResultPanel({
-  onRetryResult,
-  result,
-  resultFetchError,
-  task,
-  template,
-}: {
-  onRetryResult: () => void
-  result: GenerationResult | null
-  resultFetchError: string | null
-  task: GenerationTask | null
-  template: ProductionTemplate
-}) {
   const videoUrl = artifactFileUrl(result?.primary_video)
   const qualitySummary = buildQualitySummary(
     result?.metadata?.quality_review as QualityReviewInput | undefined
@@ -1364,156 +1313,117 @@ function ResultPanel({
   const assetItems = buildAssetItems(assetManifest)
   const assetCount = assetManifest?.assets?.length ?? assetItems.length
 
-  return (
-    <WorkspacePanel
-      description="完成后可预览、下载，并前往作品库发布。"
-      title="生成结果"
-    >
-      {resultFetchError ? (
-        <AsyncState
-          action={
-            <Button
-              onClick={onRetryResult}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              重试
-            </Button>
-          }
-          description={resultFetchError}
-          state="error"
-          title="结果读取失败"
+  const resultDetails = result ? (
+    <div className="flex flex-col gap-4">
+      <Button asChild className="min-h-11" size="lg">
+        <a href={routeHref(`/library?task=${result.task_id}`)}>
+          <Send data-icon="inline-start" />
+          前往发布
+        </a>
+      </Button>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Fact label="生产配方" value={template.display_name} />
+        <Fact label="时长" value={formatDuration(result.duration)} />
+        <Fact label="文件大小" value={formatBytes(result.file_size)} />
+        <Fact label="发布判断" value={qualitySummary.label} />
+      </div>
+
+      <Separator />
+
+      <section aria-labelledby="special-quality-title">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-medium" id="special-quality-title">
+            质量检查
+          </h3>
+          <QualityBadge summary={qualitySummary} />
+        </div>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          {qualitySummary.summary}
+        </p>
+        <QualityMessages
+          failures={qualitySummary.failures}
+          warnings={qualitySummary.warnings}
         />
-      ) : !result && task?.status === "completed" ? (
-        <AsyncState
-          description="任务已完成，正在读取成品和质量结果。"
-          state="loading"
-          title="正在读取成品"
-        />
-      ) : !result ? (
-        <EmptyState
-          className="min-h-44 border-dashed"
-          description={
-            task?.status === "failed"
-              ? "本次任务未生成可用成品。"
-              : task?.status === "cancelled"
-                ? "任务已取消，没有生成成品。"
-                : "任务完成后会在这里显示视频。"
-          }
-          headingLevel={3}
-          icon={Video}
-          title="成品尚未就绪"
-        />
-      ) : (
-        <div className="flex flex-col gap-4">
-          {videoUrl ? (
-            <video
-              aria-label={`${template.display_name}视频预览`}
-              className="aspect-[9/16] max-h-[560px] w-full rounded-lg border bg-black object-contain"
-              controls
-              preload="metadata"
-              src={videoUrl}
-            />
-          ) : (
-            <InlineError
-              message="成品已生成，但当前浏览器无法读取视频文件。"
-              title="结果无法预览"
-            />
-          )}
+      </section>
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            <Button asChild className="min-h-11" size="lg">
-              <a href={routeHref(`/library?task=${result.task_id}`)}>
-                <Send data-icon="inline-start" />
-                前往发布
-              </a>
-            </Button>
-            {videoUrl ? (
-              <Button asChild className="min-h-11" size="lg" variant="outline">
-                <a download href={videoUrl}>
-                  <Download data-icon="inline-start" />
-                  下载视频
-                </a>
-              </Button>
-            ) : null}
-          </div>
+      <Separator />
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Fact label="生产配方" value={template.display_name} />
-            <Fact label="时长" value={formatDuration(result.duration)} />
-            <Fact label="文件大小" value={formatBytes(result.file_size)} />
-            <Fact label="发布判断" value={qualitySummary.label} />
-          </div>
-
-          <Separator />
-
-          <section aria-labelledby="special-quality-title">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-medium" id="special-quality-title">
-                质量检查
-              </h3>
-              <QualityBadge summary={qualitySummary} />
-            </div>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              {qualitySummary.summary}
-            </p>
-            <QualityMessages
-              failures={qualitySummary.failures}
-              warnings={qualitySummary.warnings}
-            />
-          </section>
-
-          <Separator />
-
-          <section aria-labelledby="special-assets-title">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-medium" id="special-assets-title">
-                素材记录
-              </h3>
-              <Badge variant="outline">
-                {assetCount > 0 ? `${assetCount} 项` : "未返回"}
-              </Badge>
-            </div>
-            {assetItems.length > 0 ? (
-              <div className="mt-3 divide-y border-y">
-                {assetItems.map((asset, index) => (
-                  <div
-                    className="flex items-start justify-between gap-3 py-3"
-                    key={`${asset.label}-${index}`}
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium">{asset.label}</div>
-                      <div className="mt-1 truncate text-xs text-muted-foreground">
-                        {asset.kind}
-                      </div>
-                    </div>
-                    <Badge
-                      variant={
-                        asset.statusLabel === "缺失" ? "destructive" : "outline"
-                      }
-                    >
-                      {asset.statusLabel}
-                    </Badge>
+      <section aria-labelledby="special-assets-title">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-medium" id="special-assets-title">
+            素材记录
+          </h3>
+          <Badge variant="outline">
+            {assetCount > 0 ? `${assetCount} 项` : "未返回"}
+          </Badge>
+        </div>
+        {assetItems.length > 0 ? (
+          <div className="mt-3 divide-y border-y">
+            {assetItems.map((asset, index) => (
+              <div
+                className="flex items-start justify-between gap-3 py-3"
+                key={`${asset.label}-${index}`}
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">{asset.label}</div>
+                  <div className="mt-1 truncate text-xs text-muted-foreground">
+                    {asset.kind}
                   </div>
-                ))}
+                </div>
+                <Badge
+                  variant={
+                    asset.statusLabel === "缺失" ? "destructive" : "outline"
+                  }
+                >
+                  {asset.statusLabel}
+                </Badge>
               </div>
-            ) : (
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                后端未返回独立素材记录。
-              </p>
-            )}
-          </section>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            后端未返回独立素材记录。
+          </p>
+        )}
+      </section>
 
+      <TechDetails
+        items={[{ label: "成品路径", value: result.primary_video?.path }]}
+      />
+    </div>
+  ) : null
+
+  return (
+    <SingleTaskPanel
+      actionError={taskActionError}
+      artifactError={
+        result && !videoUrl
+          ? "成品已生成，但当前结果没有可用的视频地址。"
+          : null
+      }
+      isCancelling={isCancellingTask}
+      onCancel={onCancelTask}
+      onRetryResult={onRetryResult}
+      resultDetails={resultDetails}
+      resultFetchError={resultFetchError}
+      run={run}
+      runDetails={
+        task ? (
           <TechDetails
             items={[
-              { label: "任务 ID", value: result.task_id },
-              { label: "成品路径", value: result.primary_video?.path },
+              { label: "生成链路", value: task.pipeline_id },
+              { label: "当前阶段", value: task.progress.stage },
+              ...buildProgressRuntimeItems(task.progress.detail),
+              {
+                label: "失败层级",
+                value: task.status === "failed" ? task.error?.layer : null,
+              },
             ]}
           />
-        </div>
-      )}
-    </WorkspacePanel>
+        ) : null
+      }
+    />
   )
 }
 
@@ -1845,19 +1755,4 @@ function buildInputChecks({
     checks.push({ label: "口播文案", complete: Boolean(script.trim()) })
   }
   return checks
-}
-
-function progressLabel(task: GenerationTask) {
-  const labels: Record<string, string> = {
-    compose_image: "正在组合角色与商品画面",
-    generate_tts: "正在生成口播声音",
-    execute_workflow: "正在生成视频",
-    download_video: "正在保存成品",
-    save_artifacts: "正在整理成品信息",
-    completed: "视频已生成",
-  }
-  return (
-    labels[task.progress.stage] ??
-    (task.status === "pending" ? "任务已排队" : "正在处理任务")
-  )
 }

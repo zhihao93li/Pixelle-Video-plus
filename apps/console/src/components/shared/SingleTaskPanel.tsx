@@ -26,6 +26,7 @@ export function SingleTaskPanel({
   onRetryResult,
   resultDetails,
   resultFetchError,
+  runDetails,
   run,
 }: {
   actionError?: string | null
@@ -35,6 +36,7 @@ export function SingleTaskPanel({
   onRetryResult?: () => void
   resultDetails?: ReactNode
   resultFetchError?: string | null
+  runDetails?: ReactNode
   run: ProductionRunViewModel
 }) {
   const expertMode = useExpertMode()
@@ -110,6 +112,8 @@ export function SingleTaskPanel({
           {actionError ? (
             <InlineError message={actionError} title="任务操作失败" />
           ) : null}
+
+          {runDetails}
 
           {resultFetchError ? (
             <div className="flex flex-col gap-3">

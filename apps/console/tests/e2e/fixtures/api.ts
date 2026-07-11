@@ -23,7 +23,8 @@ const STATIC_IMAGE_URLS = [
 
 export type ApiFixtureOptions = {
   projectState?: "ready" | "loading" | "empty" | "error"
-  productionState?: "ready" | "loading" | "empty" | "error" | "resource-error"
+  productionState?:
+    "ready" | "loading" | "empty" | "error" | "stale" | "resource-error"
   contentState?: "ready" | "loading" | "empty" | "error" | "stale"
   contentDetailState?: "ready" | "loading" | "error" | "stale"
   contentItemStatus?: string
@@ -32,7 +33,9 @@ export type ApiFixtureOptions = {
   historyPages?: number
   publishAttemptState?: "scheduled" | "published" | "failed"
   settingsState?: "ready" | "loading" | "error" | "stale"
+  settingsDiagnosticsState?: "ready" | "error"
   helpState?: "ready" | "loading" | "empty" | "error"
+  scriptReviewState?: "ready" | "create-error" | "save-error" | "submit-error"
   includeBatch?: boolean
   enableBatchSubmission?: boolean
   includeSecondProject?: boolean
@@ -628,6 +631,34 @@ const scriptReviewTemplates = {
   ],
 }
 
+const scriptReviewDraftSet = {
+  draft_set_id: "draft-set-e2e-1",
+  status: "drafted",
+  created_at: "2026-07-10T08:00:00Z",
+  updated_at: "2026-07-10T08:01:00Z",
+  topics: ["猫咪夏天饮水少怎么办"],
+  languages: ["Chinese"],
+  metadata: { source: "e2e" },
+  draft_settings: { project_id: PROJECT_ID },
+  drafts: [
+    {
+      index: 0,
+      topic: "猫咪夏天饮水少怎么办",
+      selected_for_generation: true,
+      selected_languages: ["Chinese"],
+      language_drafts: {
+        Chinese: {
+          title: "夏天帮猫咪多喝水",
+          script: "用流动水、多水碗和湿粮增加猫咪的饮水量。",
+          narrations: ["准备流动水。", "在常用动线增加水碗。"],
+        },
+      },
+    },
+  ],
+  errors: [],
+  submissions: [],
+}
+
 const frameTemplate = {
   name: "image_default.html",
   display_name: "清爽图文",
@@ -709,7 +740,11 @@ function responseFor(
     return { body: contentItemForOptions(options) }
   }
   if (method === "GET" && path === "/generation/templates") {
-    if (options.productionState === "error") {
+    const count = requestCounts.get(`${method} ${path}`) ?? 1
+    if (
+      options.productionState === "error" ||
+      (options.productionState === "stale" && count > 2)
+    ) {
       return { status: 503, body: { detail: "配方服务暂时不可用。" } }
     }
     if (options.productionState === "empty") {
@@ -914,6 +949,38 @@ function responseFor(
   if (method === "GET" && path === "/generation/script-review/draft-sets") {
     return { body: { draft_sets: [] } }
   }
+  if (method === "POST" && path === "/generation/script-review/draft-sets") {
+    return options.scriptReviewState === "create-error"
+      ? { status: 503, body: { detail: "草稿生成服务暂时不可用。" } }
+      : { body: scriptReviewDraftSet }
+  }
+  if (
+    method === "PUT" &&
+    path ===
+      `/generation/script-review/draft-sets/${scriptReviewDraftSet.draft_set_id}`
+  ) {
+    return options.scriptReviewState === "save-error"
+      ? { status: 503, body: { detail: "审核草稿保存失败。" } }
+      : { body: scriptReviewDraftSet }
+  }
+  if (
+    method === "POST" &&
+    path ===
+      `/generation/script-review/draft-sets/${scriptReviewDraftSet.draft_set_id}/tasks`
+  ) {
+    return options.scriptReviewState === "submit-error"
+      ? { status: 503, body: { detail: "生产批次提交失败。" } }
+      : {
+          body: {
+            draft_set: {
+              ...scriptReviewDraftSet,
+              status: "submitted",
+              submissions: [{ batch_id: completedGenerationBatch.batch_id }],
+            },
+            batch: completedGenerationBatch,
+          },
+        }
+  }
   if (method === "GET" && path === "/drafting/profiles") {
     return {
       body: {
@@ -974,8 +1041,7 @@ function responseFor(
           jobs: [
             {
               platform: "youtube",
-              status:
-                fixtureState === "scheduled" ? "queued" : fixtureState,
+              status: fixtureState === "scheduled" ? "queued" : fixtureState,
               buffer_post_id: "buffer-fixture-state",
               public_video_url:
                 fixtureState === "published"
@@ -1032,6 +1098,9 @@ function responseFor(
     return { body: { configured: true, config: settings } }
   }
   if (method === "GET" && path === "/settings/diagnostics") {
+    if (options.settingsDiagnosticsState === "error") {
+      return { status: 503, body: { detail: "设置诊断服务暂时不可用。" } }
+    }
     return {
       body: {
         ok: true,

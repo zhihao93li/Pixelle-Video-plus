@@ -284,16 +284,33 @@ export function SettingsWorkspace() {
   useEffect(() => {
     let cancelled = false
     const hasSettings = settings !== null
-    void Promise.all([getSettingsConfig(), getSettingsDiagnostics()])
-      .then(([response, diagnosticsResponse]) => {
+    void Promise.allSettled([getSettingsConfig(), getSettingsDiagnostics()])
+      .then(([settingsResult, diagnosticsResult]) => {
         if (cancelled) {
           return
         }
+        if (settingsResult.status === "rejected") {
+          throw settingsResult.reason
+        }
+        const response = settingsResult.value
         setSettings(response.config)
         setSavedSettings(response.config)
         setConfigured(response.configured)
-        setDiagnostics(diagnosticsResponse.checks)
-        setDiagnosticsOk(diagnosticsResponse.ok)
+        if (diagnosticsResult.status === "fulfilled") {
+          setDiagnostics(diagnosticsResult.value.checks)
+          setDiagnosticsOk(diagnosticsResult.value.ok)
+        } else {
+          setDiagnosticsOk(false)
+          setDiagnostics([
+            {
+              id: "settings_diagnostics",
+              label: "设置诊断",
+              ok: false,
+              severity: "error",
+              message: readableError(diagnosticsResult.reason),
+            },
+          ])
+        }
         setError(null)
         setLoadState("ready")
       })
