@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from api.dependencies import GenerationServiceDep, PixelleVideoDep
 from pixelle_video.generation import (
+    DraftingSpec,
     GenerationProgress,
     GenerationRequest,
     GenerationResult,
@@ -158,7 +159,7 @@ class ScriptReviewDraftCreateRequest(BaseModel):
     topics: list[str] = Field(..., min_length=1, max_length=50)
     # None = 未显式指定语言，走配方默认（与旧默认区分开）
     languages: list[str] | None = None
-    drafting_profile_id: str | None = None
+    template_id: str | None = None
     project_id: str | None = None
     script_template_name: str | None = None
     split_template_name: str | None = None
@@ -200,6 +201,16 @@ class ScriptReviewDraftSetResponse(BaseModel):
 
 class ScriptReviewDraftSetListResponse(BaseModel):
     draft_sets: list[ScriptReviewDraftSetResponse]
+
+
+class TemplateDraftingConfigResponse(BaseModel):
+    template_id: str
+    drafting: DraftingSpec
+    is_overridden: bool
+
+
+class TemplateDraftingConfigUpdateRequest(BaseModel):
+    drafting: DraftingSpec
 
 
 class ScriptReviewSubmitResponse(BaseModel):
@@ -309,6 +320,83 @@ async def update_template_generation_config(
 
     save_overrides(template_id, cleaned)
     return _template_generation_config_response(template_id)
+
+
+def _drafting_template(template_id: str) -> ProductionTemplate:
+    registry = build_default_production_template_registry()
+    try:
+        template = registry.get(template_id)
+    except ProductionTemplateError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if template.product_entry != "generate" or "script" not in template.input_requirements:
+        raise HTTPException(
+            status_code=400,
+            detail="只有接收文稿输入的生产配方可以配置写稿规则。",
+        )
+    return template
+
+
+def _validate_drafting_spec(drafting: DraftingSpec) -> None:
+    script_names = {item.name for item in load_prompt_templates("script")}
+    split_names = {item.name for item in load_prompt_templates("split")}
+    if drafting.script_template_name not in script_names:
+        raise HTTPException(
+            status_code=400,
+            detail=f"脚本 Prompt 不存在：{drafting.script_template_name}",
+        )
+    if drafting.split_template_name not in split_names:
+        raise HTTPException(
+            status_code=400,
+            detail=f"分镜 Prompt 不存在：{drafting.split_template_name}",
+        )
+
+
+def _template_drafting_config_response(template_id: str) -> TemplateDraftingConfigResponse:
+    from pixelle_video.generation.template_overrides import load_drafting
+
+    template = _drafting_template(template_id)
+    return TemplateDraftingConfigResponse(
+        template_id=template.id,
+        drafting=template.drafting,
+        is_overridden=load_drafting(template.id) is not None,
+    )
+
+
+@router.get(
+    "/templates/{template_id}/drafting-config",
+    response_model=TemplateDraftingConfigResponse,
+)
+async def get_template_drafting_config(template_id: str):
+    """Return the recipe-owned defaults used before reviewed production."""
+    return _template_drafting_config_response(template_id)
+
+
+@router.put(
+    "/templates/{template_id}/drafting-config",
+    response_model=TemplateDraftingConfigResponse,
+)
+async def update_template_drafting_config(
+    template_id: str,
+    request: TemplateDraftingConfigUpdateRequest,
+):
+    from pixelle_video.generation.template_overrides import save_drafting
+
+    _drafting_template(template_id)
+    _validate_drafting_spec(request.drafting)
+    save_drafting(template_id, request.drafting.model_dump())
+    return _template_drafting_config_response(template_id)
+
+
+@router.delete(
+    "/templates/{template_id}/drafting-config",
+    response_model=TemplateDraftingConfigResponse,
+)
+async def reset_template_drafting_config(template_id: str):
+    from pixelle_video.generation.template_overrides import save_drafting
+
+    _drafting_template(template_id)
+    save_drafting(template_id, None)
+    return _template_drafting_config_response(template_id)
 
 
 class TemplateEnabledRequest(BaseModel):
@@ -763,42 +851,35 @@ async def create_script_review_draft_set(
     if not getattr(pixelle_video, "llm", None):
         raise HTTPException(status_code=400, detail="LLM service is not available.")
 
-    # 起草配置解析链：显式 drafting_profile_id（API 兼容）> 项目起草配置（自愈补建）> 安全内置
-    from pixelle_video.content.drafting_profiles import (
-        get_profile,
-        get_profile_for_project,
-    )
+    from pixelle_video.content.projects import get_project
 
     resolved_project_id = _resolve_project_id(request_body.project_id)
-
-    profile = None
-    if request_body.drafting_profile_id:
-        profile = get_profile(request_body.drafting_profile_id)
-        if profile is None:
-            raise HTTPException(status_code=404, detail="起草配置不存在。")
-    else:
-        # 项目配置是唯一入口，缺失时自愈补建，恒非 None
-        profile = get_profile_for_project(resolved_project_id)
+    project = get_project(resolved_project_id)
+    template_id = (
+        request_body.template_id
+        or _default_template_for_project(resolved_project_id)
+        or "pipeline_standard_base_v1"
+    )
+    template = _drafting_template(template_id)
+    if not template.enabled:
+        raise HTTPException(status_code=400, detail="该生产配方已停用，请先换一个配方。")
+    drafting = template.drafting
 
     languages = _clean_string_items(
         request_body.languages
         if request_body.languages is not None
-        else (profile.languages if profile else list(DEFAULT_REVIEW_LANGUAGES)),
+        else (project.languages if project else list(DEFAULT_REVIEW_LANGUAGES)),
         "languages",
     )
     if not languages:
         raise HTTPException(status_code=400, detail="At least one language is required.")
 
-    script_template_name = request_body.script_template_name or (
-        profile.script_template_name if profile else None
-    )
-    split_template_name = request_body.split_template_name or (
-        profile.split_template_name if profile else None
-    )
-    script_model = request_body.script_model or (profile.script_model if profile else None) or None
-    split_model = request_body.split_model or (profile.split_model if profile else None) or None
+    script_template_name = request_body.script_template_name or drafting.script_template_name
+    split_template_name = request_body.split_template_name or drafting.split_template_name
+    script_model = request_body.script_model or drafting.script_model or None
+    split_model = request_body.split_model or drafting.split_model or None
     language_script_models = {
-        **(profile.language_script_models if profile else {}),
+        **drafting.language_script_models,
         **request_body.language_script_models,
     }
 
@@ -853,8 +934,9 @@ async def create_script_review_draft_set(
         "draft_settings": {
             "script_template_name": script_template.name,
             "project_id": resolved_project_id,
-            "drafting_profile_id": profile.profile_id if profile else None,
-            "drafting_profile_name": profile.name if profile else None,
+            "production_template_id": template.id,
+            "production_template_name": template.display_name,
+            "production_template_version": template.version,
             "script_template_source": script_template.source,
             "split_template_name": split_template.name,
             "split_template_source": split_template.source,
@@ -967,11 +1049,18 @@ async def submit_script_review_draft_set_tasks(
 
     # 审核稿出片统一走生产模板体系（模板管默认，表单管这一次）。
     registry = build_default_production_template_registry()
+    locked_template_id = draft_set.get("draft_settings", {}).get("production_template_id")
     template_id = (
-        request_body.template_id
+        locked_template_id
+        or request_body.template_id
         or _default_template_for_project(draft_set.get("draft_settings", {}).get("project_id"))
         or "pipeline_standard_base_v1"
     )
+    if request_body.template_id and locked_template_id != request_body.template_id:
+        raise HTTPException(
+            status_code=409,
+            detail="这批草稿由另一配方起草。请返回第一步换配方后重新起草。",
+        )
     try:
         template = registry.get(template_id)
     except ProductionTemplateError as error:

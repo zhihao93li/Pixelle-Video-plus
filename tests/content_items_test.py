@@ -5,7 +5,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api.routers.content_items as content_items_router
-import pixelle_video.content.drafting_profiles as drafting_profiles
 import pixelle_video.content.projects as projects
 import pixelle_video.content.store as content_store
 import pixelle_video.generation.task_store as task_store
@@ -50,11 +49,6 @@ def isolated_storage(tmp_path, monkeypatch):
     )
     # 隔离项目存储（list/create 会触发迁移）；ops.db 探测走 tmp → 缺失 → 回退分支
     monkeypatch.setattr(projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts)))
-    monkeypatch.setattr(
-        drafting_profiles,
-        "_profiles_path",
-        lambda: str(tmp_path / "drafting-profiles.json"),
-    )
     monkeypatch.setattr(task_store, "GENERATION_TASK_DIR", tmp_path / "generation-tasks")
     yield
 

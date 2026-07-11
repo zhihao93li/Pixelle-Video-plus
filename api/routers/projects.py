@@ -1,6 +1,6 @@
 """项目（品牌级内容线）管理 API。
 
-项目是控制台的全局作用域维度：管默认起草配方、默认生产模板、语言 + 每语言音色、
+项目是控制台的全局作用域维度：管默认生产配方、语言 + 每语言音色、
 发布平台预选。"当前项目"是前端状态；这些接口显式接收/返回 project_id。
 校验失败一律返回 400，中文信息并给出下一步动作。
 """
@@ -29,7 +29,6 @@ router = APIRouter(prefix="/projects", tags=["Projects"])
 class ProjectCreateRequest(BaseModel):
     name: str
     description: str = ""
-    default_drafting_profile_id: str | None = None
     default_production_template_id: str | None = None
     languages: list[str] | None = None
     tts_voice_by_language: dict[str, str] | None = None
@@ -40,7 +39,6 @@ class ProjectCreateRequest(BaseModel):
 class ProjectUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
-    default_drafting_profile_id: str | None = None
     default_production_template_id: str | None = None
     languages: list[str] | None = None
     tts_voice_by_language: dict[str, str] | None = None
@@ -56,18 +54,7 @@ class ProjectListResponse(BaseModel):
     projects: list[Project] = Field(default_factory=list)
 
 
-def _validate_defaults(
-    default_drafting_profile_id: str | None,
-    default_production_template_id: str | None,
-) -> None:
-    if default_drafting_profile_id:
-        from pixelle_video.content.drafting_profiles import get_profile
-
-        if get_profile(default_drafting_profile_id) is None:
-            raise HTTPException(
-                status_code=400,
-                detail="默认起草配方不存在，请先在「起草配方」里创建或换一个。",
-            )
+def _validate_default(default_production_template_id: str | None) -> None:
     if default_production_template_id:
         registry = build_default_production_template_registry()
         try:
@@ -101,9 +88,7 @@ async def create_new_project(request: ProjectCreateRequest):
     name = request.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="项目名称不能为空。")
-    _validate_defaults(
-        request.default_drafting_profile_id, request.default_production_template_id
-    )
+    _validate_default(request.default_production_template_id)
     languages = (
         [language for language in request.languages if language.strip()]
         if request.languages is not None
@@ -112,7 +97,6 @@ async def create_new_project(request: ProjectCreateRequest):
     return create_project(
         name=name,
         description=request.description.strip(),
-        default_drafting_profile_id=request.default_drafting_profile_id,
         default_production_template_id=request.default_production_template_id,
         languages=languages,
         tts_voice_by_language=request.tts_voice_by_language,
@@ -142,9 +126,7 @@ async def edit_project(project_id: str, request: ProjectUpdateRequest):
         language for language in request.languages if language.strip()
     ]:
         raise HTTPException(status_code=400, detail="至少需要一种语言。")
-    _validate_defaults(
-        request.default_drafting_profile_id, request.default_production_template_id
-    )
+    _validate_default(request.default_production_template_id)
     patch = request.model_dump(exclude_none=True)
     if "name" in patch:
         patch["name"] = patch["name"].strip()

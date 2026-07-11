@@ -11,7 +11,7 @@ export type PartStep = {
   /** 控制该步骤的参数 key；null 表示项目级步骤（写稿）。 */
   controlKey: string | null
   /** 可换时跳转目标。 */
-  link: "projects" | "template"
+  link: "drafting" | "template"
   /** 产线固定步骤（结构性，不可换）。 */
   fixed?: boolean
   /** effective 无值时的兜底文案。 */
@@ -26,48 +26,218 @@ export type PartStep = {
 
 export const PIPELINE_PARTS: Record<string, PartStep[]> = {
   standard: [
-    { label: "写稿", controlKey: null, link: "projects", fallback: "项目起草配置（模型 / Prompt）" },
-    { label: "分镜", controlKey: "split_mode", link: "template", fallback: "按段落切" },
-    { label: "配音引擎", controlKey: "tts_inference_mode", link: "template", fallback: "本机 TTS", subKeys: ["tts_workflow", "tts_speed"] },
-    { label: "音色", controlKey: "tts_voice", link: "template", fallback: "引擎默认音色" },
-    { label: "每镜画面", controlKey: "media_workflow", link: "template", fallback: "AI 生图默认 workflow", subKeys: ["frame_template", "media_width", "media_height", "prompt_prefix", "image_prompt_visual_context", "image_prompt_generation_rules"] },
-    { label: "合成", controlKey: "compose_runtime", link: "template", fallback: "标准合成", subKeys: ["bgm_path", "bgm_volume", "bgm_mode"] },
+    {
+      label: "写稿",
+      controlKey: null,
+      link: "drafting",
+      fallback: "配方写稿设置（模型 / Prompt）",
+    },
+    {
+      label: "分镜",
+      controlKey: "split_mode",
+      link: "template",
+      fallback: "按段落切",
+    },
+    {
+      label: "配音引擎",
+      controlKey: "tts_inference_mode",
+      link: "template",
+      fallback: "本机 TTS",
+      subKeys: ["tts_workflow", "tts_speed"],
+    },
+    {
+      label: "音色",
+      controlKey: "tts_voice",
+      link: "template",
+      fallback: "引擎默认音色",
+    },
+    {
+      label: "每镜画面",
+      controlKey: "media_workflow",
+      link: "template",
+      fallback: "AI 生图默认 workflow",
+      subKeys: [
+        "frame_template",
+        "media_width",
+        "media_height",
+        "prompt_prefix",
+        "image_prompt_visual_context",
+        "image_prompt_generation_rules",
+      ],
+    },
+    {
+      label: "合成",
+      controlKey: "compose_runtime",
+      link: "template",
+      fallback: "标准合成",
+      subKeys: ["bgm_path", "bgm_volume", "bgm_mode"],
+    },
   ],
   asset_based: [
-    { label: "素材来源", controlKey: null, link: "template", fixed: true, fallback: "你上传的图片 / 视频" },
-    { label: "配音", controlKey: "voice_id", link: "template", fallback: "默认音色", subKeys: ["tts_speed"] },
-    { label: "合成", controlKey: "compose_runtime", link: "template", fallback: "标准合成", subKeys: ["bgm_path", "bgm_volume", "bgm_mode"] },
-    { label: "算力", controlKey: "source", link: "template", fallback: "RunningHub 云端" },
+    {
+      label: "素材来源",
+      controlKey: null,
+      link: "template",
+      fixed: true,
+      fallback: "你上传的图片 / 视频",
+    },
+    {
+      label: "配音",
+      controlKey: "voice_id",
+      link: "template",
+      fallback: "默认音色",
+      subKeys: ["tts_speed"],
+    },
+    {
+      label: "合成",
+      controlKey: "compose_runtime",
+      link: "template",
+      fallback: "标准合成",
+      subKeys: ["bgm_path", "bgm_volume", "bgm_mode"],
+    },
+    {
+      label: "算力",
+      controlKey: "source",
+      link: "template",
+      fallback: "RunningHub 云端",
+    },
   ],
   i2v: [
-    { label: "输入", controlKey: null, link: "template", fixed: true, fallback: "一张图片 + 运动提示词" },
-    { label: "运动 workflow", controlKey: "workflow_key", link: "template", fallback: "默认图生视频 workflow" },
-    { label: "算力", controlKey: "source", link: "template", fallback: "RunningHub 云端" },
+    {
+      label: "输入",
+      controlKey: null,
+      link: "template",
+      fixed: true,
+      fallback: "一张图片 + 运动提示词",
+    },
+    {
+      label: "运动 workflow",
+      controlKey: "workflow_key",
+      link: "template",
+      fallback: "默认图生视频 workflow",
+    },
+    {
+      label: "算力",
+      controlKey: "source",
+      link: "template",
+      fallback: "RunningHub 云端",
+    },
   ],
   action_transfer: [
-    { label: "输入", controlKey: null, link: "template", fixed: true, fallback: "参考视频 + 人物图" },
-    { label: "动作 workflow", controlKey: "workflow_key", link: "template", fallback: "默认动作迁移 workflow" },
-    { label: "算力", controlKey: "source", link: "template", fallback: "RunningHub 云端" },
+    {
+      label: "输入",
+      controlKey: null,
+      link: "template",
+      fixed: true,
+      fallback: "参考视频 + 人物图",
+    },
+    {
+      label: "动作 workflow",
+      controlKey: "workflow_key",
+      link: "template",
+      fallback: "默认动作迁移 workflow",
+    },
+    {
+      label: "算力",
+      controlKey: "source",
+      link: "template",
+      fallback: "RunningHub 云端",
+    },
   ],
   digital_human: [
-    { label: "输入", controlKey: null, link: "template", fixed: true, fallback: "人物形象 + 口播文案" },
-    { label: "配音引擎", controlKey: "tts_inference_mode", link: "template", fallback: "默认引擎", subKeys: ["tts_workflow", "tts_speed"] },
-    { label: "音色", controlKey: "tts_voice", link: "template", fallback: "默认音色" },
-    { label: "数字人 workflow", controlKey: "workflow_key", link: "template", fallback: "默认数字人 workflow" },
+    {
+      label: "输入",
+      controlKey: null,
+      link: "template",
+      fixed: true,
+      fallback: "人物形象 + 口播文案",
+    },
+    {
+      label: "配音引擎",
+      controlKey: "tts_inference_mode",
+      link: "template",
+      fallback: "默认引擎",
+      subKeys: ["tts_workflow", "tts_speed"],
+    },
+    {
+      label: "音色",
+      controlKey: "tts_voice",
+      link: "template",
+      fallback: "默认音色",
+    },
+    {
+      label: "数字人 workflow",
+      controlKey: "workflow_key",
+      link: "template",
+      fallback: "默认数字人 workflow",
+    },
   ],
   image_post: [
-    { label: "写稿", controlKey: null, link: "projects", fallback: "项目起草配置（模型 / Prompt）" },
-    { label: "分页", controlKey: "split_mode", link: "template", fallback: "按行分页" },
-    { label: "每页配图", controlKey: "media_workflow", link: "template", fallback: "AI 生图默认 workflow", subKeys: ["media_width", "media_height", "prompt_prefix", "image_prompt_visual_context", "image_prompt_generation_rules"] },
-    { label: "版式", controlKey: "frame_template", link: "template", fallback: "默认图文版式" },
+    {
+      label: "写稿",
+      controlKey: null,
+      link: "drafting",
+      fallback: "配方写稿设置（模型 / Prompt）",
+    },
+    {
+      label: "分页",
+      controlKey: "split_mode",
+      link: "template",
+      fallback: "按行分页",
+    },
+    {
+      label: "每页配图",
+      controlKey: "media_workflow",
+      link: "template",
+      fallback: "AI 生图默认 workflow",
+      subKeys: [
+        "media_width",
+        "media_height",
+        "prompt_prefix",
+        "image_prompt_visual_context",
+        "image_prompt_generation_rules",
+      ],
+    },
+    {
+      label: "版式",
+      controlKey: "frame_template",
+      link: "template",
+      fallback: "默认图文版式",
+    },
     // 排版渲染即成图，无视频合成——合成步骤对图文线不适用（固定）
-    { label: "成图", controlKey: null, link: "template", fixed: true, fallback: "版式渲染出 PNG 图集" },
+    {
+      label: "成图",
+      controlKey: null,
+      link: "template",
+      fixed: true,
+      fallback: "版式渲染出 PNG 图集",
+    },
   ],
   long_form: [
-    { label: "写稿", controlKey: null, link: "projects", fallback: "项目起草配置（模型 / Prompt）" },
-    { label: "长文改写", controlKey: "long_form_prompt", link: "template", fallback: "内置中性长文提示词" },
-    { label: "字数", controlKey: "word_count", link: "template", fallback: "1800 字" },
-    { label: "写作模型", controlKey: "llm_model", link: "template", fallback: "系统默认模型" },
+    {
+      label: "写稿",
+      controlKey: null,
+      link: "drafting",
+      fallback: "配方写稿设置（模型 / Prompt）",
+    },
+    {
+      label: "长文改写",
+      controlKey: "long_form_prompt",
+      link: "template",
+      fallback: "内置中性长文提示词",
+    },
+    {
+      label: "字数",
+      controlKey: "word_count",
+      link: "template",
+      fallback: "1800 字",
+    },
+    {
+      label: "写作模型",
+      controlKey: "llm_model",
+      link: "template",
+      fallback: "系统默认模型",
+    },
   ],
 }
 
@@ -106,7 +276,10 @@ export function pipelinePartsPreview(pipelineId: string): string {
 }
 
 /** 就地编辑：已知枚举零件的选项（value 为内部值，label 为人话）。 */
-export const PART_EDIT_OPTIONS: Record<string, { value: string; label: string }[]> = {
+export const PART_EDIT_OPTIONS: Record<
+  string,
+  { value: string; label: string }[]
+> = {
   split_mode: [
     { value: "paragraph", label: "按段落切" },
     { value: "line", label: "按行直出" },

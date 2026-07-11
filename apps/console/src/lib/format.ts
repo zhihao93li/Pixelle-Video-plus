@@ -33,20 +33,19 @@ export function formatBytes(value: number | null | undefined) {
   return `${(value / 1024 / 1024).toFixed(1)} MB`
 }
 
-/** 草稿溯源短句：`起草配置 · <模型或"默认模型">`；无溯源信息时返回 null。 */
+/** 草稿溯源短句：`配方名 · <模型或"默认模型">`；无溯源信息时返回 null。 */
 export function draftSetProvenance(draftSet: {
   draft_settings?: Record<string, unknown>
 }): string | null {
   const settings = draftSet.draft_settings as DraftSetSettings | undefined
-  // 起草配置与项目 1:1，配置名已是内部细节；溯源展示"用哪个模型生成"
-  if (!settings?.drafting_profile_name && !settings?.script_model) {
+  if (!settings?.production_template_name && !settings?.script_model) {
     return null
   }
   const model =
     settings?.script_model && settings.script_model.trim()
       ? settings.script_model
       : "默认模型"
-  return `起草配置 · ${model}`
+  return `${settings.production_template_name ?? "生产配方"} · ${model}`
 }
 
 /** 参数生值 → 人话（面向用户禁止 fixed/local 等内部 key 裸奔）。查不到返回原值。 */

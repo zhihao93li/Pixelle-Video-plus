@@ -29,6 +29,7 @@ from pixelle_video.generation.service import (
     generation_request_from_legacy_video_request,
 )
 from pixelle_video.generation.templates import (
+    DraftingSpec,
     ProductionTemplate,
     ProductionTemplateError,
     ProductionTemplateRegistry,
@@ -44,6 +45,7 @@ __all__ = [
     "GenerationResult",
     "GenerationService",
     "GenerationTask",
+    "DraftingSpec",
     "ComposeRuntimeContext",
     "ComposeRuntimeError",
     "ComposeRuntimeRegistry",

@@ -68,7 +68,6 @@ const project = {
   name: "PetWoods 内容计划",
   description: "用于正式路由验收的本地项目。",
   status: "active",
-  default_drafting_profile_id: "drafting-profile-1",
   default_production_template_id: VIDEO_TEMPLATE_ID,
   languages: ["Chinese"],
   tts_voice_by_language: {
@@ -109,6 +108,13 @@ function productionTemplate(
     quality_tier: "standard",
     pipeline_id: pipelineId,
     entry: requiresAssets ? "assets" : "script",
+    drafting: {
+      script_template_name: "default-script",
+      split_template_name: "default-split",
+      script_model: "test-model",
+      split_model: "test-model",
+      language_script_models: {},
+    },
     fixed_params:
       pipelineId === "standard"
         ? {
@@ -622,20 +628,6 @@ function submittedVideoResult() {
   }
 }
 
-const draftingProfile = {
-  profile_id: "drafting-profile-1",
-  name: "项目默认起草配方",
-  script_template_name: "default-script",
-  split_template_name: "default-split",
-  script_model: "test-model",
-  split_model: "test-model",
-  languages: ["Chinese"],
-  language_script_models: {},
-  project_id: PROJECT_ID,
-  created_at: "2026-07-10T08:00:00Z",
-  updated_at: "2026-07-10T08:00:00Z",
-}
-
 const scriptReviewTemplates = {
   default_languages: ["Chinese"],
   script_templates: [
@@ -662,7 +654,11 @@ const scriptReviewDraftSet = {
   topics: ["猫咪夏天饮水少怎么办"],
   languages: ["Chinese"],
   metadata: { source: "e2e" },
-  draft_settings: { project_id: PROJECT_ID },
+  draft_settings: {
+    project_id: PROJECT_ID,
+    production_template_id: VIDEO_TEMPLATE_ID,
+    production_template_name: "图文口播视频",
+  },
   drafts: [
     {
       index: 0,
@@ -726,7 +722,6 @@ function responseFor(
             ...project,
             project_id: "project-2",
             name: "WhiskerLab 内容计划",
-            default_drafting_profile_id: "drafting-profile-2",
           },
         ]
       : [configuredProject]
@@ -801,6 +796,22 @@ function responseFor(
         overridable_keys: template?.allowed_user_params ?? [],
         overrides: {},
         effective_params: template?.fixed_params ?? {},
+      },
+    }
+  }
+  if (
+    ["GET", "PUT", "DELETE"].includes(method) &&
+    /^\/generation\/templates\/[^/]+\/drafting-config$/.test(path)
+  ) {
+    const templateId = path.split("/")[3]
+    const template = templatesForOptions(options).find(
+      (item) => item.id === templateId
+    )
+    return {
+      body: {
+        template_id: templateId,
+        drafting: template?.drafting,
+        is_overridden: method === "PUT",
       },
     }
   }
@@ -1027,14 +1038,6 @@ function responseFor(
             batch: completedGenerationBatch,
           },
         }
-  }
-  if (method === "GET" && path === "/drafting/profiles") {
-    return {
-      body: {
-        default_profile_id: draftingProfile.profile_id,
-        profiles: [draftingProfile],
-      },
-    }
   }
   if (method === "GET" && path === "/history/tasks") {
     const count = requestCounts.get(`${method} ${path}`) ?? 1

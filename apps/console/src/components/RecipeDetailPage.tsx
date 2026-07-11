@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Copy,
+  Eye,
   Loader2,
   Lock,
   RotateCcw,
@@ -14,9 +15,11 @@ import { AsyncState } from "@/components/shared/AsyncState"
 import { EmptyState } from "@/components/shared/EmptyState"
 import { FrameTemplatePicker } from "@/components/shared/FrameTemplatePicker"
 import { InlineError } from "@/components/shared/feedback"
+import { PromptPeekSheet } from "@/components/shared/PromptPeekSheet"
 import { PageFrame } from "@/components/shared/PageFrame"
 import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
 import { WorkspacePanel } from "@/components/shared/WorkspacePanel"
+import { UnsavedChangesGuard } from "@/components/settings/UnsavedChangesGuard"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -33,13 +36,21 @@ import { useExpertMode } from "@/lib/expertMode"
 import { readableError } from "@/lib/format"
 import {
   cloneProductionTemplate,
+  createPromptTemplate,
+  getTemplateDraftingConfig,
   getTemplateGenerationConfig,
   listProjects,
   listResourceTemplates,
+  listScriptReviewTemplates,
   listTemplates,
+  resetTemplateDraftingConfig,
+  updatePromptTemplate,
+  updateTemplateDraftingConfig,
   updateTemplateGenerationConfig,
+  type DraftingSpec,
   type ProductionTemplate,
   type ResourceTemplate,
+  type ScriptReviewPromptTemplate,
 } from "@/lib/generationApi"
 import {
   humanizePartValue,
@@ -58,13 +69,13 @@ import {
   productionStartRoute,
   productionSubmissionSummary,
 } from "@/lib/productionSurface"
-import { navigate, routeHref } from "@/lib/router"
+import { navigate, routeHref, usePath } from "@/lib/router"
 import { settingsLink } from "@/lib/settingsLinks"
 import { cn } from "@/lib/utils"
 
 /**
- * 配方详情页只管理“以后用这份配方时”的默认值。单次生产覆盖仍留在制作页，
- * 项目级写稿设置仍留在项目设置，避免三层配置在同一页争夺控制权。
+ * 配方详情页管理从写稿到成片的长期默认值。项目只选择默认配方，
+ * 单次生产覆盖仍留在制作页。
  */
 
 const EXPERT_ONLY_KEYS = new Set([
@@ -494,6 +505,10 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
         <div className="flex min-w-0 flex-col gap-4">
+          {template.product_entry === "generate" &&
+          template.input_requirements.includes("script") ? (
+            <RecipeDraftingPanel template={template} />
+          ) : null}
           {isLoading ? (
             <AsyncState
               description="正在同步这份配方的有效默认值。"
@@ -537,8 +552,8 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
                       overridableKeys.includes(key) &&
                       (expertMode || !isExpertOnly)
                     )
-                    const isProjectStep =
-                      key === null && step.link === "projects"
+                    const isDraftingStep =
+                      key === null && step.link === "drafting"
                     const isEditing = Boolean(
                       key && editingKey === key && changeableHere
                     )
@@ -580,22 +595,10 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
                               调整
                             </Button>
                           ) : null}
-                          {isProjectStep ? (
-                            <Button
-                              asChild
-                              className="min-h-11 sm:min-h-8"
-                              variant="outline"
-                            >
-                              <a
-                                href={routeHref(
-                                  settingsLink({ kind: "projects" })
-                                )}
-                              >
-                                在项目中调整
-                              </a>
-                            </Button>
+                          {isDraftingStep ? (
+                            <Badge variant="info">在上方设置</Badge>
                           ) : null}
-                          {!changeableHere && !isProjectStep ? (
+                          {!changeableHere && !isDraftingStep ? (
                             <Badge className="gap-1" variant="outline">
                               <Lock />
                               {isExpertOnly && !expertMode
@@ -787,6 +790,383 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
         </Button>
       </div>
     </PageFrame>
+  )
+}
+
+type PromptKind = "script" | "split"
+
+function RecipeDraftingPanel({ template }: { template: ProductionTemplate }) {
+  const toast = useToast()
+  const path = usePath()
+  const [drafting, setDrafting] = useState<DraftingSpec>(template.drafting)
+  const [savedDrafting, setSavedDrafting] = useState<DraftingSpec>(
+    template.drafting
+  )
+  const [scriptTemplates, setScriptTemplates] = useState<
+    ScriptReviewPromptTemplate[]
+  >([])
+  const [splitTemplates, setSplitTemplates] = useState<
+    ScriptReviewPromptTemplate[]
+  >([])
+  const [allRecipes, setAllRecipes] = useState<ProductionTemplate[]>([])
+  const [isOverridden, setIsOverridden] = useState(false)
+  const [languageModelsText, setLanguageModelsText] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [peek, setPeek] = useState<{ kind: PromptKind; name: string } | null>(
+    null
+  )
+  const [promptEdit, setPromptEdit] = useState<{
+    kind: PromptKind
+    name: string
+    content: string
+    originalContent: string
+    source: string
+  } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void Promise.all([
+      getTemplateDraftingConfig(template.id),
+      listScriptReviewTemplates(),
+      listTemplates(),
+    ])
+      .then(([config, prompts, recipes]) => {
+        if (cancelled) return
+        setDrafting(config.drafting)
+        setSavedDrafting(config.drafting)
+        setLanguageModelsText(
+          Object.entries(config.drafting.language_script_models)
+            .map(([language, model]) => `${language}=${model}`)
+            .join("\n")
+        )
+        setIsOverridden(config.is_overridden)
+        setScriptTemplates(prompts.script_templates)
+        setSplitTemplates(prompts.split_templates)
+        setAllRecipes(recipes.templates)
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) setError(readableError(loadError))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [template.id])
+
+  const dirty = JSON.stringify(drafting) !== JSON.stringify(savedDrafting)
+  function setLanguageModels(value: string) {
+    setLanguageModelsText(value)
+    const entries: Record<string, string> = {}
+    for (const rawLine of value.split("\n")) {
+      const [language, ...modelParts] = rawLine.split("=")
+      const model = modelParts.join("=").trim()
+      if (language.trim() && model) entries[language.trim()] = model
+    }
+    setDrafting((current) => ({
+      ...current,
+      language_script_models: entries,
+    }))
+  }
+
+  async function saveDrafting(next = drafting) {
+    setBusy(true)
+    setError(null)
+    try {
+      const response = await updateTemplateDraftingConfig(template.id, next)
+      setDrafting(response.drafting)
+      setSavedDrafting(response.drafting)
+      setLanguageModelsText(
+        Object.entries(response.drafting.language_script_models)
+          .map(([language, model]) => `${language}=${model}`)
+          .join("\n")
+      )
+      setIsOverridden(response.is_overridden)
+      toast({ title: "写稿设置已保存", variant: "success" })
+      return response.drafting
+    } catch (saveError) {
+      setError(readableError(saveError))
+      return null
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function resetDrafting() {
+    setBusy(true)
+    setError(null)
+    try {
+      const response = await resetTemplateDraftingConfig(template.id)
+      setDrafting(response.drafting)
+      setSavedDrafting(response.drafting)
+      setLanguageModelsText(
+        Object.entries(response.drafting.language_script_models)
+          .map(([language, model]) => `${language}=${model}`)
+          .join("\n")
+      )
+      setIsOverridden(false)
+      toast({ title: "已恢复配方内置写稿设置", variant: "success" })
+    } catch (resetError) {
+      setError(readableError(resetError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function openPromptEditor(kind: PromptKind) {
+    const name =
+      kind === "script"
+        ? drafting.script_template_name
+        : drafting.split_template_name
+    const pool = kind === "script" ? scriptTemplates : splitTemplates
+    const selected = pool.find((item) => item.name === name)
+    if (!selected) return
+    setPromptEdit({
+      kind,
+      name,
+      content: selected.content,
+      originalContent: selected.content,
+      source: selected.source,
+    })
+  }
+
+  async function savePromptBody() {
+    if (!promptEdit) return
+    setBusy(true)
+    setError(null)
+    try {
+      const usedByOtherRecipe = allRecipes.some(
+        (recipe) =>
+          recipe.id !== template.id &&
+          (recipe.drafting.script_template_name === promptEdit.name ||
+            recipe.drafting.split_template_name === promptEdit.name)
+      )
+      let name = promptEdit.name
+      if (promptEdit.source === "builtin" || usedByOtherRecipe) {
+        const created = await createPromptTemplate({
+          kind: promptEdit.kind,
+          name: `${template.display_name} · ${promptEdit.name}`,
+          content: promptEdit.content,
+        })
+        name = created.name
+      } else {
+        await updatePromptTemplate({
+          kind: promptEdit.kind,
+          name,
+          content: promptEdit.content,
+        })
+      }
+      const next = {
+        ...drafting,
+        [promptEdit.kind === "script"
+          ? "script_template_name"
+          : "split_template_name"]: name,
+      }
+      const saved = await updateTemplateDraftingConfig(template.id, next)
+      setDrafting(saved.drafting)
+      setSavedDrafting(saved.drafting)
+      setIsOverridden(saved.is_overridden)
+      setPromptEdit(null)
+      const prompts = await listScriptReviewTemplates()
+      setScriptTemplates(prompts.script_templates)
+      setSplitTemplates(prompts.split_templates)
+      toast({ title: "提示词正文已保存", variant: "success" })
+    } catch (promptError) {
+      setError(readableError(promptError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function promptField(kind: PromptKind) {
+    const script = kind === "script"
+    const pool = script ? scriptTemplates : splitTemplates
+    const value = script
+      ? drafting.script_template_name
+      : drafting.split_template_name
+    return (
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs text-muted-foreground">
+          {script ? "写稿 Prompt" : "分镜 Prompt"}
+        </span>
+        <div className="flex gap-1.5">
+          <Select
+            onValueChange={(name) =>
+              setDrafting((current) => ({
+                ...current,
+                [script ? "script_template_name" : "split_template_name"]: name,
+              }))
+            }
+            value={value}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {pool.map((item) => (
+                <SelectItem key={item.name} value={item.name}>
+                  {item.name}
+                  {item.source === "builtin" ? "（内置）" : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            aria-label={`查看${script ? "写稿" : "分镜"}提示词`}
+            onClick={() => setPeek({ kind, name: value })}
+            size="icon-sm"
+            type="button"
+            variant="ghost"
+          >
+            <Eye />
+          </Button>
+          <Button
+            onClick={() => openPromptEditor(kind)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            编辑正文
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <WorkspacePanel
+      description="同一配方负责选题写稿、分镜和成片默认。项目只决定默认使用哪份配方。"
+      title="写稿与分镜"
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        {promptField("script")}
+        {promptField("split")}
+        <label className="flex flex-col gap-1.5 text-sm">
+          <span className="text-xs text-muted-foreground">写稿模型</span>
+          <Input
+            onChange={(event) =>
+              setDrafting((current) => ({
+                ...current,
+                script_model: event.target.value,
+              }))
+            }
+            placeholder="留空使用系统默认模型"
+            value={drafting.script_model}
+          />
+        </label>
+        <label className="flex flex-col gap-1.5 text-sm">
+          <span className="text-xs text-muted-foreground">分镜模型</span>
+          <Input
+            onChange={(event) =>
+              setDrafting((current) => ({
+                ...current,
+                split_model: event.target.value,
+              }))
+            }
+            placeholder="留空使用系统默认模型"
+            value={drafting.split_model}
+          />
+        </label>
+      </div>
+      <label className="mt-3 flex flex-col gap-1.5 text-sm">
+        <span className="text-xs text-muted-foreground">
+          按语言指定写稿模型（每行“语言=模型”）
+        </span>
+        <Textarea
+          className="min-h-20 font-mono text-xs"
+          onChange={(event) => setLanguageModels(event.target.value)}
+          placeholder={"Chinese=gpt-4.1\nEnglish=gpt-4.1-mini"}
+          value={languageModelsText}
+        />
+      </label>
+      {promptEdit ? (
+        <div className="mt-3 rounded-lg border bg-muted/20 p-3">
+          <div className="flex items-center justify-between gap-2 text-sm font-medium">
+            <span>编辑：{promptEdit.name}</span>
+            <Badge variant="outline">
+              {promptEdit.source === "builtin" ? "保存为副本" : "自定义"}
+            </Badge>
+          </div>
+          <Textarea
+            className="mt-2 min-h-64 font-mono text-xs leading-5"
+            onChange={(event) =>
+              setPromptEdit((current) =>
+                current ? { ...current, content: event.target.value } : current
+              )
+            }
+            value={promptEdit.content}
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <Button
+              disabled={busy}
+              onClick={() => setPromptEdit(null)}
+              size="sm"
+              variant="ghost"
+            >
+              取消
+            </Button>
+            <Button
+              disabled={
+                busy ||
+                !promptEdit.content.trim() ||
+                promptEdit.content === promptEdit.originalContent
+              }
+              onClick={() => void savePromptBody()}
+              size="sm"
+            >
+              {busy ? (
+                <Loader2 className="animate-spin" data-icon="inline-start" />
+              ) : null}
+              保存正文
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {error ? (
+        <div className="mt-3">
+          <InlineError message={error} title="写稿设置保存失败" />
+        </div>
+      ) : null}
+      <div className="mt-4 flex justify-end gap-2 border-t pt-3">
+        {isOverridden ? (
+          <Button
+            disabled={busy}
+            onClick={() => void resetDrafting()}
+            size="sm"
+            variant="ghost"
+          >
+            <RotateCcw data-icon="inline-start" />
+            恢复内置
+          </Button>
+        ) : null}
+        <Button
+          disabled={busy || !dirty}
+          onClick={() => void saveDrafting()}
+          size="sm"
+        >
+          {busy ? (
+            <Loader2 className="animate-spin" data-icon="inline-start" />
+          ) : null}
+          保存写稿设置
+        </Button>
+      </div>
+      <PromptPeekSheet
+        kind={peek?.kind ?? "script"}
+        name={peek?.name ?? ""}
+        onOpenChange={(open) => {
+          if (!open) setPeek(null)
+        }}
+        open={peek != null}
+      />
+      <UnsavedChangesGuard
+        currentPath={path}
+        dirty={
+          dirty ||
+          Boolean(
+            promptEdit && promptEdit.content !== promptEdit.originalContent
+          )
+        }
+      />
+    </WorkspacePanel>
   )
 }
 

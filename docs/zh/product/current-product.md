@@ -44,7 +44,7 @@ flowchart LR
 | 产品界面 | `apps/console/src` | 路由、交互、ViewModel 展示 |
 | API | `api/routers`、`api/schemas` | HTTP 合同和权限边界 |
 | 正式生成任务 | `pixelle_video/generation` | 任务身份、持久状态、运行进度与重启语义 |
-| 内容与项目 | `pixelle_video/content` | 项目、内容条目、起草配置 |
+| 内容与项目 | `pixelle_video/content` | 项目与内容条目；写稿 Prompt 和模型由生产配方管理 |
 | 生产注册与编译 | `pixelle_video/generation` | 配方解析、覆盖合并、运行与质量 |
 | 生产管线 | `pixelle_video/pipelines` | 视频、素材、图集、长文和工作流管线 |
 | 媒体服务 | `pixelle_video/services` | LLM、TTS、图片、视频、存储和发布 |

@@ -11,6 +11,14 @@ export const API_BASE_URL =
 export type GenerationStatus =
   "pending" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
 
+export type DraftingSpec = {
+  script_template_name: string
+  split_template_name: string
+  script_model: string
+  split_model: string
+  language_script_models: Record<string, string>
+}
+
 export type ProductionTemplate = {
   id: string
   version: string
@@ -29,6 +37,7 @@ export type ProductionTemplate = {
   quality_tier: string
   pipeline_id: string
   entry: string
+  drafting: DraftingSpec
   fixed_params: Record<string, unknown>
   required_capabilities: string[]
   user_selectable_runtime: boolean
@@ -175,7 +184,8 @@ export type ScriptReviewDraft = {
 
 /** 草稿集溯源字段（读取时收窄；其余字段仍为 unknown）。 */
 export type DraftSetSettings = {
-  drafting_profile_name?: string
+  production_template_id?: string
+  production_template_name?: string
   script_model?: string
   script_template_name?: string
   project_id?: string
@@ -203,7 +213,7 @@ export type ScriptReviewCreateInput = {
   topics: string[]
   languages: string[]
   projectId?: string
-  draftingProfileId?: string
+  templateId?: string
   scriptTemplateName?: string
   splitTemplateName?: string
   scriptModel?: string
@@ -622,6 +632,35 @@ export async function updateTemplateGenerationConfig(
   )
 }
 
+export type TemplateDraftingConfig = {
+  template_id: string
+  drafting: DraftingSpec
+  is_overridden: boolean
+}
+
+export async function getTemplateDraftingConfig(templateId: string) {
+  return fetchJson<TemplateDraftingConfig>(
+    `/generation/templates/${templateId}/drafting-config`
+  )
+}
+
+export async function updateTemplateDraftingConfig(
+  templateId: string,
+  drafting: DraftingSpec
+) {
+  return fetchJson<TemplateDraftingConfig>(
+    `/generation/templates/${templateId}/drafting-config`,
+    { method: "PUT", body: JSON.stringify({ drafting }) }
+  )
+}
+
+export async function resetTemplateDraftingConfig(templateId: string) {
+  return fetchJson<TemplateDraftingConfig>(
+    `/generation/templates/${templateId}/drafting-config`,
+    { method: "DELETE" }
+  )
+}
+
 export type CloneProductionTemplateInput = {
   sourceTemplateId: string
   id: string
@@ -749,7 +788,7 @@ export async function createScriptReviewDraftSet(
         topics: input.topics,
         languages: input.languages,
         project_id: input.projectId ?? null,
-        drafting_profile_id: input.draftingProfileId ?? null,
+        template_id: input.templateId ?? null,
         script_template_name: input.scriptTemplateName || null,
         split_template_name: input.splitTemplateName || null,
         script_model: input.scriptModel || null,
@@ -1371,51 +1410,8 @@ function outputRelativePath(path: string) {
 }
 
 // ---------------------------------------------------------------------------
-// 起草配方（DraftingProfile）与 Prompt 模板自助管理
+// Prompt 模板自助管理
 // ---------------------------------------------------------------------------
-
-export type DraftingProfile = {
-  profile_id: string
-  name: string
-  script_template_name: string
-  split_template_name: string
-  script_model: string
-  split_model: string
-  languages: string[]
-  language_script_models: Record<string, string>
-  project_id: string
-  created_at: string
-  updated_at: string
-}
-
-export type DraftingProfileListResponse = {
-  default_profile_id: string | null
-  profiles: DraftingProfile[]
-}
-
-export type DraftingProfileInput = {
-  name: string
-  script_template_name: string
-  split_template_name: string
-  script_model?: string
-  split_model?: string
-  languages?: string[]
-  language_script_models?: Record<string, string>
-}
-
-export async function listDraftingProfiles() {
-  return fetchJson<DraftingProfileListResponse>("/drafting/profiles")
-}
-
-export async function updateDraftingProfile(
-  profileId: string,
-  patch: Partial<DraftingProfileInput>
-) {
-  return fetchJson<DraftingProfile>(`/drafting/profiles/${profileId}`, {
-    method: "PUT",
-    body: JSON.stringify(patch),
-  })
-}
 
 export type PromptTemplateWriteInput = {
   kind: "script" | "split"
@@ -1460,7 +1456,6 @@ export type Project = {
   name: string
   description: string
   status: "active" | "archived"
-  default_drafting_profile_id: string | null
   default_production_template_id: string | null
   languages: string[]
   tts_voice_by_language: Record<string, string>
@@ -1477,7 +1472,6 @@ export type ProjectListResponse = {
 export type ProjectInput = {
   name: string
   description?: string
-  defaultDraftingProfileId?: string | null
   defaultProductionTemplateId?: string | null
   languages?: string[]
   ttsVoiceByLanguage?: Record<string, string>
@@ -1489,7 +1483,6 @@ function projectBody(input: Partial<ProjectInput>) {
   return {
     name: input.name,
     description: input.description,
-    default_drafting_profile_id: input.defaultDraftingProfileId,
     default_production_template_id: input.defaultProductionTemplateId,
     languages: input.languages,
     tts_voice_by_language: input.ttsVoiceByLanguage,

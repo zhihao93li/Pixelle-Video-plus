@@ -18,7 +18,7 @@ flowchart LR
 | --- | --- | --- |
 | 控制台 | `apps/console` | 路由、交互与 ViewModel 展示 |
 | API | `api` | HTTP 合同、校验和任务入口 |
-| 内容 | `pixelle_video/content` | 项目、内容条目和起草配置 |
+| 内容 | `pixelle_video/content` | 项目与内容条目；项目保存品牌、语言音色和默认生产配方 |
 | 生产 | `pixelle_video/generation` | 配方、参数合并、运行和质量 |
 | 管线 | `pixelle_video/pipelines` | 各产物生产实现 |
 | 服务 | `pixelle_video/services` | LLM、TTS、媒体、存储和发布 |

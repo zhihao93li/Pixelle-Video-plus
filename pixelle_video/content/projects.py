@@ -1,11 +1,11 @@
 """项目（Project）：品牌级内容线实体，是控制台的全局作用域维度。
 
-一个项目 = 一个品牌/内容线（发布渠道挂在项目下），管四类默认：默认起草配方、
-默认生产模板、语言集 + 每语言 TTS 音色、发布平台预选。存储
+一个项目 = 一个品牌/内容线（发布渠道挂在项目下），管三类默认：默认生产配方、
+语言集 + 每语言 TTS 音色、发布平台预选。写稿规则属于生产配方。存储
 ``data/projects.json``：``{"default_project_id": str|None, "projects": {id: {...}}}``。
 
-实现模式照抄 ``drafting_profiles.py``（pydantic + tmp+os.replace + threading.Lock +
-可 monkeypatch 的 ``_projects_path()``）。归档而非删除：默认项目与最后一个 active
+实现使用 pydantic + tmp+os.replace + threading.Lock，并保留可 monkeypatch 的
+``_projects_path()``。归档而非删除：默认项目与最后一个 active
 项目不可归档（约束在 API 层校验）。"当前项目"是前端状态，服务端 default 仅作兜底。
 """
 
@@ -31,7 +31,6 @@ class Project(BaseModel):
     name: str
     description: str = ""
     status: Literal["active", "archived"] = "active"
-    default_drafting_profile_id: str | None = None
     default_production_template_id: str | None = None
     languages: list[str] = Field(default_factory=lambda: ["Chinese"])
     tts_voice_by_language: dict[str, str] = Field(default_factory=dict)
@@ -117,7 +116,6 @@ def create_project(
     *,
     name: str,
     description: str = "",
-    default_drafting_profile_id: str | None = None,
     default_production_template_id: str | None = None,
     languages: list[str] | None = None,
     tts_voice_by_language: dict[str, str] | None = None,
@@ -133,11 +131,6 @@ def create_project(
         project_id=uuid.uuid4().hex,
         name=name,
         description=description,
-        default_drafting_profile_id=(
-            default_drafting_profile_id
-            if default_drafting_profile_id is not None
-            else (source.default_drafting_profile_id if source else None)
-        ),
         default_production_template_id=(
             default_production_template_id
             if default_production_template_id is not None
@@ -168,8 +161,6 @@ def create_project(
         if not raw["default_project_id"]:
             raw["default_project_id"] = project.project_id
         _write_raw(raw)
-    # 每个项目自动拥有一份起草配置（copy_from 时克隆源项目配置内容，绝不共享引用）
-    _provision_profile(project, source)
     return project
 
 
@@ -271,78 +262,6 @@ def _migrate_content_items(default_project_id_value: str, valid_ids: set[str]) -
             save_item(item)
 
 
-def _clone_profile_content(source, project: "Project") -> None:
-    from pixelle_video.content.drafting_profiles import create_profile
-
-    create_profile(
-        name=f"{project.name} 起草配置",
-        script_template_name=source.script_template_name,
-        split_template_name=source.split_template_name,
-        script_model=source.script_model,
-        split_model=source.split_model,
-        languages=list(source.languages),
-        language_script_models=dict(source.language_script_models),
-        project_id=project.project_id,
-    )
-
-
-def _provision_profile(project: "Project", source_project: "Project | None") -> None:
-    """确保项目有且仅有一份起草配置（幂等）。迁移三分支的统一实现。"""
-    from pixelle_video.content.drafting_profiles import (
-        SAFE_DEFAULT_SCRIPT_TEMPLATE,
-        SAFE_DEFAULT_SPLIT_TEMPLATE,
-        create_profile,
-        get_default_profile,
-        get_profile,
-        get_profile_by_project,
-        get_profile_for_project,
-        update_profile,
-    )
-
-    if get_profile_by_project(project.project_id) is not None:
-        return  # 已有配置（幂等）
-
-    # copy_from：克隆源项目配置内容（不共享引用）
-    if source_project is not None:
-        _clone_profile_content(
-            get_profile_for_project(source_project.project_id), project
-        )
-        return
-
-    pointer = project.default_drafting_profile_id
-    target = get_profile(pointer) if pointer else None
-    if target is not None and not target.project_id:
-        # 分支1：指针指向未占用配方 → 认领（保留旧内容，如旧全局默认）
-        update_profile(
-            target.profile_id,
-            {"project_id": project.project_id, "name": f"{project.name} 起草配置"},
-        )
-        return
-    if target is not None and target.project_id != project.project_id:
-        # 分支2：指针指向已被别的项目占用的配方 → 克隆内容（消除跨项目共享）
-        _clone_profile_content(target, project)
-        return
-
-    # 分支3：空/缺失 → 内容优先取旧全局默认，否则安全内置
-    global_default = get_default_profile()
-    if global_default is not None and not global_default.project_id:
-        _clone_profile_content(global_default, project)
-        return
-    create_profile(
-        name=f"{project.name} 起草配置",
-        script_template_name=SAFE_DEFAULT_SCRIPT_TEMPLATE,
-        split_template_name=SAFE_DEFAULT_SPLIT_TEMPLATE,
-        project_id=project.project_id,
-    )
-
-
-def _ensure_project_profiles() -> None:
-    """为每个项目（含 archived，按 created_at 序）补齐起草配置。幂等、可自愈。"""
-    _, projects = list_projects()
-    for project in projects:
-        _provision_profile(project, None)
-
-
 def _bootstrap_default_project() -> None:
     """无项目时从 ops.db 种子建默认项目并归拢存量条目。"""
     seed = _read_ops_seed()
@@ -436,9 +355,8 @@ def _repoint_project_default_templates() -> None:
 
 
 def ensure_migrated() -> None:
-    """幂等迁移：无项目时建默认项目并归拢条目；补齐起草配置；骨架化模板迁移。"""
+    """幂等迁移：无项目时建默认项目并归拢条目；完成骨架化模板迁移。"""
     if not _load_raw()["projects"]:
         _bootstrap_default_project()
-    _ensure_project_profiles()
     _ensure_migrated_static_subtitle()
     _repoint_project_default_templates()

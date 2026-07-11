@@ -25,9 +25,9 @@ import { useCurrentProject } from "@/lib/currentProject"
 import { generateDraftsForItems } from "@/lib/contentDrafting"
 import {
   createContentItems,
-  listDraftingProfiles,
+  listTemplates,
   uploadGenerationAssets,
-  type DraftingProfile,
+  type ProductionTemplate,
 } from "@/lib/generationApi"
 
 type AddTab = "topic" | "copy" | "asset"
@@ -69,14 +69,13 @@ export function AddContentDialog({
   const [copyText, setCopyText] = useState("")
   const [assetFiles, setAssetFiles] = useState<File[]>([])
   const [languages, setLanguages] = useState<string[]>(["Chinese"])
-  const [profiles, setProfiles] = useState<DraftingProfile[]>([])
+  const [templates, setTemplates] = useState<ProductionTemplate[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [peekOpen, setPeekOpen] = useState(false)
 
-  // 起草配置与项目 1:1：直接取当前项目的配置
-  const projectProfile = profiles.find(
-    (profile) => profile.project_id === projectId
+  const draftingRecipe = templates.find(
+    (template) => template.id === project?.default_production_template_id
   )
   const languagesAreProjectDefault =
     !!project &&
@@ -96,25 +95,25 @@ export function AddContentDialog({
     setLanguageInitKey(null)
   }
 
-  // 打开时读取当前项目的起草配置（1:1，只作展示）
+  // 这里只展示项目默认配方；真正起草时后端仍会锁定同一配方。
   useEffect(() => {
     if (!open) {
       return
     }
     let cancelled = false
-    void listDraftingProfiles()
+    void listTemplates(projectId ?? undefined)
       .then((response) => {
         if (!cancelled) {
-          setProfiles(response.profiles)
+          setTemplates(response.templates)
         }
       })
       .catch(() => {
-        // 读取失败不阻塞添加（后端起草时会自愈补建）
+        // 展示失败不阻塞添加；后端会按项目默认配方解析。
       })
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, projectId])
 
   function reset() {
     setTopicsText("")
@@ -172,7 +171,7 @@ export function AddContentDialog({
       languages: chosenLanguages,
       projectId: projectId ?? undefined,
     })
-    // 标记起草中 + 后台起草由共享编排负责（起草配置由后端按当前项目 1:1 解析）
+    // 标记起草中 + 后台起草由共享编排负责（后端锁定项目默认配方）。
     await generateDraftsForItems(items, toast, onCreated, {
       projectId: projectId ?? undefined,
     })
@@ -213,145 +212,163 @@ export function AddContentDialog({
 
   return (
     <>
-    <Sheet onOpenChange={onOpenChange} open={open}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
-        <SheetHeader>
-          <SheetTitle>添加内容</SheetTitle>
-          <SheetDescription className="text-left">
-            选题入池、导入现成文案，或上传素材。
-          </SheetDescription>
-        </SheetHeader>
+      <Sheet onOpenChange={onOpenChange} open={open}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+          <SheetHeader>
+            <SheetTitle>添加内容</SheetTitle>
+            <SheetDescription className="text-left">
+              选题入池、导入现成文案，或上传素材。
+            </SheetDescription>
+          </SheetHeader>
 
-        <div className="flex flex-col gap-4 px-4 pb-4">
-          <Tabs onValueChange={(value) => setTab(value as AddTab)} value={tab}>
-            <TabsList>
-              <TabsTrigger value="topic">选题</TabsTrigger>
-              <TabsTrigger value="copy">现成文案</TabsTrigger>
-              <TabsTrigger value="asset">素材</TabsTrigger>
-            </TabsList>
+          <div className="flex flex-col gap-4 px-4 pb-4">
+            <Tabs
+              onValueChange={(value) => setTab(value as AddTab)}
+              value={tab}
+            >
+              <TabsList>
+                <TabsTrigger value="topic">选题</TabsTrigger>
+                <TabsTrigger value="copy">现成文案</TabsTrigger>
+                <TabsTrigger value="asset">素材</TabsTrigger>
+              </TabsList>
 
-            <TabsContent className="mt-4" value="topic">
-              <Textarea
-                onChange={(event) => setTopicsText(event.target.value)}
-                placeholder="每行一个选题"
-                rows={6}
-                value={topicsText}
-              />
-            </TabsContent>
+              <TabsContent className="mt-4" value="topic">
+                <Textarea
+                  onChange={(event) => setTopicsText(event.target.value)}
+                  placeholder="每行一个选题"
+                  rows={6}
+                  value={topicsText}
+                />
+              </TabsContent>
 
-            <TabsContent className="mt-4" value="copy">
-              <Textarea
-                onChange={(event) => setCopyText(event.target.value)}
-                placeholder={"第一行为标题，其余为文案。\n多条之间用单独一行 --- 分隔。"}
-                rows={8}
-                value={copyText}
-              />
-            </TabsContent>
+              <TabsContent className="mt-4" value="copy">
+                <Textarea
+                  onChange={(event) => setCopyText(event.target.value)}
+                  placeholder={
+                    "第一行为标题，其余为文案。\n多条之间用单独一行 --- 分隔。"
+                  }
+                  rows={8}
+                  value={copyText}
+                />
+              </TabsContent>
 
-            <TabsContent className="mt-4" value="asset">
-              <FileDropzone
-                accept="image/*,video/*"
-                files={assetFiles}
-                hint="拖入图片或视频素材"
-                id="add-content-assets"
-                onFilesChange={setAssetFiles}
-              />
-            </TabsContent>
-          </Tabs>
+              <TabsContent className="mt-4" value="asset">
+                <FileDropzone
+                  accept="image/*,video/*"
+                  files={assetFiles}
+                  hint="拖入图片或视频素材"
+                  id="add-content-assets"
+                  onFilesChange={setAssetFiles}
+                />
+              </TabsContent>
+            </Tabs>
 
-          {tab === "topic" && projectProfile && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span>
-                起草配置：口播「{projectProfile.script_template_name}」
-              </span>
-              <SourceChip source="project" to={settingsLink({ kind: "projects" })} />
-              <Button
-                aria-label="查看口播提示词"
-                onClick={() => setPeekOpen(true)}
-                size="icon-sm"
-                type="button"
-                variant="ghost"
-              >
-                <Eye />
-              </Button>
-            </div>
-          )}
-
-          {tab !== "asset" && (
-            <div className="flex flex-col gap-1.5">
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                语言
-                {languagesAreProjectDefault && (
-                  <SourceChip
-                    source="project"
-                    to={settingsLink({ kind: "projects" })}
-                  />
-                )}
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {PRESET_LANGUAGES.map((language) => {
-                  const active = languages.includes(language)
-                  return (
-                    <button
-                      className={cn(
-                        "rounded-lg border px-2.5 py-1 text-xs transition-colors",
-                        active
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "text-muted-foreground hover:bg-muted"
-                      )}
-                      key={language}
-                      onClick={() => toggleLanguage(language)}
-                      type="button"
-                    >
-                      {languageLabel(language)}
-                    </button>
-                  )
-                })}
+            {tab === "topic" && draftingRecipe && (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span>写稿配方：{draftingRecipe.display_name}</span>
+                <SourceChip
+                  source="recipe"
+                  to={`/create/recipes/${draftingRecipe.id}`}
+                />
+                <Button
+                  aria-label="查看口播提示词"
+                  onClick={() => setPeekOpen(true)}
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Eye />
+                </Button>
               </div>
-            </div>
-          )}
+            )}
 
-          {error && <InlineError title="添加失败" message={error} />}
-        </div>
+            {tab !== "asset" && (
+              <div className="flex flex-col gap-1.5">
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  语言
+                  {languagesAreProjectDefault && (
+                    <SourceChip
+                      source="project"
+                      to={settingsLink({ kind: "projects" })}
+                    />
+                  )}
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {PRESET_LANGUAGES.map((language) => {
+                    const active = languages.includes(language)
+                    return (
+                      <button
+                        className={cn(
+                          "rounded-lg border px-2.5 py-1 text-xs transition-colors",
+                          active
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "text-muted-foreground hover:bg-muted"
+                        )}
+                        key={language}
+                        onClick={() => toggleLanguage(language)}
+                        type="button"
+                      >
+                        {languageLabel(language)}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
-        <SheetFooter className="flex-row justify-end gap-2">
-          {tab === "topic" && (
-            <>
-              <Button
-                disabled={busy}
-                onClick={() => void run(addTopicsOnly)}
-                variant="outline"
-              >
-                仅入池
+            {error && <InlineError title="添加失败" message={error} />}
+          </div>
+
+          <SheetFooter className="flex-row justify-end gap-2">
+            {tab === "topic" && (
+              <>
+                <Button
+                  disabled={busy}
+                  onClick={() => void run(addTopicsOnly)}
+                  variant="outline"
+                >
+                  仅入池
+                </Button>
+                <Button
+                  disabled={busy}
+                  onClick={() => void run(addTopicsAndDraft)}
+                >
+                  {busy && (
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
+                  )}
+                  入池并生成草稿
+                </Button>
+              </>
+            )}
+            {tab === "copy" && (
+              <Button disabled={busy} onClick={() => void run(addReadyCopy)}>
+                {busy && (
+                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                )}
+                入库为确认稿
               </Button>
-              <Button disabled={busy} onClick={() => void run(addTopicsAndDraft)}>
-                {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
-                入池并生成草稿
+            )}
+            {tab === "asset" && (
+              <Button disabled={busy} onClick={() => void run(addAssets)}>
+                {busy && (
+                  <Loader2 className="animate-spin" data-icon="inline-start" />
+                )}
+                导入素材
               </Button>
-            </>
-          )}
-          {tab === "copy" && (
-            <Button disabled={busy} onClick={() => void run(addReadyCopy)}>
-              {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
-              入库为确认稿
-            </Button>
-          )}
-          {tab === "asset" && (
-            <Button disabled={busy} onClick={() => void run(addAssets)}>
-              {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
-              导入素材
-            </Button>
-          )}
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+            )}
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
-    <PromptPeekSheet
-      kind="script"
-      name={projectProfile?.script_template_name ?? ""}
-      onOpenChange={setPeekOpen}
-      open={peekOpen}
-    />
+      <PromptPeekSheet
+        kind="script"
+        name={draftingRecipe?.drafting.script_template_name ?? ""}
+        onOpenChange={setPeekOpen}
+        open={peekOpen}
+      />
     </>
   )
 }

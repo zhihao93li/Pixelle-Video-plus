@@ -59,14 +59,12 @@ import {
   getSettingsConfig,
   getTask,
   listScriptReviewDraftSets,
-  listDraftingProfiles,
   listScriptReviewTemplates,
   listTemplates,
   createScriptReviewDraftSet,
   retryGenerationBatchItem,
   submitScriptReviewDraftSetTasks,
   updateScriptReviewDraftSet,
-  type DraftingProfile,
   type GenerationBatch,
   type ProductionTemplate,
   type ScriptReviewDraft,
@@ -111,9 +109,6 @@ const BAZI_LANGUAGE_SCRIPT_MODEL_DEFAULTS: Record<string, string> = {
 }
 export function ScriptReviewWorkspace() {
   const { projectId, project } = useCurrentProject()
-  const [sourceProfile, setSourceProfile] = useState<DraftingProfile | null>(
-    null
-  )
   const [peek, setPeek] = useState<{
     kind: "script" | "split"
     name: string
@@ -191,7 +186,6 @@ export function ScriptReviewWorkspace() {
 
   if (activeProjectId !== projectId) {
     setActiveProjectId(projectId)
-    setSourceProfile(null)
     setDraftSets([])
     setDraftSet(null)
     setDraftListError(null)
@@ -239,13 +233,6 @@ export function ScriptReviewWorkspace() {
     scriptTemplateName || templates?.script_templates[0]?.name || ""
   const currentSplitTemplateName =
     splitTemplateName || templates?.split_templates[0]?.name || ""
-  // 首步默认值是否被用户改过（脚本/分镜模板名 + 两个模型；语言不参与，语言归项目）
-  const defaultsModified =
-    sourceProfile != null &&
-    (currentScriptTemplateName !== sourceProfile.script_template_name ||
-      currentSplitTemplateName !== sourceProfile.split_template_name ||
-      scriptModel !== sourceProfile.script_model ||
-      splitModel !== sourceProfile.split_model)
   const selectedLanguages = useMemo(
     () => draftSetSelectedLanguages(draftSet),
     [draftSet]
@@ -253,6 +240,7 @@ export function ScriptReviewWorkspace() {
   const canCreateDrafts =
     topics.length > 0 &&
     languages.length > 0 &&
+    Boolean(productionTemplateId) &&
     Boolean(currentScriptTemplateName) &&
     Boolean(currentSplitTemplateName) &&
     projectDefaultsLoadState === "ready" &&
@@ -278,6 +266,14 @@ export function ScriptReviewWorkspace() {
   const selectedProductionTemplate = productionTemplates.find(
     (template) => template.id === productionTemplateId
   )
+  const defaultsModified =
+    selectedProductionTemplate != null &&
+    (currentScriptTemplateName !==
+      selectedProductionTemplate.drafting.script_template_name ||
+      currentSplitTemplateName !==
+        selectedProductionTemplate.drafting.split_template_name ||
+      scriptModel !== selectedProductionTemplate.drafting.script_model ||
+      splitModel !== selectedProductionTemplate.drafting.split_model)
   const selectedTemplatePipeline = selectedProductionTemplate?.pipeline_id
   const isNonVideoTemplate = isNonVideoPipeline(selectedTemplatePipeline)
   const nonVideoOutputLabel =
@@ -305,7 +301,28 @@ export function ScriptReviewWorkspace() {
     void listTemplates(projectId ?? undefined)
       .then((response) => {
         if (!cancelled) {
-          setProductionTemplates(response.templates)
+          const compatible = response.templates.filter(
+            (candidate) =>
+              candidate.enabled &&
+              candidate.product_entry === "generate" &&
+              candidate.input_requirements.includes("script")
+          )
+          setProductionTemplates(compatible)
+          const selected =
+            compatible.find(
+              (candidate) =>
+                candidate.id === project?.default_production_template_id
+            ) ?? compatible[0]
+          if (selected) {
+            setProductionTemplateId(selected.id)
+            setScriptTemplateName(selected.drafting.script_template_name)
+            setSplitTemplateName(selected.drafting.split_template_name)
+            setScriptModel(selected.drafting.script_model)
+            setSplitModel(selected.drafting.split_model)
+            setLanguageScriptModels({
+              ...selected.drafting.language_script_models,
+            })
+          }
           setProductionCatalogError(null)
         }
       })
@@ -322,7 +339,11 @@ export function ScriptReviewWorkspace() {
     return () => {
       cancelled = true
     }
-  }, [productionCatalogReloadToken, projectId])
+  }, [
+    productionCatalogReloadToken,
+    projectId,
+    project?.default_production_template_id,
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -354,40 +375,10 @@ export function ScriptReviewWorkspace() {
   useEffect(() => {
     let cancelled = false
 
-    void Promise.allSettled([getSettingsConfig(), listDraftingProfiles()])
-      .then(([settingsResult, profileResult]) => {
+    void Promise.allSettled([getSettingsConfig()])
+      .then(([settingsResult]) => {
         if (cancelled) {
           return
-        }
-
-        if (profileResult.status === "rejected") {
-          throw profileResult.reason
-        }
-
-        const profile =
-          profileResult.value.profiles.find(
-            (item) => item.project_id === projectId
-          ) ?? null
-        if (!profile) {
-          throw new Error(
-            "当前项目没有可用的起草配置，请先到项目设置补全后重试。"
-          )
-        }
-
-        setSourceProfile(profile)
-        setScriptTemplateName(
-          (current) => current || profile.script_template_name
-        )
-        setSplitTemplateName(
-          (current) => current || profile.split_template_name
-        )
-        setScriptModel((current) => current || profile.script_model)
-        setSplitModel((current) => current || profile.split_model)
-        if (Object.keys(profile.language_script_models).length > 0) {
-          setLanguageScriptModels((current) => ({
-            ...profile.language_script_models,
-            ...current,
-          }))
         }
         if (settingsResult.status === "fulfilled") {
           const defaultReferenceId = (
@@ -417,7 +408,7 @@ export function ScriptReviewWorkspace() {
     return () => {
       cancelled = true
     }
-  }, [projectDefaultsReloadToken, projectId])
+  }, [projectDefaultsReloadToken])
 
   // 项目作用域：草稿集列表随项目切换刷新；最近草稿只作为恢复入口。
   useEffect(() => {
@@ -509,7 +500,6 @@ export function ScriptReviewWorkspace() {
     setProjectDefaultsError(null)
     setVoiceDefaultsError(null)
     setProjectDefaultsLoadState("loading")
-    setSourceProfile(null)
     setProjectDefaultsReloadToken((token) => token + 1)
   }
 
@@ -525,6 +515,7 @@ export function ScriptReviewWorkspace() {
         topics,
         languages,
         projectId: projectId ?? undefined,
+        templateId: productionTemplateId,
         scriptTemplateName: currentScriptTemplateName,
         splitTemplateName: currentSplitTemplateName,
         scriptModel: scriptModel.trim() || undefined,
@@ -787,6 +778,11 @@ export function ScriptReviewWorkspace() {
     nextStep: 2 | 3
   ) {
     setDraftSet(recoveredDraftSet)
+    const lockedTemplateId =
+      recoveredDraftSet.draft_settings.production_template_id
+    if (typeof lockedTemplateId === "string" && lockedTemplateId) {
+      setProductionTemplateId(lockedTemplateId)
+    }
     setSubmittedBatch(null)
     setBatchPollingError(null)
     setError(null)
@@ -912,10 +908,48 @@ export function ScriptReviewWorkspace() {
               ) : null}
 
               <WorkspacePanel
-                description="默认只需填写本批选题并确认语言；模型和 Prompt 沿用当前项目配置。"
+                description="先选定一份配方，再填写本批选题与语言；模型和 Prompt 默认沿用该配方。"
                 title="选择内容范围"
               >
                 <FieldGroup>
+                  <Field>
+                    <FieldLabel>生产配方</FieldLabel>
+                    <Select
+                      onValueChange={(templateId) => {
+                        const selected = productionTemplates.find(
+                          (candidate) => candidate.id === templateId
+                        )
+                        if (!selected) return
+                        setProductionTemplateId(selected.id)
+                        setScriptTemplateName(
+                          selected.drafting.script_template_name
+                        )
+                        setSplitTemplateName(
+                          selected.drafting.split_template_name
+                        )
+                        setScriptModel(selected.drafting.script_model)
+                        setSplitModel(selected.drafting.split_model)
+                        setLanguageScriptModels({
+                          ...selected.drafting.language_script_models,
+                        })
+                      }}
+                      value={productionTemplateId}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择负责写稿与成片的配方" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {productionTemplates.map((candidate) => (
+                          <SelectItem key={candidate.id} value={candidate.id}>
+                            {candidate.display_name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FieldDescription>
+                      本批会锁定这份配方；写稿、分镜和最终生产使用同一个配置来源。
+                    </FieldDescription>
+                  </Field>
                   <Field>
                     <FieldLabel htmlFor="script-review-topics">选题</FieldLabel>
                     <Textarea
@@ -977,19 +1011,19 @@ export function ScriptReviewWorkspace() {
                   </Field>
 
                   <AdvancedGroup
-                    description="沿用项目默认即可，只有本批需要覆盖时再修改"
+                    description="沿用配方默认即可，只有本批需要覆盖时再修改"
                     id="script-review-drafting-options"
                     title="起草模型与 Prompt"
                   >
-                    {sourceProfile ? (
+                    {selectedProductionTemplate ? (
                       <p className="text-sm leading-6 text-muted-foreground">
-                        默认值来自项目
+                        默认值来自配方
                         <SettingsTextLink
-                          to={settingsLink({ kind: "projects" })}
+                          to={`/create/recipes/${selectedProductionTemplate.id}`}
                         >
-                          「{project?.name ?? "当前项目"}」
+                          「{selectedProductionTemplate.display_name}」
                         </SettingsTextLink>
-                        的起草配置
+                        的写稿设置
                         {defaultsModified ? "，本批已有覆盖" : "。"}
                       </p>
                     ) : null}
@@ -1021,7 +1055,7 @@ export function ScriptReviewWorkspace() {
                           onChange={(event) =>
                             setScriptModel(event.target.value)
                           }
-                          placeholder="留空使用项目默认模型"
+                          placeholder="留空使用配方默认模型"
                           value={scriptModel}
                         />
                       </Field>
@@ -1048,7 +1082,7 @@ export function ScriptReviewWorkspace() {
                           onChange={(event) =>
                             setSplitModel(event.target.value)
                           }
-                          placeholder="留空使用项目默认模型"
+                          placeholder="留空使用配方默认模型"
                           value={splitModel}
                         />
                       </Field>
@@ -1229,7 +1263,7 @@ export function ScriptReviewWorkspace() {
           ) : (
             <>
               <WorkspacePanel
-                description="选择生产模板并核对本批参数；提交后会创建真实 generation batch。"
+                description="核对第一步已锁定的配方和本批参数；提交后会创建真实生产批次。"
                 title="确认生产设置"
               >
                 <div className="flex flex-col gap-4">
@@ -1282,6 +1316,7 @@ export function ScriptReviewWorkspace() {
                     overrides={productionOverrides}
                     projectId={projectId ?? undefined}
                     requiredInput="script"
+                    templateSelectionDisabled
                     templateId={productionTemplateId}
                   />
 

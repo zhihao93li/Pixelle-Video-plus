@@ -17,10 +17,7 @@ import { Fact, InlineError, TechDetails } from "@/components/shared/feedback"
 import { FrameTemplatePicker } from "@/components/shared/FrameTemplatePicker"
 import { RecipeSelect } from "@/components/shared/RecipeSelect"
 import { SourceChip } from "@/components/shared/SourceChip"
-import {
-  isNonVideoPipeline,
-  templateArtifactType,
-} from "@/lib/artifactKind"
+import { isNonVideoPipeline, templateArtifactType } from "@/lib/artifactKind"
 import { useCurrentProject } from "@/lib/currentProject"
 import { useExpertMode } from "@/lib/expertMode"
 import { readableError } from "@/lib/format"
@@ -97,6 +94,7 @@ export function ProductionSubmitPanel({
   onOverridesChange,
   lockedSummary,
   projectId,
+  templateSelectionDisabled = false,
 }: {
   /** 该流程的内容输入类型，用于过滤兼容模板 */
   requiredInput: "script" | "topic"
@@ -108,11 +106,15 @@ export function ProductionSubmitPanel({
   lockedSummary?: string
   /** 当前项目：默认模板 = 项目默认 > 全局 */
   projectId?: string
+  /** 审核稿已由配方起草后，提交步骤必须锁定同一配方。 */
+  templateSelectionDisabled?: boolean
 }) {
   const expertMode = useExpertMode()
   const { project } = useCurrentProject()
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
-  const [defaultTemplateId, setDefaultTemplateId] = useState<string | null>(null)
+  const [defaultTemplateId, setDefaultTemplateId] = useState<string | null>(
+    null
+  )
   const [loadError, setLoadError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [frameTemplates, setFrameTemplates] = useState<ResourceTemplate[]>([])
@@ -120,8 +122,12 @@ export function ProductionSubmitPanel({
   const [previewText, setPreviewText] = useState(
     "这是一段用于预览画面与声音的示例文案。"
   )
-  const [framePreview, setFramePreview] = useState<FramePreviewResponse | null>(null)
-  const [framePreviewError, setFramePreviewError] = useState<string | null>(null)
+  const [framePreview, setFramePreview] = useState<FramePreviewResponse | null>(
+    null
+  )
+  const [framePreviewError, setFramePreviewError] = useState<string | null>(
+    null
+  )
   const [isPreviewingFrame, setIsPreviewingFrame] = useState(false)
   const [ttsPreview, setTtsPreview] = useState<TtsPreviewResponse | null>(null)
   const [ttsPreviewError, setTtsPreviewError] = useState<string | null>(null)
@@ -150,7 +156,9 @@ export function ProductionSubmitPanel({
   const templateSource: { source: "project" | "builtin"; to?: string } | null =
     projectDefaultTemplate && templateId === projectDefaultTemplate
       ? { source: "project", to: settingsLink({ kind: "projects" }) }
-      : !projectDefaultTemplate && templateId && templateId === defaultTemplateId
+      : !projectDefaultTemplate &&
+          templateId &&
+          templateId === defaultTemplateId
         ? { source: "builtin" }
         : null
 
@@ -274,9 +282,7 @@ export function ProductionSubmitPanel({
     setTtsPreviewError(null)
     try {
       const mode = String(effectiveParams.tts_inference_mode ?? "local") as
-        | "local"
-        | "comfyui"
-        | "fish"
+        "local" | "comfyui" | "fish"
       const voice = String(effectiveParams.tts_voice ?? "").trim()
       const response = await synthesizeTtsPreview({
         text: previewText.trim() || "预览示例文案",
@@ -328,10 +334,14 @@ export function ProductionSubmitPanel({
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               生产模板
               {templateSource && (
-                <SourceChip source={templateSource.source} to={templateSource.to} />
+                <SourceChip
+                  source={templateSource.source}
+                  to={templateSource.to}
+                />
               )}
             </span>
             <RecipeSelect
+              disabled={templateSelectionDisabled}
               onChange={(template) => {
                 setLoadError(null)
                 onTemplateChange(template.id)
@@ -362,7 +372,9 @@ export function ProductionSubmitPanel({
                     {chip}
                   </Badge>
                 ))}
-                <Badge variant="outline">预计 {selected.estimated_turnaround}</Badge>
+                <Badge variant="outline">
+                  预计 {selected.estimated_turnaround}
+                </Badge>
               </div>
               {lockedSummary && (
                 <p className="mt-2 text-xs text-muted-foreground">
@@ -394,7 +406,10 @@ export function ProductionSubmitPanel({
                   variant="outline"
                 >
                   {isPreviewingFrame ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
                   ) : (
                     <ImageIcon data-icon="inline-start" />
                   )}
@@ -408,7 +423,10 @@ export function ProductionSubmitPanel({
                   variant="outline"
                 >
                   {isPreviewingTts ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
                   ) : (
                     <Volume2 data-icon="inline-start" />
                   )}
@@ -425,7 +443,9 @@ export function ProductionSubmitPanel({
                     <img
                       alt="画面模板预览"
                       className="aspect-[9/16] max-h-[360px] rounded-lg border bg-background object-contain"
-                      src={fileUrlFromPath(framePreview.frame_path) ?? undefined}
+                      src={
+                        fileUrlFromPath(framePreview.frame_path) ?? undefined
+                      }
                     />
                   ) : (
                     <InlineError
@@ -440,7 +460,9 @@ export function ProductionSubmitPanel({
                     />
                   </div>
                   <TechDetails
-                    items={[{ label: "帧图路径", value: framePreview.frame_path }]}
+                    items={[
+                      { label: "帧图路径", value: framePreview.frame_path },
+                    ]}
                   />
                 </div>
               )}
@@ -463,7 +485,9 @@ export function ProductionSubmitPanel({
                     />
                   )}
                   <TechDetails
-                    items={[{ label: "音频路径", value: ttsPreview.audio_path }]}
+                    items={[
+                      { label: "音频路径", value: ttsPreview.audio_path },
+                    ]}
                   />
                 </div>
               )}
@@ -526,7 +550,9 @@ export function ProductionSubmitPanel({
                 </label>
 
                 <label className="flex flex-col gap-1.5 text-sm">
-                  <span className="text-xs text-muted-foreground">TTS 模式</span>
+                  <span className="text-xs text-muted-foreground">
+                    TTS 模式
+                  </span>
                   <Select
                     onValueChange={(value) =>
                       patchOverride(
@@ -534,7 +560,9 @@ export function ProductionSubmitPanel({
                         value === "__default__" ? null : value
                       )
                     }
-                    value={String(overrides.tts_inference_mode ?? "__default__")}
+                    value={String(
+                      overrides.tts_inference_mode ?? "__default__"
+                    )}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue />
@@ -554,7 +582,10 @@ export function ProductionSubmitPanel({
                   </span>
                   <Input
                     onChange={(event) =>
-                      patchOverride("tts_voice", event.target.value.trim() || null)
+                      patchOverride(
+                        "tts_voice",
+                        event.target.value.trim() || null
+                      )
                     }
                     placeholder="voice 或 reference_id"
                     value={String(overrides.tts_voice ?? "")}
@@ -608,7 +639,9 @@ export function ProductionSubmitPanel({
               selected.allowed_user_params.includes("llm_model")) && (
               <AdvancedGroup
                 description={
-                  overrideCount > 0 ? `已覆盖 ${overrideCount} 项` : "默认不覆盖"
+                  overrideCount > 0
+                    ? `已覆盖 ${overrideCount} 项`
+                    : "默认不覆盖"
                 }
                 id="production-overrides"
                 title="本次覆盖（专家）"

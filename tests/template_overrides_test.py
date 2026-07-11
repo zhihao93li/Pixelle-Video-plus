@@ -6,8 +6,10 @@ from pixelle_video.generation import build_default_production_template_registry,
 from pixelle_video.generation.template_overrides import (
     TemplateOverrideError,
     load_all_enabled,
+    load_drafting,
     load_enabled,
     load_overrides,
+    save_drafting,
     save_enabled,
     save_overrides,
     validate_overrides,
@@ -239,3 +241,28 @@ def test_disabled_override_disables_builtin_template(isolated_overrides):
     save_enabled(TEMPLATE_ID, False)
     registry = build_default_production_template_registry()
     assert registry.get(TEMPLATE_ID).enabled is False
+
+
+def test_drafting_config_is_recipe_owned_and_preserves_other_overrides(isolated_overrides):
+    save_overrides(TEMPLATE_ID, {"tts_speed": 1.2})
+    save_drafting(
+        TEMPLATE_ID,
+        {
+            "script_template_name": "Short Oral Script",
+            "split_template_name": "Copy-Safe Scene Split",
+            "script_model": "writer-model",
+            "split_model": "splitter-model",
+            "language_script_models": {"English": "writer-en"},
+        },
+    )
+
+    registry = build_default_production_template_registry()
+    drafting = registry.get(TEMPLATE_ID).drafting
+    assert drafting.script_model == "writer-model"
+    assert drafting.language_script_models == {"English": "writer-en"}
+    assert load_overrides(TEMPLATE_ID) == {"tts_speed": 1.2}
+    assert load_drafting(TEMPLATE_ID)["split_model"] == "splitter-model"
+
+    save_drafting(TEMPLATE_ID, None)
+    assert load_drafting(TEMPLATE_ID) is None
+    assert load_overrides(TEMPLATE_ID) == {"tts_speed": 1.2}

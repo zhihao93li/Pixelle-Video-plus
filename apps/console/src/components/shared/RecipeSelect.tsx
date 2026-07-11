@@ -19,17 +19,20 @@ export function RecipeSelect({
   onChange,
   triggerClassName,
   placeholder = "选择生产配方",
+  disabled = false,
 }: {
   templates: ProductionTemplate[]
   value: string
   onChange: (template: ProductionTemplate) => void
   triggerClassName?: string
   placeholder?: string
+  disabled?: boolean
 }) {
   const selected = templates.find((template) => template.id === value)
 
   return (
     <Select
+      disabled={disabled}
       onValueChange={(id) => {
         const next = templates.find((template) => template.id === id)
         if (next) {

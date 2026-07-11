@@ -4,7 +4,6 @@ import pytest
 from fastapi import HTTPException
 
 import api.routers.generation as generation_router
-import pixelle_video.content.drafting_profiles as drafting_profiles
 import pixelle_video.content.projects as projects
 
 # registry 内置默认（PetWoods×小红书）→ 标准骨架
@@ -14,11 +13,6 @@ BUILTIN_DEFAULT = "pipeline_standard_base_v1"
 @pytest.fixture(autouse=True)
 def isolated_projects(tmp_path, monkeypatch):
     monkeypatch.setattr(projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts)))
-    monkeypatch.setattr(
-        drafting_profiles,
-        "_profiles_path",
-        lambda: str(tmp_path / "drafting-profiles.json"),
-    )
     yield
 
 

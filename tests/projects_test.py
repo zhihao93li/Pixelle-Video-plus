@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-import pixelle_video.content.drafting_profiles as drafting_profiles
 import pixelle_video.content.projects as projects
 import pixelle_video.content.store as content_store
 from pixelle_video.content.models import new_content_item
@@ -13,11 +12,6 @@ def isolated_storage(tmp_path, monkeypatch):
     # projects 模块内所有落盘都走 tmp（含 ops.db 探测 → 不存在 → 走回退分支）
     monkeypatch.setattr(
         projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts))
-    )
-    monkeypatch.setattr(
-        drafting_profiles,
-        "_profiles_path",
-        lambda: str(tmp_path / "drafting-profiles.json"),
     )
     monkeypatch.setattr(content_store, "CONTENT_ITEMS_DIR", tmp_path / "content-items")
     yield
@@ -128,63 +122,3 @@ def test_migration_leaves_valid_project_ids_untouched():
     # 再次迁移是 no-op，不应改写已合法的 project
     projects.ensure_migrated()
     assert content_store.load_item(item.item_id).project == default_id
-
-
-# ---------------------------------------------------------------------------
-# 起草配置随项目自动创建（1:1，克隆不共享）
-# ---------------------------------------------------------------------------
-
-
-def test_create_project_provisions_profile():
-    project = projects.create_project(name="A")
-    profile = drafting_profiles.get_profile_by_project(project.project_id)
-    assert profile is not None
-    assert profile.script_template_name == drafting_profiles.SAFE_DEFAULT_SCRIPT_TEMPLATE
-
-
-def test_copy_from_clones_profile_not_shared():
-    source = projects.create_project(name="源")
-    source_profile = drafting_profiles.get_profile_by_project(source.project_id)
-    # 改源项目的配置内容
-    drafting_profiles.update_profile(
-        source_profile.profile_id, {"script_model": "src-model"}
-    )
-
-    clone = projects.create_project(name="克隆", copy_from_project_id=source.project_id)
-    clone_profile = drafting_profiles.get_profile_by_project(clone.project_id)
-
-    assert clone_profile is not None
-    assert clone_profile.profile_id != source_profile.profile_id  # 不共享引用
-    assert clone_profile.script_model == "src-model"  # 内容已克隆
-
-    # 改克隆项目的配置不影响源项目
-    drafting_profiles.update_profile(
-        clone_profile.profile_id, {"script_model": "clone-model"}
-    )
-    assert (
-        drafting_profiles.get_profile_by_project(source.project_id).script_model
-        == "src-model"
-    )
-
-
-def test_migration_provisions_profiles_for_preexisting_projects():
-    import json
-
-    # 模拟"旧多项目"状态：项目已存在但配置还没有 project_id（升级前数据）
-    projects.create_project(name="老项目")
-    profiles_path = Path(drafting_profiles._profiles_path())
-    raw = json.loads(profiles_path.read_text("utf-8"))
-    for payload in raw["profiles"].values():
-        payload["project_id"] = ""
-    profiles_path.write_text(json.dumps(raw), encoding="utf-8")
-
-    _, projs = projects.list_projects()
-    projects.ensure_migrated()  # 应为每个项目补齐配置
-    for project in projs:
-        assert drafting_profiles.get_profile_by_project(project.project_id) is not None
-
-    # 幂等：再次迁移不新增配置
-    _, before = drafting_profiles.list_profiles()
-    projects.ensure_migrated()
-    _, after = drafting_profiles.list_profiles()
-    assert len(after) == len(before)

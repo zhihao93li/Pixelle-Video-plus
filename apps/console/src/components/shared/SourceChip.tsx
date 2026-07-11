@@ -6,10 +6,11 @@ import { cn } from "@/lib/utils"
  * 判定规则由调用方给出（当前值 === 该层默认值 → 显示该层；用户改过 → 本次覆盖，不带链接）。
  */
 
-export type SourceKind = "project" | "builtin" | "override"
+export type SourceKind = "project" | "recipe" | "builtin" | "override"
 
 const LABELS: Record<SourceKind, string> = {
   project: "项目默认",
+  recipe: "配方默认",
   builtin: "内置默认",
   override: "本次覆盖",
 }
@@ -28,7 +29,10 @@ export function SourceChip({
   if (to) {
     return (
       <button
-        className={cn(base, "transition-colors hover:text-foreground hover:underline")}
+        className={cn(
+          base,
+          "transition-colors hover:text-foreground hover:underline"
+        )}
         onClick={() => navigate(to)}
         type="button"
       >

@@ -19,6 +19,7 @@ import {
   getPublishRecord,
   getSettingsConfig,
   getSettingsDiagnostics,
+  getTemplateDraftingConfig,
   listResourceBgm,
   listResourceMediaWorkflows,
   listResourceTemplates,
@@ -33,6 +34,7 @@ import {
   publishTask,
   renderFramePreview,
   resetSettingsConfig,
+  resetTemplateDraftingConfig,
   retryGenerationBatchItem,
   setTemplateEnabled,
   submitScriptReviewDraftSetTasks,
@@ -43,6 +45,7 @@ import {
   uploadResourceBgm,
   updateScriptReviewDraftSet,
   updateSettingsConfig,
+  updateTemplateDraftingConfig,
 } from "../src/lib/generationApi.ts"
 
 type FetchCall = {
@@ -462,6 +465,34 @@ test("generation task cancel API uses task-scoped delete route", async () => {
   assert.equal(calls[0].init?.method, "DELETE")
 })
 
+test("recipe drafting config APIs use the recipe-scoped contract", async () => {
+  const calls = installFetchMock({
+    template_id: "recipe-1",
+    drafting: {},
+    is_overridden: true,
+  })
+  const drafting = {
+    script_template_name: "Short Oral Script",
+    split_template_name: "Copy-Safe Scene Split",
+    script_model: "writer",
+    split_model: "splitter",
+    language_script_models: { English: "writer-en" },
+  }
+
+  await getTemplateDraftingConfig("recipe-1")
+  await updateTemplateDraftingConfig("recipe-1", drafting)
+  await resetTemplateDraftingConfig("recipe-1")
+
+  const url =
+    "http://127.0.0.1:8000/api/generation/templates/recipe-1/drafting-config"
+  assert.equal(calls[0].url, url)
+  assert.equal(calls[1].url, url)
+  assert.equal(calls[1].init?.method, "PUT")
+  assert.equal(calls[1].init?.body, JSON.stringify({ drafting }))
+  assert.equal(calls[2].url, url)
+  assert.equal(calls[2].init?.method, "DELETE")
+})
+
 test("template enabled API PUTs the toggle to the enabled route", async () => {
   const calls = installFetchMock({
     id: "pipeline_asset_based_base_v1",
@@ -590,7 +621,7 @@ test("script review APIs persist drafts and submit reviewed tasks", async () => 
       topics: ["Cat hydration"],
       languages: ["English"],
       project_id: null,
-      drafting_profile_id: null,
+      template_id: null,
       script_template_name: "Short Oral Script",
       split_template_name: "Copy-Safe Scene Split",
       script_model: "model-a",

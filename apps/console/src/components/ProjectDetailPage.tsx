@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { ArrowLeft, Eye, Loader2, SlidersHorizontal, Star } from "lucide-react"
+import { ArrowLeft, Loader2, SlidersHorizontal, Star } from "lucide-react"
 
 import { UnsavedChangesGuard } from "@/components/settings/UnsavedChangesGuard"
 import { AsyncState } from "@/components/shared/AsyncState"
@@ -13,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +27,6 @@ import {
 import { useToast } from "@/components/ui/toast"
 import { InlineError } from "@/components/shared/feedback"
 import { PageFrame } from "@/components/shared/PageFrame"
-import { PromptPeekSheet } from "@/components/shared/PromptPeekSheet"
 import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
 import { refreshProjects } from "@/lib/currentProject"
 import { formatDate, readableError } from "@/lib/format"
@@ -38,24 +36,15 @@ import { settingsLink } from "@/lib/settingsLinks"
 import { cn } from "@/lib/utils"
 import {
   archiveProject,
-  createPromptTemplate,
-  getSettingsConfig,
   listContentItems,
-  listDraftingProfiles,
   listProjects,
   listPublishPlatforms,
-  listScriptReviewTemplates,
   listTemplates,
-  loadLlmModels,
   setDefaultProject,
-  updateDraftingProfile,
-  updatePromptTemplate,
   updateProject,
-  type DraftingProfile,
   type Project,
   type ProductionTemplate,
   type PublishPlatform,
-  type ScriptReviewPromptTemplate,
 } from "@/lib/generationApi"
 
 const NONE = "__none__"
@@ -63,131 +52,58 @@ const NONE = "__none__"
 /**
  * 项目详情页（/settings/projects/:id）：项目编辑 Sheet 的继任者
  * （DESIGN.md §2.5：>2 分区 + 长文本编辑必须页面；消灭嵌套 Prompt Sheet）。
- * 分区块保存：基本信息 / 起草配置（Prompt 正文页内展开编辑，copy-on-write）
- * / 语言与音色 / 生产与发布默认各自保存。
+ * 分区块保存：基本信息 / 语言与音色 / 生产与发布默认各自保存。
  */
-
-type PromptKind = "script" | "split"
 
 export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const toast = useToast()
   const path = usePath()
   const [project, setProject] = useState<Project | null>(null)
   const [defaultId, setDefaultId] = useState<string | null>(null)
-  const [profile, setProfile] = useState<DraftingProfile | null>(null)
-  const [profiles, setProfiles] = useState<DraftingProfile[]>([])
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
   const [platforms, setPlatforms] = useState<PublishPlatform[]>([])
-  const [scriptTemplates, setScriptTemplates] = useState<
-    ScriptReviewPromptTemplate[]
-  >([])
-  const [splitTemplates, setSplitTemplates] = useState<
-    ScriptReviewPromptTemplate[]
-  >([])
-  const [llmModels, setLlmModels] = useState<string[]>([])
   const [activeCount, setActiveCount] = useState<number | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [auxiliaryErrors, setAuxiliaryErrors] = useState<
-    Partial<Record<"content" | "models", string>>
+    Partial<Record<"content", string>>
   >({})
   const [reloadToken, setReloadToken] = useState(0)
 
   // 分区块编辑态
   const [basic, setBasic] = useState({ name: "", description: "" })
-  const [drafting, setDrafting] = useState({
-    scriptTemplateName: "",
-    splitTemplateName: "",
-    scriptModel: "",
-    splitModel: "",
-  })
   const [languages, setLanguages] = useState<string[]>([])
   const [voices, setVoices] = useState<Record<string, string>>({})
   const [productionTemplateId, setProductionTemplateId] = useState(NONE)
   const [publishPlatformIds, setPublishPlatformIds] = useState<string[]>([])
   const [savingSection, setSavingSection] = useState<string | null>(null)
   const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({})
-  const [peek, setPeek] = useState<{ kind: PromptKind; name: string } | null>(
-    null
-  )
-
-  // 页内 Prompt 正文编辑
-  const [promptEdit, setPromptEdit] = useState<{
-    kind: PromptKind
-    name: string
-    content: string
-    originalContent: string
-    source: string | null
-  } | null>(null)
-  const [promptBusy, setPromptBusy] = useState(false)
-  const [promptError, setPromptError] = useState<string | null>(null)
 
   const refresh = useCallback(() => setReloadToken((token) => token + 1), [])
 
   useEffect(() => {
     let cancelled = false
-    void Promise.all([
-      listProjects(),
-      listDraftingProfiles(),
-      listTemplates(),
-      listPublishPlatforms(),
-      listScriptReviewTemplates(),
-    ])
-      .then(
-        ([
-          projectResponse,
-          profileResponse,
-          templateResponse,
-          platformResponse,
-          reviewResponse,
-        ]) => {
-          if (cancelled) {
-            return
-          }
-          const found =
-            projectResponse.projects.find(
-              (item) => item.project_id === projectId
-            ) ?? null
-          const foundProfile =
-            profileResponse.profiles.find(
-              (item) => item.project_id === projectId
-            ) ?? null
-          setProject(found)
-          setDefaultId(projectResponse.default_project_id)
-          setProfiles(profileResponse.profiles)
-          setProfile(foundProfile)
-          setTemplates(templateResponse.templates)
-          setPlatforms(platformResponse.platforms)
-          setScriptTemplates(reviewResponse.script_templates)
-          setSplitTemplates(reviewResponse.split_templates)
-          setLoadError(found ? null : "项目不存在，可能已被归档或删除。")
-          setPromptEdit(null)
-          setPeek(null)
-          if (found) {
-            setBasic({ name: found.name, description: found.description })
-            setLanguages(effectiveLanguages(found))
-            setVoices({ ...found.tts_voice_by_language })
-            setProductionTemplateId(
-              found.default_production_template_id || NONE
-            )
-            setPublishPlatformIds([...found.publish_platforms])
-          }
-          setDrafting(
-            foundProfile
-              ? {
-                  scriptTemplateName: foundProfile.script_template_name,
-                  splitTemplateName: foundProfile.split_template_name,
-                  scriptModel: foundProfile.script_model,
-                  splitModel: foundProfile.split_model,
-                }
-              : {
-                  scriptTemplateName: "",
-                  splitTemplateName: "",
-                  scriptModel: "",
-                  splitModel: "",
-                }
-          )
+    void Promise.all([listProjects(), listTemplates(), listPublishPlatforms()])
+      .then(([projectResponse, templateResponse, platformResponse]) => {
+        if (cancelled) {
+          return
         }
-      )
+        const found =
+          projectResponse.projects.find(
+            (item) => item.project_id === projectId
+          ) ?? null
+        setProject(found)
+        setDefaultId(projectResponse.default_project_id)
+        setTemplates(templateResponse.templates)
+        setPlatforms(platformResponse.platforms)
+        setLoadError(found ? null : "项目不存在，可能已被归档或删除。")
+        if (found) {
+          setBasic({ name: found.name, description: found.description })
+          setLanguages(effectiveLanguages(found))
+          setVoices({ ...found.tts_voice_by_language })
+          setProductionTemplateId(found.default_production_template_id || NONE)
+          setPublishPlatformIds([...found.publish_platforms])
+        }
+      })
       .catch((error: unknown) => {
         if (!cancelled) {
           setLoadError(readableError(error))
@@ -223,40 +139,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     }
   }, [projectId, reloadToken])
 
-  // 模型目录失败时保留文本输入，同时显式标记辅助数据未同步。
-  useEffect(() => {
-    let cancelled = false
-    void getSettingsConfig()
-      .then((response) => {
-        const { api_key, base_url } = response.config.llm
-        if (!api_key || !base_url) {
-          return null
-        }
-        return loadLlmModels(api_key, base_url)
-      })
-      .then((models) => {
-        if (models && !cancelled) {
-          setLlmModels(models.models)
-          setAuxiliaryErrors((current) => {
-            const next = { ...current }
-            delete next.models
-            return next
-          })
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setAuxiliaryErrors((current) => ({
-            ...current,
-            models: readableError(error),
-          }))
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [reloadToken])
-
   async function saveSection(section: string, action: () => Promise<void>) {
     setSavingSection(section)
     setSectionErrors((current) => {
@@ -277,18 +159,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             ? {
                 ...current,
                 ...savedBasic,
-              }
-            : current
-        )
-      } else if (section === "drafting") {
-        setProfile((current) =>
-          current
-            ? {
-                ...current,
-                script_template_name: drafting.scriptTemplateName,
-                split_template_name: drafting.splitTemplateName,
-                script_model: drafting.scriptModel,
-                split_model: drafting.splitModel,
               }
             : current
         )
@@ -331,201 +201,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     }
   }
 
-  function openPromptEditor(kind: PromptKind) {
-    const name =
-      kind === "script"
-        ? drafting.scriptTemplateName
-        : drafting.splitTemplateName
-    const pool = kind === "script" ? scriptTemplates : splitTemplates
-    const template = pool.find((item) => item.name === name)
-    setPromptError(null)
-    setPromptEdit({
-      kind,
-      name,
-      content: template?.content ?? "",
-      originalContent: template?.content ?? "",
-      source: template?.source ?? null,
-    })
-  }
-
-  const promptIsBuiltin = promptEdit?.source === "builtin"
-  const promptUsedByOthers =
-    promptEdit != null &&
-    profiles.some(
-      (item) =>
-        item.project_id !== projectId &&
-        (item.script_template_name === promptEdit.name ||
-          item.split_template_name === promptEdit.name)
-    )
-  const promptMustCopy = promptIsBuiltin || promptUsedByOthers
-
-  async function savePrompt() {
-    if (!promptEdit || !profile) {
-      return
-    }
-    setPromptBusy(true)
-    setPromptError(null)
-    try {
-      if (promptMustCopy) {
-        const created = await createPromptTemplate({
-          kind: promptEdit.kind,
-          name: `${basic.name || project?.name} · ${promptEdit.name}`,
-          content: promptEdit.content,
-        })
-        // 副本立刻接管本项目引用，避免悬空
-        const patch =
-          promptEdit.kind === "script"
-            ? { script_template_name: created.name }
-            : { split_template_name: created.name }
-        await updateDraftingProfile(profile.profile_id, patch)
-        setDrafting((current) => ({
-          ...current,
-          [promptEdit.kind === "script"
-            ? "scriptTemplateName"
-            : "splitTemplateName"]: created.name,
-        }))
-        setProfile((current) =>
-          current
-            ? {
-                ...current,
-                [promptEdit.kind === "script"
-                  ? "script_template_name"
-                  : "split_template_name"]: created.name,
-              }
-            : current
-        )
-        const createdTemplate: ScriptReviewPromptTemplate = {
-          name: created.name,
-          content: promptEdit.content,
-          source: "custom",
-        }
-        const updatePool = (current: ScriptReviewPromptTemplate[]) => [
-          ...current,
-          createdTemplate,
-        ]
-        if (promptEdit.kind === "script") {
-          setScriptTemplates(updatePool)
-        } else {
-          setSplitTemplates(updatePool)
-        }
-        toast({
-          title: "已为本项目创建副本，不影响其他项目",
-          variant: "success",
-        })
-      } else {
-        await updatePromptTemplate({
-          kind: promptEdit.kind,
-          name: promptEdit.name,
-          content: promptEdit.content,
-        })
-        const updatePool = (current: ScriptReviewPromptTemplate[]) =>
-          current.map((item) =>
-            item.name === promptEdit.name
-              ? { ...item, content: promptEdit.content }
-              : item
-          )
-        if (promptEdit.kind === "script") {
-          setScriptTemplates(updatePool)
-        } else {
-          setSplitTemplates(updatePool)
-        }
-        toast({ title: "提示词已保存", variant: "success" })
-      }
-      setPromptEdit(null)
-    } catch (error) {
-      setPromptError(readableError(error))
-    } finally {
-      setPromptBusy(false)
-    }
-  }
-
-  function renderModelField(value: string, onChange: (value: string) => void) {
-    if (llmModels.length === 0) {
-      return (
-        <Input
-          onChange={(event) => onChange(event.target.value)}
-          placeholder="留空用设置页默认模型"
-          value={value}
-        />
-      )
-    }
-    const options =
-      value && !llmModels.includes(value) ? [value, ...llmModels] : llmModels
-    return (
-      <Select
-        onValueChange={(next) => onChange(next === NONE ? "" : next)}
-        value={value || NONE}
-      >
-        <SelectTrigger className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={NONE}>默认模型（留空）</SelectItem>
-          {options.map((model) => (
-            <SelectItem key={model} value={model}>
-              {model}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    )
-  }
-
-  function renderPromptRow(kind: PromptKind) {
-    const isScript = kind === "script"
-    const value = isScript
-      ? drafting.scriptTemplateName
-      : drafting.splitTemplateName
-    const pool = isScript ? scriptTemplates : splitTemplates
-    return (
-      <div className="flex flex-col gap-1.5">
-        <span className="text-xs text-muted-foreground">
-          {isScript ? "口播提示词" : "分镜提示词"}
-        </span>
-        <div className="flex items-center gap-1.5">
-          <Select
-            onValueChange={(next) =>
-              setDrafting((current) => ({
-                ...current,
-                [isScript ? "scriptTemplateName" : "splitTemplateName"]: next,
-              }))
-            }
-            value={value}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {pool.map((template) => (
-                <SelectItem key={template.name} value={template.name}>
-                  {template.name}
-                  {template.source === "builtin" ? "（内置）" : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button
-            aria-label="查看提示词"
-            onClick={() => setPeek({ kind, name: value })}
-            size="icon-sm"
-            type="button"
-            variant="ghost"
-          >
-            <Eye />
-          </Button>
-          <Button
-            onClick={() => openPromptEditor(kind)}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            编辑正文
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
   if (loadError && !project) {
     return (
       <PageFrame>
@@ -549,7 +224,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       <PageFrame>
         <BackRow />
         <AsyncState
-          description="正在同步项目、起草配置与发布平台。"
+          description="正在同步项目、生产配方与发布平台。"
           state="loading"
           title="正在读取项目"
         />
@@ -560,12 +235,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
   const isDefault = project.project_id === defaultId
   const basicDirty =
     basic.name !== project.name || basic.description !== project.description
-  const draftingDirty = profile
-    ? drafting.scriptTemplateName !== profile.script_template_name ||
-      drafting.splitTemplateName !== profile.split_template_name ||
-      drafting.scriptModel !== profile.script_model ||
-      drafting.splitModel !== profile.split_model
-    : false
   const languagesDirty =
     JSON.stringify(languages) !== JSON.stringify(effectiveLanguages(project)) ||
     JSON.stringify(normalizedVoices(languages, voices)) !==
@@ -579,18 +248,9 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
     productionTemplateId !== (project.default_production_template_id || NONE) ||
     JSON.stringify(publishPlatformIds) !==
       JSON.stringify(project.publish_platforms)
-  const promptDirty =
-    promptEdit != null && promptEdit.content !== promptEdit.originalContent
-  const hasDirty =
-    basicDirty ||
-    draftingDirty ||
-    languagesDirty ||
-    defaultsDirty ||
-    promptDirty
+  const hasDirty = basicDirty || languagesDirty || defaultsDirty
   const selectedTemplate =
     templates.find((template) => template.id === productionTemplateId) ?? null
-  const missingTopic =
-    promptEdit != null && !promptEdit.content.includes("{topic}")
 
   return (
     <PageFrame>
@@ -634,7 +294,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             </AlertDialog>
           </>
         }
-        description="分区保存项目基本信息、起草方式、语言音色与生产默认。"
+        description="分区保存品牌信息、语言音色与生产发布默认。写稿规则在配方中管理。"
         title={project.name}
       />
       {isDefault && (
@@ -719,135 +379,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                   }
                   value={basic.description}
                 />
-              </label>
-            </div>
-          </section>
-
-          {/* 起草配置 */}
-          <section className="rounded-lg border bg-background p-4">
-            <SectionHeader
-              busy={savingSection === "drafting"}
-              disabled={!profile}
-              dirty={draftingDirty}
-              error={sectionErrors.drafting}
-              onSave={() =>
-                void saveSection("drafting", async () => {
-                  if (!profile) {
-                    throw new Error("起草配置尚未就绪，请刷新重试。")
-                  }
-                  await updateDraftingProfile(profile.profile_id, {
-                    script_template_name: drafting.scriptTemplateName,
-                    split_template_name: drafting.splitTemplateName,
-                    script_model: drafting.scriptModel,
-                    split_model: drafting.splitModel,
-                  })
-                })
-              }
-              title="起草配置"
-            />
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              决定 AI 怎么把选题写成文案。与本项目一对一，改动不影响其他项目。
-            </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {renderPromptRow("script")}
-              {renderPromptRow("split")}
-            </div>
-
-            {promptEdit && (
-              <div className="mt-3 rounded-lg border bg-muted/20 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    正在编辑：{promptEdit.name}
-                    <Badge variant="outline">
-                      {promptIsBuiltin ? "内置" : "自定义"}
-                    </Badge>
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {promptEdit.content.length} 字符
-                  </span>
-                </div>
-                <Textarea
-                  className="mt-2 min-h-60 resize-y font-mono text-xs leading-5"
-                  onChange={(event) =>
-                    setPromptEdit((current) =>
-                      current
-                        ? { ...current, content: event.target.value }
-                        : current
-                    )
-                  }
-                  value={promptEdit.content}
-                />
-                <div className="mt-1.5 flex items-center justify-between text-xs text-muted-foreground">
-                  <span>
-                    占位符{" "}
-                    <code className="rounded bg-muted px-1">{"{topic}"}</code> =
-                    选题，
-                    <code className="rounded bg-muted px-1">
-                      {"{language}"}
-                    </code>{" "}
-                    = 语言
-                  </span>
-                  {missingTopic && (
-                    <span className="text-destructive">
-                      缺少 {"{topic}"} 占位符，选题将无法注入
-                    </span>
-                  )}
-                </div>
-                {promptMustCopy && (
-                  <div className="mt-2 rounded-lg border bg-muted/30 p-2.5 text-xs leading-5 text-muted-foreground">
-                    {promptIsBuiltin
-                      ? "这是内置提示词。保存会为本项目创建可编辑副本，不影响内置模板与其他项目。"
-                      : "这份提示词被其他项目使用中。保存会为本项目创建副本，不影响其他项目。"}
-                  </div>
-                )}
-                {promptError && (
-                  <div className="mt-2">
-                    <InlineError title="保存失败" message={promptError} />
-                  </div>
-                )}
-                <div className="mt-2 flex justify-end gap-2">
-                  <Button
-                    disabled={promptBusy}
-                    onClick={() => setPromptEdit(null)}
-                    size="sm"
-                    variant="ghost"
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    disabled={promptBusy || !promptDirty}
-                    onClick={() => void savePrompt()}
-                    size="sm"
-                  >
-                    {promptBusy && (
-                      <Loader2
-                        className="animate-spin"
-                        data-icon="inline-start"
-                      />
-                    )}
-                    保存正文
-                  </Button>
-                </div>
-                {!promptDirty ? (
-                  <p className="mt-1 text-right text-xs text-muted-foreground">
-                    正文没有未保存更改。
-                  </p>
-                ) : null}
-              </div>
-            )}
-
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="text-xs text-muted-foreground">口播模型</span>
-                {renderModelField(drafting.scriptModel, (value) =>
-                  setDrafting((current) => ({ ...current, scriptModel: value }))
-                )}
-              </label>
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="text-xs text-muted-foreground">分镜模型</span>
-                {renderModelField(drafting.splitModel, (value) =>
-                  setDrafting((current) => ({ ...current, splitModel: value }))
-                )}
               </label>
             </div>
           </section>
@@ -1054,16 +585,6 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
         </aside>
       </div>
 
-      <PromptPeekSheet
-        kind={peek?.kind ?? "script"}
-        name={peek?.name ?? ""}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPeek(null)
-          }
-        }}
-        open={peek != null}
-      />
       <UnsavedChangesGuard currentPath={path} dirty={hasDirty} />
     </PageFrame>
   )

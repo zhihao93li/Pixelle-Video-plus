@@ -123,26 +123,28 @@ def _validate_word_count(value: int) -> None:
         )
 
 
-def _parse_entry(value: Any) -> tuple[dict[str, Any], bool | None]:
-    """把一条模板记录解析成 (参数 overrides, enabled)。
+def _parse_entry(value: Any) -> tuple[dict[str, Any], bool | None, dict[str, Any] | None]:
+    """把一条模板记录解析成 (参数 overrides, enabled, drafting)。
 
     兼容两种格式：
     - 旧扁平格式 ``{param: value, ...}`` → 全部是参数，enabled=None。
     - 新包裹格式 ``{"overrides": {...}, "enabled": bool}`` → 参数与启用开关平级。
     """
     if not isinstance(value, dict):
-        return {}, None
-    if "overrides" in value or "enabled" in value:
+        return {}, None, None
+    if "overrides" in value or "enabled" in value or "drafting" in value:
         raw_overrides = value.get("overrides")
         overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
         enabled = value.get("enabled")
         enabled = enabled if isinstance(enabled, bool) else None
+        raw_drafting = value.get("drafting")
+        drafting = raw_drafting if isinstance(raw_drafting, dict) else None
     else:
-        overrides, enabled = value, None
+        overrides, enabled, drafting = value, None, None
     filtered = {
         key: val for key, val in overrides.items() if key in OVERRIDABLE_PARAMS
     }
-    return filtered, enabled
+    return filtered, enabled, drafting
 
 
 def _load_entries() -> dict[str, dict[str, Any]]:
@@ -160,8 +162,12 @@ def _load_entries() -> dict[str, dict[str, Any]]:
     for template_id, value in data.items():
         if not isinstance(template_id, str):
             continue
-        overrides, enabled = _parse_entry(value)
-        entries[template_id] = {"overrides": overrides, "enabled": enabled}
+        overrides, enabled, drafting = _parse_entry(value)
+        entries[template_id] = {
+            "overrides": overrides,
+            "enabled": enabled,
+            "drafting": drafting,
+        }
     return entries
 
 
@@ -170,13 +176,16 @@ def _write_entries(entries: dict[str, dict[str, Any]]) -> None:
     for template_id, entry in entries.items():
         overrides = entry.get("overrides") or {}
         enabled = entry.get("enabled")
-        if not overrides and enabled is None:
+        drafting = entry.get("drafting")
+        if not overrides and enabled is None and drafting is None:
             continue  # 两者都空 → 删除该条
         record: dict[str, Any] = {}
         if overrides:
             record["overrides"] = overrides
         if enabled is not None:
             record["enabled"] = enabled
+        if drafting is not None:
+            record["drafting"] = drafting
         out[template_id] = record
     path = _overrides_path()
     tmp_path = f"{path}.tmp"
@@ -210,11 +219,25 @@ def load_enabled(template_id: str) -> bool | None:
     return _load_entries().get(template_id, {}).get("enabled")
 
 
+def load_all_drafting() -> dict[str, dict[str, Any]]:
+    return {
+        template_id: entry["drafting"]
+        for template_id, entry in _load_entries().items()
+        if entry.get("drafting") is not None
+    }
+
+
+def load_drafting(template_id: str) -> dict[str, Any] | None:
+    return _load_entries().get(template_id, {}).get("drafting")
+
+
 def save_enabled(template_id: str, enabled: bool | None) -> None:
     """写入模板启用开关；None 清除该开关（回到代码默认）。"""
     with _lock:
         entries = _load_entries()
-        entry = entries.setdefault(template_id, {"overrides": {}, "enabled": None})
+        entry = entries.setdefault(
+            template_id, {"overrides": {}, "enabled": None, "drafting": None}
+        )
         entry["enabled"] = enabled
         _write_entries(entries)
 
@@ -262,7 +285,20 @@ def save_overrides(template_id: str, overrides: dict[str, Any]) -> dict[str, Any
     """Persist param overrides for a template; preserves the enabled flag."""
     with _lock:
         entries = _load_entries()
-        entry = entries.setdefault(template_id, {"overrides": {}, "enabled": None})
+        entry = entries.setdefault(
+            template_id, {"overrides": {}, "enabled": None, "drafting": None}
+        )
         entry["overrides"] = overrides
         _write_entries(entries)
     return overrides
+
+
+def save_drafting(template_id: str, drafting: dict[str, Any] | None) -> None:
+    """Persist a complete recipe drafting spec; None restores the code default."""
+    with _lock:
+        entries = _load_entries()
+        entry = entries.setdefault(
+            template_id, {"overrides": {}, "enabled": None, "drafting": None}
+        )
+        entry["drafting"] = drafting
+        _write_entries(entries)

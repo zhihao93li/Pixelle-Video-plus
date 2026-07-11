@@ -53,12 +53,10 @@ import { cn } from "@/lib/utils"
 import {
   archiveProject,
   createProject,
-  listDraftingProfiles,
   listProjects,
   listTemplates,
   restoreProject,
   setDefaultProject,
-  type DraftingProfile,
   type Project,
   type ProductionTemplate,
 } from "@/lib/generationApi"
@@ -75,7 +73,6 @@ export function ProjectsPanel() {
   const toast = useToast()
   const [projects, setProjects] = useState<Project[]>([])
   const [defaultId, setDefaultId] = useState<string | null>(null)
-  const [profiles, setProfiles] = useState<DraftingProfile[]>([])
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loadState, setLoadState] = useState<LoadState>("loading")
@@ -91,11 +88,10 @@ export function ProjectsPanel() {
 
   const refresh = useCallback(
     () =>
-      Promise.all([listProjects(), listDraftingProfiles(), listTemplates()])
-        .then(([projectResponse, profileResponse, templateResponse]) => {
+      Promise.all([listProjects(), listTemplates()])
+        .then(([projectResponse, templateResponse]) => {
           setProjects(projectResponse.projects)
           setDefaultId(projectResponse.default_project_id)
-          setProfiles(profileResponse.profiles)
           setTemplates(templateResponse.templates)
           setLoadError(null)
           hasDataRef.current = true
@@ -115,10 +111,6 @@ export function ProjectsPanel() {
 
   const templateName = (id: string | null) =>
     templates.find((template) => template.id === id)?.display_name ?? null
-  const profileForProject = (project: Project) =>
-    profiles.find((profile) => profile.project_id === project.project_id) ??
-    null
-
   async function refreshAll() {
     await refresh()
     await refreshProjects()
@@ -139,7 +131,7 @@ export function ProjectsPanel() {
       })
       toast({
         title: "项目已创建",
-        description: "起草配置已就绪，接下来在详情页继续配置。",
+        description: "接下来在详情页补充品牌与生产默认。",
         variant: "success",
       })
       setCreateOpen(false)
@@ -216,7 +208,6 @@ export function ProjectsPanel() {
   function renderCard(project: Project) {
     const isDefault = project.project_id === defaultId
     const isArchived = project.status === "archived"
-    const profile = profileForProject(project)
     return (
       <div
         className={cn(
@@ -236,9 +227,6 @@ export function ProjectsPanel() {
             )}
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            <Badge variant="outline">
-              起草：{profile?.script_template_name ?? "默认"}
-            </Badge>
             <Badge variant="outline">
               配方：
               {templateName(project.default_production_template_id) ??
@@ -330,7 +318,7 @@ export function ProjectsPanel() {
             项目
           </h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-            每个项目代表一个品牌或内容线，管理起草、配方、语言音色与发布平台。
+            每个项目代表一个品牌或内容线，管理默认配方、语言音色与发布平台。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -356,7 +344,7 @@ export function ProjectsPanel() {
       {loadState === "loading" ? (
         <AsyncState
           className="mt-5"
-          description="正在同步项目、起草配置与配方默认值。"
+          description="正在同步项目与配方默认值。"
           state="loading"
           title="正在读取项目"
         />

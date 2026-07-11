@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import pixelle_video.content.drafting_profiles as drafting_profiles
 import pixelle_video.content.projects as projects
 from api.app import app
 from pixelle_video.generation import custom_templates, template_overrides
@@ -25,11 +24,6 @@ RETIRED_DAILY = "petwoods_xhs_daily_v1"
 def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(
         projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts))
-    )
-    monkeypatch.setattr(
-        drafting_profiles,
-        "_profiles_path",
-        lambda: str(tmp_path / "drafting-profiles.json"),
     )
     monkeypatch.setattr(
         custom_templates,

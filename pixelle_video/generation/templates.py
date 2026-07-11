@@ -24,6 +24,22 @@ class ProductionTemplateError(ValueError):
     pass
 
 
+DEFAULT_SCRIPT_TEMPLATE = "Short Oral Script"
+DEFAULT_SPLIT_TEMPLATE = "Copy-Safe Scene Split"
+
+
+class DraftingSpec(BaseModel):
+    """Recipe-owned defaults for topic-to-draft generation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    script_template_name: str = DEFAULT_SCRIPT_TEMPLATE
+    split_template_name: str = DEFAULT_SPLIT_TEMPLATE
+    script_model: str = ""
+    split_model: str = ""
+    language_script_models: dict[str, str] = Field(default_factory=dict)
+
+
 class ProductionTemplate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -44,6 +60,7 @@ class ProductionTemplate(BaseModel):
     quality_tier: str
     pipeline_id: str
     entry: EntryId
+    drafting: DraftingSpec = Field(default_factory=DraftingSpec)
     fixed_params: dict[str, Any] = Field(default_factory=dict)
     required_capabilities: list[str] = Field(default_factory=list)
     user_selectable_runtime: bool = False
@@ -215,8 +232,19 @@ def build_default_production_template_registry() -> ProductionTemplateRegistry:
     registry = _build_builtin_production_template_registry()
     _append_custom_templates(registry)
     _apply_template_overrides(registry)
+    _apply_drafting_overrides(registry)
     _apply_enabled_overrides(registry)
     return registry
+
+
+def _apply_drafting_overrides(registry: ProductionTemplateRegistry) -> None:
+    from pixelle_video.generation.template_overrides import load_all_drafting
+
+    for template_id, drafting in load_all_drafting().items():
+        try:
+            registry.get(template_id).drafting = DraftingSpec.model_validate(drafting)
+        except (ProductionTemplateError, ValueError):
+            continue
 
 
 def _apply_enabled_overrides(registry: ProductionTemplateRegistry) -> None:

@@ -531,15 +531,9 @@ def test_script_review_batch_item_retry_preserves_params(tmp_path):
 def test_script_review_draft_set_endpoint_generates_and_persists_drafts(tmp_path, monkeypatch):
     from pathlib import Path as _Path
 
-    import pixelle_video.content.drafting_profiles as drafting_profiles
     import pixelle_video.content.projects as projects
 
     monkeypatch.setattr(projects, "get_data_path", lambda *parts: str(tmp_path / _Path(*parts)))
-    monkeypatch.setattr(
-        drafting_profiles,
-        "_profiles_path",
-        lambda: str(tmp_path / "drafting-profiles.json"),
-    )
     previous_dir = generation_router.GENERATION_SCRIPT_REVIEW_DIR
     generation_router.GENERATION_SCRIPT_REVIEW_DIR = tmp_path
     app.dependency_overrides[get_pixelle_video] = get_fake_script_review_pixelle_video
@@ -576,6 +570,8 @@ def test_script_review_draft_set_endpoint_generates_and_persists_drafts(tmp_path
     assert payload["draft_settings"]["language_script_models"] == {"English": "model-en"}
     # 每个草稿集记录项目归属（迁移生成的默认项目）
     assert payload["draft_settings"]["project_id"]
+    assert payload["draft_settings"]["production_template_id"] == "pipeline_standard_base_v1"
+    assert payload["draft_settings"]["production_template_name"]
     assert payload["drafts"][0]["language_script_models"] == {"English": "model-en"}
     assert payload["drafts"][0]["language_drafts"]["English"]["narrations"] == [
         "Cats need clean water every day.",
@@ -586,6 +582,41 @@ def test_script_review_draft_set_endpoint_generates_and_persists_drafts(tmp_path
     assert get_response.json()["draft_set_id"] == draft_set_id
     assert list_response.status_code == 200
     assert list_response.json()["draft_sets"][0]["draft_set_id"] == draft_set_id
+
+
+def test_recipe_drafting_config_endpoint_round_trip(tmp_path, monkeypatch):
+    from pixelle_video.generation import template_overrides
+
+    monkeypatch.setattr(
+        template_overrides,
+        "_overrides_path",
+        lambda: str(tmp_path / "production-template-overrides.json"),
+    )
+    client = TestClient(app)
+    template_id = "pipeline_standard_base_v1"
+
+    initial = client.get(f"/api/generation/templates/{template_id}/drafting-config")
+    assert initial.status_code == 200
+    assert initial.json()["is_overridden"] is False
+
+    drafting = {
+        "script_template_name": "Short Oral Script",
+        "split_template_name": "Copy-Safe Scene Split",
+        "script_model": "writer-model",
+        "split_model": "splitter-model",
+        "language_script_models": {"English": "writer-en"},
+    }
+    updated = client.put(
+        f"/api/generation/templates/{template_id}/drafting-config",
+        json={"drafting": drafting},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["drafting"] == drafting
+    assert updated.json()["is_overridden"] is True
+
+    reset = client.delete(f"/api/generation/templates/{template_id}/drafting-config")
+    assert reset.status_code == 200
+    assert reset.json()["is_overridden"] is False
 
 
 def test_script_review_submit_endpoint_creates_real_generation_tasks(tmp_path):
@@ -724,9 +755,9 @@ def test_script_review_submit_honors_template_id_and_rejects_invalid(tmp_path):
         rejected = _submit_script_review(
             client, draft_set_id, {"template_id": "pixelle_i2v_basic_v1"}
         )
-        assert rejected.status_code == 400
+        assert rejected.status_code == 409
         unknown = _submit_script_review(client, draft_set_id, {"template_id": "no_such_template"})
-        assert unknown.status_code == 400
+        assert unknown.status_code == 409
     finally:
         app.dependency_overrides.clear()
         generation_router.GENERATION_SCRIPT_REVIEW_DIR = previous_review_dir
