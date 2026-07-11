@@ -199,3 +199,31 @@ test.describe("键盘与浏览器历史", () => {
     expect(unhandledApi).toEqual([])
   })
 })
+
+test("配方设置直接编辑，并按 Provider 条件展示 Workflow", async ({ page }) => {
+  const unhandledApi = await installApiFixtures(page)
+  await preparePage(page)
+  await page.goto(`/#/create/recipes/${fixtureIds.videoTemplate}`, {
+    waitUntil: "networkidle",
+  })
+
+  await expect(page.getByRole("heading", { name: "文案生成" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "内容处理" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "画面生成" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "配音" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "版式与输出" })).toBeVisible()
+  await expect(page.getByText("生产步骤与默认设置")).toHaveCount(0)
+  await expect(
+    page.getByRole("button", { name: "调整", exact: true })
+  ).toHaveCount(0)
+
+  await page.getByLabel("生成方式 Provider").click()
+  await page.getByRole("option", { name: "RunningHub 云端" }).click()
+  await expect(page.getByLabel("生成方式 Workflow")).toBeVisible()
+
+  const save = page.getByRole("button", { name: "保存生产设置" })
+  await expect(save).toBeEnabled()
+  await save.click()
+  await expect(page.getByText("生产设置已保存", { exact: true })).toBeVisible()
+  expect(unhandledApi).toEqual([])
+})

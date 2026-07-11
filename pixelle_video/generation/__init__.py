@@ -33,6 +33,7 @@ from pixelle_video.generation.templates import (
     ProductionTemplate,
     ProductionTemplateError,
     ProductionTemplateRegistry,
+    build_base_production_template_registry,
     build_default_production_template_registry,
     detect_available_generation_capabilities,
 )
@@ -63,6 +64,7 @@ __all__ = [
     "build_default_pipeline_manifests",
     "build_default_pipeline_registry",
     "build_default_production_template_registry",
+    "build_base_production_template_registry",
     "build_pipeline_registry",
     "detect_available_generation_capabilities",
     "generation_request_from_legacy_video_request",

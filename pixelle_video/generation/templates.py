@@ -237,6 +237,13 @@ def build_default_production_template_registry() -> ProductionTemplateRegistry:
     return registry
 
 
+def build_base_production_template_registry() -> ProductionTemplateRegistry:
+    """Build recipe defaults before persisted per-recipe overrides are applied."""
+    registry = _build_builtin_production_template_registry()
+    _append_custom_templates(registry)
+    return registry
+
+
 def _apply_drafting_overrides(registry: ProductionTemplateRegistry) -> None:
     from pixelle_video.generation.template_overrides import load_all_drafting
 

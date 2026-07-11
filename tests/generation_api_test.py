@@ -619,6 +619,28 @@ def test_recipe_drafting_config_endpoint_round_trip(tmp_path, monkeypatch):
     assert reset.json()["is_overridden"] is False
 
 
+def test_generation_config_exposes_base_values_before_overrides(tmp_path, monkeypatch):
+    from pixelle_video.generation import template_overrides
+
+    monkeypatch.setattr(
+        template_overrides,
+        "_overrides_path",
+        lambda: str(tmp_path / "production-template-overrides.json"),
+    )
+    template_overrides.save_overrides(
+        "pipeline_standard_base_v1", {"tts_speed": 1.4}
+    )
+
+    response = TestClient(app).get(
+        "/api/generation/templates/pipeline_standard_base_v1/generation-config"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["overrides"]["tts_speed"] == 1.4
+    assert payload["base_params"].get("tts_speed") != 1.4
+    assert payload["effective_params"]["tts_speed"] == 1.4
+
+
 def test_script_review_submit_endpoint_creates_real_generation_tasks(tmp_path):
     fake_batch_service = FakeBatchGenerationService()
 

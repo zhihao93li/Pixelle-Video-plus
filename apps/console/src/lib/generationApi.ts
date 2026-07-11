@@ -610,6 +610,7 @@ export type TemplateGenerationConfig = {
   template_id: string
   overridable_keys: string[]
   overrides: Record<string, unknown>
+  base_params: Record<string, unknown>
   effective_params: Record<string, unknown>
 }
 

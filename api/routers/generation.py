@@ -18,6 +18,7 @@ from pixelle_video.generation import (
     PipelineManifest,
     ProductionTemplate,
     ProductionTemplateError,
+    build_base_production_template_registry,
     build_default_production_template_registry,
     detect_available_generation_capabilities,
 )
@@ -248,6 +249,7 @@ class TemplateGenerationConfigResponse(BaseModel):
     template_id: str
     overridable_keys: list[str]
     overrides: dict[str, Any]
+    base_params: dict[str, Any]
     effective_params: dict[str, Any]
 
 
@@ -264,6 +266,7 @@ def _template_generation_config_response(
     )
 
     registry = build_default_production_template_registry()
+    base_registry = build_base_production_template_registry()
     try:
         template = registry.get(template_id)
     except ProductionTemplateError as error:
@@ -271,10 +274,19 @@ def _template_generation_config_response(
 
     allowed = set(template.allowed_user_params)
     overridable = [key for key in OVERRIDABLE_PARAMS if key in allowed]
+    try:
+        base_template = base_registry.get(template_id)
+    except ProductionTemplateError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     return TemplateGenerationConfigResponse(
         template_id=template.id,
         overridable_keys=overridable,
         overrides=load_overrides(template.id),
+        base_params={
+            key: value
+            for key, value in base_template.fixed_params.items()
+            if key in OVERRIDABLE_PARAMS
+        },
         effective_params={
             key: value for key, value in template.fixed_params.items() if key in OVERRIDABLE_PARAMS
         },

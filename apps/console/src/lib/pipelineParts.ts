@@ -297,11 +297,15 @@ export const PART_EDIT_OPTIONS: Record<
     { value: "html_ffmpeg", label: "标准合成" },
     { value: "hyperframes", label: "高质量动效合成" },
   ],
+  bgm_mode: [
+    { value: "loop", label: "循环播放" },
+    { value: "once", label: "播放一次" },
+  ],
 }
 
 /** 全部可覆盖参数的人话名——「更多可调参数」兜底区用（凡白名单有而产线图没画的，自动出现在那里，杜绝漏登记）。 */
 export const PART_KEY_LABELS: Record<string, string> = {
-  split_mode: "分镜切法",
+  split_mode: "内容拆分方式",
   frame_template: "画面模板",
   media_workflow: "每镜画面 workflow",
   media_width: "画面宽度",

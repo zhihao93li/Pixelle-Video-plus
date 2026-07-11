@@ -795,7 +795,29 @@ function responseFor(
         template_id: templateId,
         overridable_keys: template?.allowed_user_params ?? [],
         overrides: {},
+        base_params: template?.fixed_params ?? {},
         effective_params: template?.fixed_params ?? {},
+      },
+    }
+  }
+  if (
+    method === "PUT" &&
+    /^\/generation\/templates\/[^/]+\/generation-config$/.test(path)
+  ) {
+    const templateId = path.split("/")[3]
+    const template = templatesForOptions(options).find(
+      (item) => item.id === templateId
+    )
+    return {
+      body: {
+        template_id: templateId,
+        overridable_keys: template?.allowed_user_params ?? [],
+        overrides: { media_workflow: "runninghub/image_flux.json" },
+        base_params: template?.fixed_params ?? {},
+        effective_params: {
+          ...(template?.fixed_params ?? {}),
+          media_workflow: "runninghub/image_flux.json",
+        },
       },
     }
   }
@@ -1208,7 +1230,40 @@ function responseFor(
     if (options.productionState === "resource-error") {
       return { status: 503, body: { detail: "资源服务暂时不可用。" } }
     }
-    return { body: { workflows: [] } }
+    return {
+      body: {
+        workflows:
+          path === "/resources/workflows/media"
+            ? [
+                {
+                  name: "image_flux.json",
+                  display_name: "Flux · RunningHub",
+                  source: "runninghub",
+                  path: "workflows/runninghub/image_flux.json",
+                  key: "runninghub/image_flux.json",
+                  workflow_id: "workflow-flux",
+                },
+                {
+                  name: "image_local.json",
+                  display_name: "本机图片",
+                  source: "selfhost",
+                  path: "workflows/selfhost/image_local.json",
+                  key: "selfhost/image_local.json",
+                  workflow_id: null,
+                },
+              ]
+            : [
+                {
+                  name: "tts_edge.json",
+                  display_name: "Edge TTS · RunningHub",
+                  source: "runninghub",
+                  path: "workflows/runninghub/tts_edge.json",
+                  key: "runninghub/tts_edge.json",
+                  workflow_id: "workflow-tts",
+                },
+              ],
+      },
+    }
   }
   if (method === "GET" && path === "/frame/template/params") {
     return {
