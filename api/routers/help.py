@@ -1,9 +1,4 @@
-"""
-Help and FAQ API routes.
-
-The Streamlit Help page reads docs/FAQ*.md directly. React should use the API
-boundary, so the same content is exposed here without importing Streamlit UI.
-"""
+"""Help and FAQ API routes backed by the canonical user documentation."""
 
 import re
 from pathlib import Path
@@ -49,8 +44,8 @@ async def get_faq(language: str = Query(default="zh_CN")):
 def _faq_path(language: str) -> Path:
     project_root = Path(__file__).resolve().parents[2]
     if language.startswith("zh"):
-        return project_root / "docs" / "FAQ_CN.md"
-    return project_root / "docs" / "FAQ.md"
+        return project_root / "docs" / "zh" / "faq.md"
+    return project_root / "docs" / "en" / "faq.md"
 
 
 def _parse_faq_sections(content: str) -> list[tuple[str, str]]:

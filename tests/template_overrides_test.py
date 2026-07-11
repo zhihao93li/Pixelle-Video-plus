@@ -2,8 +2,7 @@ import json
 
 import pytest
 
-from pixelle_video.generation import build_default_production_template_registry
-from pixelle_video.generation import template_overrides
+from pixelle_video.generation import build_default_production_template_registry, template_overrides
 from pixelle_video.generation.template_overrides import (
     TemplateOverrideError,
     load_all_enabled,

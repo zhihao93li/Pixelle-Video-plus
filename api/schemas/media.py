@@ -16,11 +16,23 @@ Media generation API schemas
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MediaGenerateRequest(BaseModel):
     """Generate an image or video preview through the shared media service."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "prompt": "warm natural light, a dog drinking water at home",
+                "workflow": "runninghub/image_flux.json",
+                "media_type": "image",
+                "width": 1080,
+                "height": 1440,
+            }
+        }
+    )
 
     prompt: str = Field(..., min_length=1, description="Image/video generation prompt")
     workflow: Optional[str] = Field(
@@ -41,17 +53,6 @@ class MediaGenerateRequest(BaseModel):
     )
     negative_prompt: Optional[str] = Field(None, description="Optional negative prompt")
     seed: Optional[int] = Field(None, description="Optional random seed")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "prompt": "warm natural light, a dog drinking water at home",
-                "workflow": "runninghub/image_flux.json",
-                "media_type": "image",
-                "width": 1080,
-                "height": 1440,
-            }
-        }
 
 
 class MediaGenerateResponse(BaseModel):

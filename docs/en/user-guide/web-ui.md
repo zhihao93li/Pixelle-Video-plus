@@ -1,98 +1,45 @@
-# Web UI Guide
+# Web Console
 
-Detailed introduction to the Pixelle-Video Web interface features.
+The Pixelle console organizes content production by project. Desktop uses a primary sidebar; page title, project switching, and theme controls live in one shared shell.
 
----
+## Board
 
-## Interface Layout
+The board follows the content lifecycle: topic, draft, review, production, publishing, and metrics. Content detail supports language editing, draft approval, production submission, and one visible next action.
 
-The Web interface uses a three-column layout:
+## Quick Create
 
-- **Left Panel**: Content input and audio settings
-- **Middle Panel**: Voice and visual settings  
-- **Right Panel**: Video generation and preview
-- **Sidebar**: System configuration and FAQ
+Quick Create first selects the artifact family and then a production recipe:
 
----
+- Video from scripts, topics, or source assets
+- Image sets with a cover and pages
+- Structured long-form text
+- Specialized video flows: image-to-video, action transfer, and digital human
+- Multilingual review followed by unified production submission
 
-## System Configuration
+The generation workspace keeps input and current overrides on the left. The right rail moves from estimate to progress to result. Batch is a mode inside supported recipes, not a separate entry.
 
-First-time use requires configuring LLM and image generation services. See [Configuration Guide](../getting-started/configuration.md).
+## Tasks
 
----
+Tasks are grouped by submission run. The list shows overall state and progress; details show child tasks, failure reasons, and available cancel or retry actions.
 
-## Content Input
+## Library
 
-### Generation Mode
+Library supports keyword, artifact type, status, and sort filters. Selecting an item opens video, image-set, or text preview, production facts, download actions, and publishing when eligible.
 
-- **AI Generate Content**: Enter a topic, AI creates script automatically
-- **Fixed Script Content**: Enter complete script directly
+## Settings
 
-### Fixed Script Split Mode
+Settings uses URL-backed sections:
 
-When using fixed script mode, you can choose how to split the content:
+- Overview
+- Projects
+- AI & Voice
+- Generation
+- Publishing & Storage
+- Recipes
+- Help
 
-- **By Paragraph**: Split by empty lines, each paragraph becomes a scene
-- **By Line**: Split by line breaks, each line becomes a scene
-- **By Sentence**: Smart sentence boundary detection, each sentence becomes a scene
+Each configuration section saves independently. Unsaved changes are marked and protected when leaving.
 
-### Background Music
+## State and Recovery
 
-- Built-in music supported
-- Custom music files supported
-
----
-
-## Voice Settings
-
-### TTS Workflow
-
-- Select TTS workflow
-- Supports Edge-TTS, Index-TTS, etc.
-
-### Reference Audio
-
-- Upload reference audio for voice cloning
-- Supports MP3/WAV/FLAC formats
-
----
-
-## Visual Settings
-
-### Image/Video Generation
-
-- Select media generation workflow (image or video)
-- Adjust prompt prefix to control style
-
-### Video Template
-
-- **Template Preview Gallery**: Visually preview all available templates
-- Supports portrait (1080x1920) / landscape (1920x1080) / square (1080x1080)
-- Template types:
-  - `static_*.html`: Static templates (no AI-generated media)
-  - `image_*.html`: Image templates (requires AI-generated images)
-  - `video_*.html`: Video templates (requires AI-generated videos)
-
----
-
-## Generate Video
-
-After clicking "Generate Video", the system will:
-
-1. Generate video script
-2. Generate images/videos for each scene
-3. Synthesize voice narration
-4. Compose final video
-
-Automatically previews when complete.
-
----
-
-## FAQ
-
-The sidebar includes built-in FAQ for quick reference:
-
-- Common configuration issues
-- Generation failure solutions
-- Performance optimization tips
-
+Loading failures, empty data, and stale data are separate states. Errors appear near the affected action with an explicit recovery path; they are never presented as empty lists or successful results.

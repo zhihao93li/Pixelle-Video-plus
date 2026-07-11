@@ -427,9 +427,10 @@ def test_script_review_batch_item_retry_preserves_params(tmp_path):
 def test_script_review_draft_set_endpoint_generates_and_persists_drafts(
     tmp_path, monkeypatch
 ):
+    from pathlib import Path as _Path
+
     import pixelle_video.content.drafting_profiles as drafting_profiles
     import pixelle_video.content.projects as projects
-    from pathlib import Path as _Path
 
     monkeypatch.setattr(
         projects, "get_data_path", lambda *parts: str(tmp_path / _Path(*parts))

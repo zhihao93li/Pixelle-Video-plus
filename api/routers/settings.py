@@ -12,8 +12,7 @@ from typing import Any, Literal
 import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
-from pydantic import ValidationError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from api.dependencies import ConfigManagerDep
 from pixelle_video.config.schema import PixelleVideoConfig

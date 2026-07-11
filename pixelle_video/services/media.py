@@ -19,14 +19,13 @@ Automatically detects output type based on ExecuteResult.
 
 from typing import Callable, Optional
 
-from comfykit import ComfyKit
 from loguru import logger
 
+from pixelle_video.models.media import MediaResult
 from pixelle_video.services.comfy_base_service import ComfyBaseService
 from pixelle_video.services.provider_execution import (
     execute_workflow_with_provider_progress,
 )
-from pixelle_video.models.media import MediaResult
 
 
 class MediaService(ComfyBaseService):
@@ -74,8 +73,13 @@ class MediaService(ComfyBaseService):
         
         Override parent method to support multiple prefixes
         """
-        from pixelle_video.utils.os_util import list_resource_dirs, list_resource_files, get_resource_path
         from pathlib import Path
+
+        from pixelle_video.utils.os_util import (
+            get_resource_path,
+            list_resource_dirs,
+            list_resource_files,
+        )
         
         workflows = []
         

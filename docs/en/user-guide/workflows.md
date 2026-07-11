@@ -65,5 +65,3 @@ Located in `workflows/selfhost/` or `workflows/runninghub/`
 
 ## More Information
 
-Detailed workflow customization guide coming soon.
-

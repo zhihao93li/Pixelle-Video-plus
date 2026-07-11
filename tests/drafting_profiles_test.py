@@ -8,8 +8,7 @@ from fastapi.testclient import TestClient
 import api.routers.generation as generation_router
 from api.app import app
 from api.dependencies import get_pixelle_video
-from pixelle_video.content import drafting_profiles
-from pixelle_video.content import projects
+from pixelle_video.content import drafting_profiles, projects
 from tests.generation_api_test import get_fake_script_review_pixelle_video
 
 

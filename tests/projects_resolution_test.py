@@ -12,9 +12,7 @@ BUILTIN_DEFAULT = "pipeline_standard_base_v1"
 
 @pytest.fixture(autouse=True)
 def isolated_projects(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts))
-    )
+    monkeypatch.setattr(projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts)))
     monkeypatch.setattr(
         drafting_profiles,
         "_profiles_path",
@@ -39,20 +37,12 @@ def test_retired_project_default_falls_back_to_builtin():
         name="R", default_production_template_id="petwoods_xhs_static_subtitle_v1"
     )
     # 退役模板（disabled）不作为有效默认 → 回退内置骨架
-    assert (
-        generation_router._default_template_for_project(project.project_id)
-        == BUILTIN_DEFAULT
-    )
+    assert generation_router._default_template_for_project(project.project_id) == BUILTIN_DEFAULT
 
 
 def test_invalid_project_template_falls_back_to_builtin():
-    project = projects.create_project(
-        name="B", default_production_template_id="does_not_exist"
-    )
-    assert (
-        generation_router._default_template_for_project(project.project_id)
-        == BUILTIN_DEFAULT
-    )
+    project = projects.create_project(name="B", default_production_template_id="does_not_exist")
+    assert generation_router._default_template_for_project(project.project_id) == BUILTIN_DEFAULT
 
 
 def test_none_project_uses_builtin_default():
@@ -60,7 +50,7 @@ def test_none_project_uses_builtin_default():
 
 
 def test_resolve_project_id_prefers_explicit():
-    project = projects.create_project(name="C")
+    projects.create_project(name="C")
     assert generation_router._resolve_project_id("explicit-id") == "explicit-id"
     # 不传时回退到默认项目（迁移已建）
     resolved = generation_router._resolve_project_id(None)

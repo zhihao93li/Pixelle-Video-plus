@@ -32,18 +32,15 @@ Example:
     )
 """
 
-from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pixelle_video.pipelines.linear import LinearVideoPipeline, PipelineContext
 from pixelle_video.models.progress import ProgressEvent
-from pixelle_video.utils.os_util import (
-    create_task_output_dir,
-    get_task_final_video_path
-)
+from pixelle_video.pipelines.linear import LinearVideoPipeline, PipelineContext
+from pixelle_video.utils.os_util import create_task_output_dir, get_task_final_video_path
 
 # Type alias for progress callback
 ProgressCallback = Optional[Callable[[ProgressEvent], None]]
@@ -51,16 +48,21 @@ ProgressCallback = Optional[Callable[[ProgressEvent], None]]
 
 # ==================== Structured Output Models ====================
 
+
 class SceneScript(BaseModel):
     """Single scene in the video script"""
+
     scene_number: int = Field(description="Scene number starting from 1")
     asset_path: str = Field(description="Path to the asset file for this scene")
-    narrations: List[str] = Field(description="List of narration sentences for this scene (1-5 sentences)")
+    narrations: List[str] = Field(
+        description="List of narration sentences for this scene (1-5 sentences)"
+    )
     duration: int = Field(description="Estimated duration in seconds for this scene")
 
 
 class VideoScript(BaseModel):
     """Complete video script with scenes"""
+
     scenes: List[SceneScript] = Field(description="List of scenes in the video")
 
 
@@ -92,7 +94,7 @@ class AssetBasedPipeline(LinearVideoPipeline):
         bgm_volume: float = 0.2,
         bgm_mode: str = "loop",
         progress_callback: ProgressCallback = None,
-        **kwargs
+        **kwargs,
     ) -> PipelineContext:
         """
         Execute pipeline with user-provided assets
@@ -129,8 +131,8 @@ class AssetBasedPipeline(LinearVideoPipeline):
                 "bgm_path": bgm_path,
                 "bgm_volume": bgm_volume,
                 "bgm_mode": bgm_mode,
-                **kwargs
-            }
+                **kwargs,
+            },
         )
 
         # Store request parameters in context for easy access
@@ -187,13 +189,15 @@ class AssetBasedPipeline(LinearVideoPipeline):
         logger.info(f"Found {total_assets} assets to analyze")
 
         # Emit initial progress (0-15% for asset analysis)
-        self._emit_progress(ProgressEvent(
-            event_type="analyzing_assets",
-            progress=0.01,
-            frame_current=0,
-            frame_total=total_assets,
-            extra_info="start"
-        ))
+        self._emit_progress(
+            ProgressEvent(
+                event_type="analyzing_assets",
+                progress=0.01,
+                frame_current=0,
+                frame_total=total_assets,
+                extra_info="start",
+            )
+        )
 
         self.asset_index = {}
 
@@ -208,13 +212,15 @@ class AssetBasedPipeline(LinearVideoPipeline):
 
             # Emit progress for this asset
             progress = 0.01 + (i - 1) / total_assets * 0.14  # 1% - 15%
-            self._emit_progress(ProgressEvent(
-                event_type="analyzing_asset",
-                progress=progress,
-                frame_current=i,
-                frame_total=total_assets,
-                extra_info=asset_path_obj.name
-            ))
+            self._emit_progress(
+                ProgressEvent(
+                    event_type="analyzing_asset",
+                    progress=progress,
+                    frame_current=i,
+                    frame_total=total_assets,
+                    extra_info=asset_path_obj.name,
+                )
+            )
 
             # Determine asset type
             asset_type = self._get_asset_type(asset_path_obj)
@@ -232,7 +238,7 @@ class AssetBasedPipeline(LinearVideoPipeline):
                     "path": asset_path,
                     "type": "image",
                     "name": asset_path_obj.name,
-                    "description": description
+                    "description": description,
                 }
 
                 logger.info(f"✅ Image analyzed: {description[:50]}...")
@@ -251,17 +257,19 @@ class AssetBasedPipeline(LinearVideoPipeline):
                         "path": asset_path,
                         "type": "video",
                         "name": asset_path_obj.name,
-                        "description": description
+                        "description": description,
                     }
 
                     logger.info(f"✅ Video analyzed: {description[:50]}...")
                 except Exception as e:
-                    logger.warning(f"Video analysis failed for {asset_path_obj.name}: {e}, using fallback")
+                    logger.warning(
+                        f"Video analysis failed for {asset_path_obj.name}: {e}, using fallback"
+                    )
                     self.asset_index[asset_path] = {
                         "path": asset_path,
                         "type": "video",
                         "name": asset_path_obj.name,
-                        "description": "Video asset (analysis failed)"
+                        "description": "Video asset (analysis failed)",
                     }
 
             else:
@@ -273,13 +281,15 @@ class AssetBasedPipeline(LinearVideoPipeline):
         context.asset_index = self.asset_index
 
         # Emit completion of asset analysis
-        self._emit_progress(ProgressEvent(
-            event_type="analyzing_assets",
-            progress=0.15,
-            frame_current=total_assets,
-            frame_total=total_assets,
-            extra_info="complete"
-        ))
+        self._emit_progress(
+            ProgressEvent(
+                event_type="analyzing_assets",
+                progress=0.15,
+                frame_current=total_assets,
+                frame_total=total_assets,
+                extra_info="complete",
+            )
+        )
 
         return context
 
@@ -300,7 +310,7 @@ class AssetBasedPipeline(LinearVideoPipeline):
             logger.info(f"📝 Video title: {title} (user-specified)")
         else:
             context.title = ""
-            logger.info(f"📝 No video title specified (will be hidden in template)")
+            logger.info("📝 No video title specified (will be hidden in template)")
 
         return context
 
@@ -321,10 +331,7 @@ class AssetBasedPipeline(LinearVideoPipeline):
         logger.info("🤖 Generating video script with LLM...")
 
         # Emit progress for script generation (15% - 25%)
-        self._emit_progress(ProgressEvent(
-            event_type="generating_script",
-            progress=0.16
-        ))
+        self._emit_progress(ProgressEvent(event_type="generating_script", progress=0.16))
 
         # Build prompt for LLM
         intent = context.request.get("intent", context.input_text)
@@ -340,18 +347,12 @@ class AssetBasedPipeline(LinearVideoPipeline):
 
         # Build prompt using the centralized prompt function
         prompt = build_asset_script_prompt(
-            intent=intent,
-            duration=duration,
-            assets_text=assets_text,
-            title=title
+            intent=intent, duration=duration, assets_text=assets_text, title=title
         )
 
         # Call LLM with structured output
         script: VideoScript = await self.core.llm(
-            prompt=prompt,
-            response_type=VideoScript,
-            temperature=0.8,
-            max_tokens=4000
+            prompt=prompt, response_type=VideoScript, temperature=0.8, max_tokens=4000
         )
 
         # Convert to dict format for compatibility with downstream code
@@ -373,24 +374,26 @@ class AssetBasedPipeline(LinearVideoPipeline):
                 if not matched:
                     # Fallback to first available asset
                     fallback_path = list(self.asset_index.keys())[0]
-                    logger.warning(f"Unknown asset path '{asset_path}', using fallback: {fallback_path}")
+                    logger.warning(
+                        f"Unknown asset path '{asset_path}', using fallback: {fallback_path}"
+                    )
                     scene["asset_path"] = fallback_path
 
         logger.success(f"✅ Generated script with {len(context.script)} scenes")
 
         # Emit progress after script generation
-        self._emit_progress(ProgressEvent(
-            event_type="generating_script",
-            progress=0.25,
-            extra_info="complete"
-        ))
+        self._emit_progress(
+            ProgressEvent(event_type="generating_script", progress=0.25, extra_info="complete")
+        )
 
         # Log script preview
         for scene in context.script:
             narrations = scene.get("narrations", [])
             if isinstance(narrations, str):
                 narrations = [narrations]
-            narration_preview = " | ".join([n[:30] + "..." if len(n) > 30 else n for n in narrations[:2]])
+            narration_preview = " | ".join(
+                [n[:30] + "..." if len(n) > 30 else n for n in narrations[:2]]
+            )
             asset_name = Path(scene.get("asset_path", "unknown")).name
             logger.info(f"Scene {scene['scene_number']} [{asset_name}]: {narration_preview}")
 
@@ -416,7 +419,7 @@ class AssetBasedPipeline(LinearVideoPipeline):
         context.matched_scenes = [
             {
                 **scene,
-                "matched_asset": scene["asset_path"]  # Alias for compatibility
+                "matched_asset": scene["asset_path"],  # Alias for compatibility
             }
             for scene in context.script
         ]
@@ -427,7 +430,7 @@ class AssetBasedPipeline(LinearVideoPipeline):
             asset = scene["matched_asset"]
             asset_usage[asset] = asset_usage.get(asset, 0) + 1
 
-        logger.info(f"📊 Asset usage summary:")
+        logger.info("📊 Asset usage summary:")
         for asset_path, count in asset_usage.items():
             logger.info(f"   {Path(asset_path).name}: {count} scene(s)")
 
@@ -443,12 +446,9 @@ class AssetBasedPipeline(LinearVideoPipeline):
         Returns:
             Updated context with storyboard
         """
-        from pixelle_video.models.storyboard import (
-            Storyboard,
-            StoryboardFrame,
-            StoryboardConfig
-        )
         from datetime import datetime
+
+        from pixelle_video.models.storyboard import Storyboard, StoryboardConfig, StoryboardFrame
 
         # Extract all narrations in order for compatibility
         all_narrations = []
@@ -469,12 +469,14 @@ class AssetBasedPipeline(LinearVideoPipeline):
             dims = template_name.split("/")[0].split("x")
             media_width = int(dims[0])
             media_height = int(dims[1])
-        except:
+        except (IndexError, ValueError):
             # Default to 1080x1920
             media_width = 1080
             media_height = 1920
 
-        tts_mode = context.params.get("tts_inference_mode") or self.core.tts.config.get("inference_mode", "local")
+        tts_mode = context.params.get("tts_inference_mode") or self.core.tts.config.get(
+            "inference_mode", "local"
+        )
         tts_voice = context.params.get("tts_voice") or context.params.get("voice_id")
         if tts_mode == "local":
             tts_voice = tts_voice or "zh-CN-YunjianNeural"
@@ -492,14 +494,12 @@ class AssetBasedPipeline(LinearVideoPipeline):
             media_width=media_width,
             media_height=media_height,
             frame_template=template_name,
-            template_params=context.params.get("template_params")
+            template_params=context.params.get("template_params"),
         )
 
         # Create Storyboard
         context.storyboard = Storyboard(
-            title=context.title,
-            config=context.config,
-            created_at=datetime.now()
+            title=context.title, config=context.config, created_at=datetime.now()
         )
 
         # Create StoryboardFrames - one per scene
@@ -517,7 +517,7 @@ class AssetBasedPipeline(LinearVideoPipeline):
                 index=i,
                 narration=main_narration,
                 image_prompt=None,  # We're using user assets, not generating images
-                created_at=datetime.now()
+                created_at=datetime.now(),
             )
 
             # Get asset path and determine actual media type from asset_index
@@ -569,14 +569,16 @@ class AssetBasedPipeline(LinearVideoPipeline):
 
             # Emit progress for this frame (each frame has 4 steps: audio, combine, duration, compose)
             frame_progress = base_progress + (i - 1) / total_frames * progress_range
-            self._emit_progress(ProgressEvent(
-                event_type="frame_step",
-                progress=frame_progress,
-                frame_current=i,
-                frame_total=total_frames,
-                step=1,
-                action="audio"
-            ))
+            self._emit_progress(
+                ProgressEvent(
+                    event_type="frame_step",
+                    progress=frame_progress,
+                    frame_current=i,
+                    frame_total=total_frames,
+                    step=1,
+                    action="audio",
+                )
+            )
 
             # Get scene data with narrations
             scene = frame._scene_data
@@ -596,7 +598,7 @@ class AssetBasedPipeline(LinearVideoPipeline):
                     text=narration_text,
                     output_path=str(audio_path),
                     voice=config.voice_id,
-                    speed=config.tts_speed
+                    speed=config.tts_speed,
                 )
 
                 narration_audios.append(str(audio_path))
@@ -604,18 +606,18 @@ class AssetBasedPipeline(LinearVideoPipeline):
 
             # Concatenate all narration audios for this scene
             if len(narration_audios) > 1:
-                from pixelle_video.utils.os_util import get_task_frame_path
-
                 # Emit progress for combining audio
                 frame_progress = base_progress + ((i - 1) + 0.25) / total_frames * progress_range
-                self._emit_progress(ProgressEvent(
-                    event_type="frame_step",
-                    progress=frame_progress,
-                    frame_current=i,
-                    frame_total=total_frames,
-                    step=2,
-                    action="audio"
-                ))
+                self._emit_progress(
+                    ProgressEvent(
+                        event_type="frame_step",
+                        progress=frame_progress,
+                        frame_current=i,
+                        frame_total=total_frames,
+                        step=2,
+                        action="audio",
+                    )
+                )
 
                 combined_audio_path = Path(context.task_dir) / "frames" / f"{i:02d}_audio.mp3"
 
@@ -624,20 +626,24 @@ class AssetBasedPipeline(LinearVideoPipeline):
 
                 # Create a file list for FFmpeg concat
                 filelist_path = Path(context.task_dir) / "frames" / f"{i:02d}_audiolist.txt"
-                with open(filelist_path, 'w') as f:
+                with open(filelist_path, "w") as f:
                     for audio_file in narration_audios:
                         escaped_path = str(Path(audio_file).absolute()).replace("'", "'\\''")
                         f.write(f"file '{escaped_path}'\n")
 
                 # Concatenate audio files
                 concat_cmd = [
-                    'ffmpeg',
-                    '-f', 'concat',
-                    '-safe', '0',
-                    '-i', str(filelist_path),
-                    '-c', 'copy',
-                    '-y',
-                    str(combined_audio_path)
+                    "ffmpeg",
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "0",
+                    "-i",
+                    str(filelist_path),
+                    "-c",
+                    "copy",
+                    "-y",
+                    str(combined_audio_path),
                 ]
 
                 subprocess.run(concat_cmd, check=True, capture_output=True)
@@ -659,55 +665,64 @@ class AssetBasedPipeline(LinearVideoPipeline):
 
             # Emit progress for duration calculation
             frame_progress = base_progress + ((i - 1) + 0.5) / total_frames * progress_range
-            self._emit_progress(ProgressEvent(
-                event_type="frame_step",
-                progress=frame_progress,
-                frame_current=i,
-                frame_total=total_frames,
-                step=3,
-                action="compose"
-            ))
+            self._emit_progress(
+                ProgressEvent(
+                    event_type="frame_step",
+                    progress=frame_progress,
+                    frame_current=i,
+                    frame_total=total_frames,
+                    step=3,
+                    action="compose",
+                )
+            )
 
             # Get audio duration for frame duration
             import subprocess
+
             duration_cmd = [
-                'ffprobe',
-                '-v', 'error',
-                '-show_entries', 'format=duration',
-                '-of', 'default=noprint_wrappers=1:nokey=1',
-                frame.audio_path
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                frame.audio_path,
             ]
-            duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, check=True)
+            duration_result = subprocess.run(
+                duration_cmd, capture_output=True, text=True, check=True
+            )
             frame.duration = float(duration_result.stdout.strip())
 
             # Emit progress for video composition
             frame_progress = base_progress + ((i - 1) + 0.75) / total_frames * progress_range
-            self._emit_progress(ProgressEvent(
-                event_type="frame_step",
-                progress=frame_progress,
-                frame_current=i,
-                frame_total=total_frames,
-                step=4,
-                action="video"
-            ))
+            self._emit_progress(
+                ProgressEvent(
+                    event_type="frame_step",
+                    progress=frame_progress,
+                    frame_current=i,
+                    frame_total=total_frames,
+                    step=4,
+                    action="video",
+                )
+            )
 
             # Use FrameProcessor for proper composition
-            processed_frame = await self.core.frame_processor(
-                frame=frame,
-                storyboard=storyboard,
-                config=config,
-                total_frames=total_frames
+            await self.core.frame_processor(
+                frame=frame, storyboard=storyboard, config=config, total_frames=total_frames
             )
 
             logger.success(f"✅ Scene {i} complete")
 
         # Emit completion of frame production
-        self._emit_progress(ProgressEvent(
-            event_type="processing_frame",
-            progress=0.85,
-            frame_current=total_frames,
-            frame_total=total_frames
-        ))
+        self._emit_progress(
+            ProgressEvent(
+                event_type="processing_frame",
+                progress=0.85,
+                frame_current=total_frames,
+                frame_total=total_frames,
+            )
+        )
 
         return context
 
@@ -724,10 +739,7 @@ class AssetBasedPipeline(LinearVideoPipeline):
         logger.info("🎞️ Concatenating scenes...")
 
         # Emit progress for concatenation (85% - 95%)
-        self._emit_progress(ProgressEvent(
-            event_type="concatenating",
-            progress=0.86
-        ))
+        self._emit_progress(ProgressEvent(event_type="concatenating", progress=0.86))
 
         # Collect video segments from storyboard frames
         scene_videos = [frame.video_segment_path for frame in context.storyboard.frames]
@@ -753,7 +765,7 @@ class AssetBasedPipeline(LinearVideoPipeline):
             output=str(final_video_path),
             bgm_path=bgm_path,
             bgm_volume=bgm_volume,
-            bgm_mode=bgm_mode
+            bgm_mode=bgm_mode,
         )
 
         context.final_video_path = str(final_video_path)
@@ -762,11 +774,9 @@ class AssetBasedPipeline(LinearVideoPipeline):
         logger.success(f"✅ Final video: {final_video_path}")
 
         # Emit completion of concatenation
-        self._emit_progress(ProgressEvent(
-            event_type="concatenating",
-            progress=0.95,
-            extra_info="complete"
-        ))
+        self._emit_progress(
+            ProgressEvent(event_type="concatenating", progress=0.95, extra_info="complete")
+        )
 
         return context
 
@@ -780,14 +790,11 @@ class AssetBasedPipeline(LinearVideoPipeline):
         Returns:
             Final context
         """
-        logger.success(f"🎉 Asset-based video generation complete!")
+        logger.success("🎉 Asset-based video generation complete!")
         logger.info(f"Video: {context.final_video_path}")
 
         # Emit completion
-        self._emit_progress(ProgressEvent(
-            event_type="completed",
-            progress=1.0
-        ))
+        self._emit_progress(ProgressEvent(event_type="completed", progress=1.0))
 
         # Persist metadata for history tracking
         await self._persist_task_data(context)
@@ -828,24 +835,25 @@ class AssetBasedPipeline(LinearVideoPipeline):
 
             metadata = {
                 "task_id": task_id,
-                "created_at": storyboard.created_at.isoformat() if storyboard and storyboard.created_at else None,
-                "completed_at": storyboard.completed_at.isoformat() if storyboard and storyboard.completed_at else None,
+                "created_at": storyboard.created_at.isoformat()
+                if storyboard and storyboard.created_at
+                else None,
+                "completed_at": storyboard.completed_at.isoformat()
+                if storyboard and storyboard.completed_at
+                else None,
                 "status": "completed",
-
                 "input": input_params,
-
                 "result": {
                     "video_path": ctx.final_video_path,
                     "duration": storyboard.total_duration if storyboard else 0,
                     "file_size": file_size,
-                    "n_frames": len(storyboard.frames) if storyboard else 0
+                    "n_frames": len(storyboard.frames) if storyboard else 0,
                 },
-
                 "config": {
                     "llm_model": self.core.config.get("llm", {}).get("model", "unknown"),
                     "llm_base_url": self.core.config.get("llm", {}).get("base_url", "unknown"),
                     "source": ctx.request.get("source", "runninghub"),
-                }
+                },
             }
 
             # Save metadata

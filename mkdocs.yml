@@ -35,7 +35,6 @@ theme:
     code: Roboto Mono
   
   features:
-    - navigation.instant       # Instant loading
     - navigation.tracking      # Anchor tracking
     - navigation.tabs          # Top-level tabs
     - navigation.tabs.sticky   # Sticky tabs
@@ -89,13 +88,10 @@ plugins:
             Config Schema: 配置文件详解
             Development: 开发指南
             Architecture: 架构设计
+            Product Contract: 产品合同
             Contributing: 贡献指南
             FAQ: 常见问题
             Troubleshooting: 故障排查
-  - git-revision-date-localized:
-      enable_creation_date: true
-      type: datetime
-
 markdown_extensions:
   # Python Markdown
   - abbr
@@ -157,6 +153,7 @@ nav:
     - Config Schema: reference/config-schema.md
   - Development:
     - Architecture: development/architecture.md
+    - Product Contract: product/current-product.md
     - Contributing: development/contributing.md
   - FAQ: faq.md
   - Troubleshooting: troubleshooting.md

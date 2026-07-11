@@ -198,7 +198,7 @@
 
     ---
 
-    ![video_default](../../images/1080x1920/video_default.jpg)
+    ![video_default](../../images/1080x1920/video_default.png)
     
     默认动态模版
 
@@ -206,7 +206,7 @@
 
     ---
 
-    ![video_healing](../../images/1080x1920/video_healing.jpg)
+    ![video_healing](../../images/1080x1920/video_healing.png)
     
     治愈动态模版
 </div>
@@ -405,4 +405,3 @@ templates/
 ## 更多信息
 
 如有模板开发相关问题，欢迎在 [GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues) 中提问。
-

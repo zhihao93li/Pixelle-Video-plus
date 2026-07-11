@@ -1,54 +1,37 @@
 # 架构设计
 
-Pixelle-Video 的技术架构概览。
+Pixelle 使用 React 控制台、FastAPI 合同层和 Python 生产服务组成单一业务系统。
 
----
+```mermaid
+flowchart LR
+    Console[React Console] --> API[FastAPI]
+    Codex[Codex Plugin] --> API
+    API --> Content[Projects and Content]
+    API --> Tasks[Task Manager]
+    API --> Generation[Generation Registry]
+    Generation --> Pipelines[Pipelines]
+    Pipelines --> Services[LLM / TTS / Media / Publish]
+```
 
-## 核心架构
+## 分层
 
-Pixelle-Video 采用分层架构设计：
+| 层 | 位置 | 责任 |
+| --- | --- | --- |
+| 控制台 | `apps/console` | 路由、交互与 ViewModel 展示 |
+| API | `api` | HTTP 合同、校验和任务入口 |
+| 内容 | `pixelle_video/content` | 项目、内容条目和起草配置 |
+| 生产 | `pixelle_video/generation` | 配方、参数合并、运行和质量 |
+| 管线 | `pixelle_video/pipelines` | 各产物生产实现 |
+| 服务 | `pixelle_video/services` | LLM、TTS、媒体、存储和发布 |
+| 运营 | `ops` | 运营项目与状态持久化 |
+| Agent | `codex_plugin` | 受控自动化操作接口 |
 
-- **Web 层**: Streamlit Web 界面
-- **服务层**: 核心业务逻辑
-- **ComfyUI 层**: 图像和TTS生成
+## 关键边界
 
----
+- 所有正式生成先经过配方注册与编译，再进入具体管线。
+- 前端不解释原始后端状态，状态先适配成统一 ViewModel。
+- 项目、任务、产物和发布状态由后端持久化层拥有。
+- API、控制台和 Agent 共用同一业务合同，不复制状态机。
+- 外部供应商失败必须显式返回，不能通过 fallback 伪装成功。
 
-## 主要组件
-
-### PixelleVideoCore
-
-核心服务类，协调各个子服务。
-
-### LLM Service
-
-负责调用大语言模型生成文案。
-
-### Image Service
-
-负责调用 ComfyUI 生成图像。
-
-### TTS Service
-
-负责调用 ComfyUI 生成语音。
-
-### Video Generator
-
-负责合成最终视频。
-
----
-
-## 技术栈
-
-- **后端**: Python 3.10+, AsyncIO
-- **Web**: Streamlit
-- **AI**: OpenAI API, ComfyUI
-- **配置**: YAML
-- **工具**: uv (包管理)
-
----
-
-## 更多信息
-
-详细的架构文档即将推出。
-
+更完整的产品边界见 [当前产品合同](../product/current-product.md)。

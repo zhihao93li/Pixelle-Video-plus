@@ -3,7 +3,6 @@ from typing import Any, Callable
 
 from comfykit.comfyui.runninghub_executor import RunningHubExecutor
 
-
 ProviderProgressCallback = Callable[[dict[str, Any]], None]
 
 

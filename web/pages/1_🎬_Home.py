@@ -25,14 +25,14 @@ if str(_project_root) not in sys.path:
 
 import streamlit as st
 
-# Import state management
-from web.state.session import init_session_state, init_i18n, get_pixelle_video
-
 # Import components
 from web.components.header import render_header
 from web.components.pipeline_selector import render_pipeline_selector
 from web.components.settings import render_config_status_bar
 from web.i18n import tr
+
+# Import state management
+from web.state.session import get_pixelle_video, init_i18n, init_session_state
 
 # Page config
 st.set_page_config(

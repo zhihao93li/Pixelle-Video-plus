@@ -79,9 +79,7 @@ def _validate_template_names(
 @router.get("/profiles", response_model=DraftingProfileListResponse)
 async def list_drafting_profiles():
     default_id, profiles = list_profiles()
-    return DraftingProfileListResponse(
-        default_profile_id=default_id, profiles=profiles
-    )
+    return DraftingProfileListResponse(default_profile_id=default_id, profiles=profiles)
 
 
 @router.post("/profiles", response_model=DraftingProfile)
@@ -94,31 +92,23 @@ async def create_drafting_profile(request: DraftingProfileCreateRequest):
         raise HTTPException(status_code=400, detail="名称不能为空。")
     # 配方与项目 1:1：一个项目只能有一份起草配置
     if get_profile_by_project(project_id) is not None:
-        raise HTTPException(
-            status_code=400, detail="每个项目只有一份起草配置。"
-        )
-    _validate_template_names(
-        request.script_template_name, request.split_template_name
-    )
+        raise HTTPException(status_code=400, detail="每个项目只有一份起草配置。")
+    _validate_template_names(request.script_template_name, request.split_template_name)
     return create_profile(
         name=name,
         script_template_name=request.script_template_name,
         split_template_name=request.split_template_name,
         script_model=request.script_model.strip(),
         split_model=request.split_model.strip(),
-        languages=[l for l in request.languages if l.strip()] or ["Chinese"],
+        languages=[language for language in request.languages if language.strip()] or ["Chinese"],
         language_script_models=request.language_script_models,
         project_id=project_id,
     )
 
 
 @router.put("/profiles/{profile_id}", response_model=DraftingProfile)
-async def patch_drafting_profile(
-    profile_id: str, request: DraftingProfilePatchRequest
-):
-    _validate_template_names(
-        request.script_template_name, request.split_template_name
-    )
+async def patch_drafting_profile(profile_id: str, request: DraftingProfilePatchRequest):
+    _validate_template_names(request.script_template_name, request.split_template_name)
     patch = request.model_dump(exclude_none=True)
     if "name" in patch and not patch["name"].strip():
         raise HTTPException(status_code=400, detail="起草配置名称不能为空。")
@@ -190,9 +180,7 @@ async def create_prompt_template(request: PromptTemplateWriteRequest):
     filename = _name_to_filename(request.name)
     final_name = _derived_name(filename)
     if final_name in _template_names(request.kind):
-        raise HTTPException(
-            status_code=400, detail=f"已存在同名模板：{final_name}"
-        )
+        raise HTTPException(status_code=400, detail=f"已存在同名模板：{final_name}")
 
     path = _prompt_dir(request.kind) / filename
     path.write_text(content, encoding="utf-8")
@@ -223,9 +211,7 @@ async def delete_prompt_template(kind: str, name: str):
         raise HTTPException(status_code=400, detail=f"未知模板类型：{kind}")
     path = _find_custom_template_path(kind, name)
     if path is None:
-        raise HTTPException(
-            status_code=400, detail="内置模板不可删除，只能删除自定义模板。"
-        )
+        raise HTTPException(status_code=400, detail="内置模板不可删除，只能删除自定义模板。")
     # 保护：仍被配方引用的模板不可删
     _, profiles = list_profiles()
     for profile in profiles:

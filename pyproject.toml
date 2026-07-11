@@ -14,7 +14,6 @@ dependencies = [
     "loguru>=0.7.0",
     "pyyaml>=6.0.0",
     "edge-tts==7.2.7",
-    "certifi>=2025.10.5",
     "ffmpeg-python>=0.2.0",
     "httpx>=0.28.1",
     "pillow>=10.0.0,<12",
@@ -48,6 +47,12 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# These executable entry points add the repository root before importing packages.
+"api/app.py" = ["E402"]
+"web/app.py" = ["E402"]
+"web/pages/*.py" = ["E402"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

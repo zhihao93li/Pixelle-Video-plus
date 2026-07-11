@@ -17,8 +17,8 @@ from web.utils.async_helpers import run_async
 from web.utils.script_review import (
     DEFAULT_REVIEW_LANGUAGES,
     DEFAULT_TARGET_LANGUAGES,
-    PromptTemplate,
     SOURCE_LANGUAGE_KEY,
+    PromptTemplate,
     build_generation_jobs,
     draft_titles,
     generate_independent_language_drafts,

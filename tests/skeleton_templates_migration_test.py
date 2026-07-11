@@ -1,4 +1,4 @@
-"""骨架模板化 PRD 的迁移/开关/退役行为测试（prd-pipeline-skeleton-templates §5.5）。"""
+"""生产模板迁移、启停与退役行为测试。"""
 
 from pathlib import Path
 
@@ -10,7 +10,6 @@ import pixelle_video.content.projects as projects
 from api.app import app
 from pixelle_video.generation import custom_templates, template_overrides
 from pixelle_video.generation.templates import (
-    ProductionTemplateError,
     build_default_production_template_registry,
     code_level_enabled,
 )

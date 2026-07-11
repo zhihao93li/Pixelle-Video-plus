@@ -32,5 +32,3 @@ Use the "Preview Style" feature to test different configurations.
 
 ## More Information
 
-More style customization tips coming soon.
-

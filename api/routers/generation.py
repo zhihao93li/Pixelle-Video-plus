@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field
 
 from api.dependencies import GenerationServiceDep, PixelleVideoDep
 from pixelle_video.generation import (
+    GenerationProgress,
     GenerationRequest,
     GenerationResult,
-    GenerationProgress,
     GenerationTask,
     PipelineManifest,
     ProductionTemplate,
@@ -329,8 +329,8 @@ def _project_using_default_template(template_id: str) -> str | None:
 @router.put("/templates/{template_id}/enabled", response_model=ProductionTemplate)
 async def set_template_enabled(template_id: str, request: TemplateEnabledRequest):
     """用户侧启用/停用模板（退役的内置模板不可启用；被项目默认引用的不可停用）。"""
-    from pixelle_video.generation.templates import code_level_enabled
     from pixelle_video.generation.template_overrides import save_enabled
+    from pixelle_video.generation.templates import code_level_enabled
 
     registry = build_default_production_template_registry()
     try:
@@ -1140,9 +1140,15 @@ def _load_script_review_draft_sets() -> list[dict]:
     draft_sets = []
     for path in sorted(draft_dir.glob("*.json")):
         try:
-            draft_sets.append(json.loads(path.read_text(encoding="utf-8")))
+            draft_set = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        if (
+            not isinstance(draft_set, dict)
+            or draft_set.get("draft_set_id") != path.stem
+        ):
+            continue
+        draft_sets.append(draft_set)
     return draft_sets
 
 

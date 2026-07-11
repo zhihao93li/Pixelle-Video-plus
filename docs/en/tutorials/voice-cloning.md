@@ -31,5 +31,3 @@ Use reference audio to implement voice cloning functionality.
 
 ## More Information
 
-Detailed voice cloning tutorial coming soon.
-

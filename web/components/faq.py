@@ -138,6 +138,6 @@ def render_faq_content(expanded: bool = False, nested: bool = False):
 
     st.warning(tr("faq.load_error", fallback="Failed to load FAQ content"))
     st.markdown(
-        f"[GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues) | "
-        f"[Documentation](https://aidc-ai.github.io/Pixelle-Video)"
+        "[GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues) | "
+        "[Documentation](https://aidc-ai.github.io/Pixelle-Video)"
     )

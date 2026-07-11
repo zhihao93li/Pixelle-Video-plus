@@ -44,16 +44,16 @@ from api.dependencies import shutdown_pixelle_video
 
 # Import routers
 from api.routers import (
-    content_router,
     content_items_router,
+    content_router,
     drafting_router,
     files_router,
     frame_router,
     generation_router,
     generation_settings_router,
+    health_router,
     help_router,
     history_router,
-    health_router,
     image_router,
     llm_router,
     media_router,

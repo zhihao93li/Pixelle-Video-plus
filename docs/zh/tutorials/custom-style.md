@@ -32,5 +32,3 @@ Minimalist black-and-white illustration, clean lines, simple style
 
 ## 更多信息
 
-即将推出更多风格定制技巧。
-

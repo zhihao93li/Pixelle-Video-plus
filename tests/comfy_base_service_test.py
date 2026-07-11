@@ -1,5 +1,5 @@
-from pixelle_video.services.comfy_base_service import ComfyBaseService
 from pixelle_video.service import PixelleVideoCore
+from pixelle_video.services.comfy_base_service import ComfyBaseService
 
 
 def test_comfykit_config_redaction_hides_secrets_without_changing_runtime_config():

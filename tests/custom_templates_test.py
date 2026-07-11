@@ -2,9 +2,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.app import app
-from pixelle_video.generation import build_default_production_template_registry
-from pixelle_video.generation import custom_templates
-from pixelle_video.generation import template_overrides
+from pixelle_video.generation import (
+    build_default_production_template_registry,
+    custom_templates,
+    template_overrides,
+)
 
 SOURCE_TEMPLATE_ID = "pipeline_standard_base_v1"
 

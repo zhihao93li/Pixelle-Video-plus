@@ -198,7 +198,7 @@ Suitable for TikTok, Kuaishou, Xiaohongshu, and other short video platforms.
 
     ---
 
-    ![video_default](../../images/1080x1920/video_default.jpg)
+    ![video_default](../../images/1080x1920/video_default.png)
     
     Default dynamic template
 
@@ -206,7 +206,7 @@ Suitable for TikTok, Kuaishou, Xiaohongshu, and other short video platforms.
 
     ---
 
-    ![video_healing](../../images/1080x1920/video_healing.jpg)
+    ![video_healing](../../images/1080x1920/video_healing.png)
     
     Healing dynamic template
 
@@ -407,4 +407,3 @@ Ensure the template's `body` size matches the target video dimensions:
 ## More Information
 
 For template development questions, feel free to ask in [GitHub Issues](https://github.com/AIDC-AI/Pixelle-Video/issues).
-
