@@ -29,6 +29,7 @@ class GenerationService:
         pipeline_registry: PipelineRegistry,
         task_id_factory: Callable[[], str] | None = None,
         storage_dir: Path | None = None,
+        surface: str = "public",
     ):
         self.pipeline_registry = pipeline_registry
         self._task_id_factory = task_id_factory or (lambda: str(uuid.uuid4()))
@@ -37,6 +38,7 @@ class GenerationService:
         self._idempotency_index: dict[str, str] = {}
         self._progress_callbacks: dict[str, Callable[[GenerationTask], None]] = {}
         self._storage_dir = storage_dir
+        self._surface = surface
         self._shutting_down = False
         self._restore_tasks()
 
@@ -122,6 +124,9 @@ class GenerationService:
             manifest = self.pipeline_registry.get_manifest(request.pipeline_id)
         except KeyError:
             raise ValueError(f"Unknown pipeline: {request.pipeline_id}") from None
+
+        if manifest.access_scope == "codex" and self._surface != "codex":
+            raise ValueError(f"Pipeline {request.pipeline_id!r} is only available through Codex")
 
         try:
             entry = manifest.entry(request.entry)
@@ -417,6 +422,30 @@ class GenerationService:
         )
 
     def _to_generation_error(self, exc: Exception) -> GenerationError:
+        from pixelle_video.services.image_providers import ImageProviderError
+
+        if isinstance(exc, ImageProviderError):
+            layer_map = {
+                "config": "config",
+                "credentials": "credentials",
+                "permissions": "permissions",
+                "network": "network",
+                "api_contract": "api_contract",
+                "validation": "input",
+                "download": "network",
+                "provider_runtime": "runtime",
+            }
+            return GenerationError(
+                layer=layer_map.get(exc.layer, "runtime"),
+                message=str(exc),
+                exception_type=type(exc).__name__,
+                detail={
+                    "provider": exc.provider,
+                    "code": exc.code,
+                    "request_id": exc.request_id,
+                    "retryable": exc.retryable,
+                },
+            )
         return GenerationError(
             layer="runtime",
             message=str(exc),

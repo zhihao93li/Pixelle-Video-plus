@@ -2,7 +2,11 @@ import inspect
 
 import pytest
 
-from pixelle_video.generation import build_default_pipeline_manifests, build_pipeline_registry
+from pixelle_video.generation import (
+    build_default_pipeline_manifests,
+    build_default_production_template_registry,
+    build_pipeline_registry,
+)
 from pixelle_video.models.storyboard import Storyboard, StoryboardConfig, VideoGenerationResult
 
 
@@ -64,6 +68,9 @@ def test_build_generation_request_from_video_params_can_use_production_template(
     from web.utils.generation_tasks import build_generation_request_from_video_params
 
     registry = _registry_with_pipeline(RecordingPipeline())
+    effective_template = build_default_production_template_registry().get(
+        "pipeline_standard_base_v1"
+    )
 
     request = build_generation_request_from_video_params(
         pipeline_registry=registry,
@@ -81,7 +88,7 @@ def test_build_generation_request_from_video_params_can_use_production_template(
     assert request.entry == "script"
     assert request.input == {"script": "Scene one.\nScene two."}
     assert request.params["title"] == "Approved script"
-    assert request.params["tts_voice"] == "zh-CN-YunjianNeural"
+    assert request.params["tts_voice"] == effective_template.fixed_params["tts_voice"]
     assert request.params["compose_runtime"] == "html_ffmpeg"
     assert "media_workflow" not in request.params
     assert request.metadata["production_template"]["id"] == "pipeline_standard_base_v1"

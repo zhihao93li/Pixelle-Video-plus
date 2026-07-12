@@ -25,6 +25,7 @@ def _field(
 def build_default_pipeline_manifests() -> list[PipelineManifest]:
     return [
         _standard_manifest(),
+        _codex_scene_video_manifest(),
         _custom_manifest(),
         _asset_based_manifest(),
         _image_post_manifest(),
@@ -33,6 +34,43 @@ def build_default_pipeline_manifests() -> list[PipelineManifest]:
         _action_transfer_manifest(),
         _digital_human_manifest(),
     ]
+
+
+def _codex_scene_video_manifest() -> PipelineManifest:
+    return PipelineManifest(
+        id="codex_scene_video",
+        name="Codex Scene Video",
+        description=(
+            "Compose a user-confirmed Codex storyboard and Codex-generated images into a video."
+        ),
+        category="agent",
+        default_entry="scenes",
+        access_scope="codex",
+        required_capabilities=["tts", "ffmpeg", "persistence"],
+        entries=[
+            PipelineEntrySpec(
+                id="scenes",
+                name="Confirmed scenes",
+                description="One to twenty user-confirmed scenes with existing image files.",
+                required_fields=[
+                    _field(
+                        "scenes",
+                        "array",
+                        "Confirmed scenes containing scene_id, narration, image_prompt, image_path, and optional duration",
+                    )
+                ],
+                optional_fields=[_field("title", description="Optional video title")],
+                start_stage="validate_scenes",
+            )
+        ],
+        stages=[
+            PipelineStageSpec(id="validate_scenes", name="Validate Confirmed Scenes"),
+            PipelineStageSpec(id="generate_tts", name="Generate TTS"),
+            PipelineStageSpec(id="compose_video", name="Compose Video"),
+            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+        ],
+        outputs=_standard_outputs(),
+    )
 
 
 def build_default_pipeline_registry() -> PipelineRegistry:
@@ -204,6 +242,8 @@ def _image_post_manifest() -> PipelineManifest:
                     _field("split_mode", description="Pagination mode", default="line"),
                     _field("frame_template", description="Page layout template path"),
                     _field("media_workflow", description="Per-page image workflow"),
+                    _field("image_provider", description="Direct image provider"),
+                    _field("image_model", description="Direct image model"),
                 ],
                 start_stage="paginate",
                 skipped_stages=["generate_script"],

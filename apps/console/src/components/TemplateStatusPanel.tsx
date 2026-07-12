@@ -50,9 +50,11 @@ import {
   listProjects,
   listTemplates,
   setTemplateEnabled,
+  templatesForManagement,
   type ProductionTemplate,
 } from "@/lib/generationApi"
 import {
+  isCodexOnlyTemplate,
   isDedicatedEntry as isDedicatedEntryTemplate,
   isRetiredTemplate,
   pipelineChipLabel,
@@ -240,6 +242,7 @@ function TemplateEnabledControl({
   const [isSaving, setIsSaving] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const lockedByProject = template.enabled && usedByProjects.length > 0
+  const codexOnly = isCodexOnlyTemplate(template)
 
   async function apply(next: boolean) {
     setIsSaving(true)
@@ -289,7 +292,9 @@ function TemplateEnabledControl({
               停用「{template.display_name}」？
             </AlertDialogTitle>
             <AlertDialogDescription>
-              停用后它不再出现在快速生产和各处配方选择里；已用它生成的作品与历史不受影响，随时可重新启用。
+              {codexOnly
+                ? "停用后 Codex 将不再使用这份配方；已生成的作品与历史不受影响，随时可重新启用。"
+                : "停用后它不再出现在快速生产和各处配方选择里；已用它生成的作品与历史不受影响，随时可重新启用。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -379,7 +384,7 @@ export function TemplateStatusPanel() {
         listTemplates(),
         listProjects(),
       ])
-      setTemplates(response.templates)
+      setTemplates(templatesForManagement(response))
       const usage: Record<string, string[]> = {}
       for (const project of projectResponse.projects) {
         const templateId = project.default_production_template_id
@@ -516,6 +521,7 @@ export function TemplateStatusPanel() {
           <div className="mt-5 grid gap-3 lg:grid-cols-2">
             {visibleTemplates.map((template) => {
               const isDedicatedEntry = isDedicatedEntryTemplate(template)
+              const codexOnly = isCodexOnlyTemplate(template)
               return (
                 <div
                   className="scroll-mt-20 rounded-lg border bg-background p-4"
@@ -532,6 +538,9 @@ export function TemplateStatusPanel() {
                       {template.is_custom && (
                         <Badge variant="outline">自定义</Badge>
                       )}
+                      {codexOnly ? (
+                        <Badge variant="info">仅 Codex 发起</Badge>
+                      ) : null}
                       <Badge
                         variant={
                           template.migration_status === "ready" ||
@@ -601,12 +610,14 @@ export function TemplateStatusPanel() {
                         template={template}
                       />
                     )}
-                    <Button
-                      onClick={() => navigate(productionStartRoute(template))}
-                      variant="outline"
-                    >
-                      {isDedicatedEntry ? "打开专用入口" : "使用这套配方"}
-                    </Button>
+                    {!codexOnly ? (
+                      <Button
+                        onClick={() => navigate(productionStartRoute(template))}
+                        variant="outline"
+                      >
+                        {isDedicatedEntry ? "打开专用入口" : "使用这套配方"}
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               )

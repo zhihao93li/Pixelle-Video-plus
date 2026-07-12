@@ -27,6 +27,7 @@ from pixelle_video.config import config_manager
 from pixelle_video.generation import PipelineRegistry, build_pipeline_registry
 from pixelle_video.generation.defaults import build_default_pipeline_manifests
 from pixelle_video.pipelines.asset_based import AssetBasedPipeline
+from pixelle_video.pipelines.codex_scene_video import CodexSceneVideoPipeline
 from pixelle_video.pipelines.custom import CustomPipeline
 from pixelle_video.pipelines.image_post import ImagePostPipeline
 from pixelle_video.pipelines.long_form import LongFormPipeline
@@ -237,6 +238,7 @@ class PixelleVideoCore:
         # 2. Register video generation pipelines
         self.pipelines = {
             "standard": StandardPipeline(self),
+            "codex_scene_video": CodexSceneVideoPipeline(self),
             "custom": CustomPipeline(self),
             "asset_based": AssetBasedPipeline(self),
             "image_post": ImagePostPipeline(self),

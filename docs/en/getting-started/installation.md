@@ -3,7 +3,7 @@
 ## Requirements
 
 - Python 3.11+
-- Node.js 20+
+- Node.js 20.19+ or 22.12+
 - `uv`
 - FFmpeg and FFprobe
 - macOS, Linux, or Windows
@@ -48,4 +48,4 @@ Continue with the [quick start](quick-start.md).
 
 ## Optional Surface
 
-`web/app.py` is a standalone Streamlit utility for the Windows bundle and low-level capability diagnostics. The React console is the production product surface.
+`web/app.py` is a frozen legacy Streamlit diagnostic surface retained only during migration. The Windows bundle and production product both use the React console; the legacy surface will be removed after compatibility acceptance.

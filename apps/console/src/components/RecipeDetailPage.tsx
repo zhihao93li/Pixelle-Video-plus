@@ -43,10 +43,12 @@ import {
   resetTemplateDraftingConfig,
   updatePromptTemplate,
   updateTemplateDraftingConfig,
+  templatesForManagement,
   type DraftingSpec,
   type ProductionTemplate,
   type ScriptReviewPromptTemplate,
 } from "@/lib/generationApi"
+import { isCodexOnlyTemplate } from "@/lib/templatePresentation"
 import {
   productionArtifactSummary,
   productionDescription,
@@ -85,8 +87,9 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
           return
         }
         const found =
-          templateResponse.templates.find((item) => item.id === templateId) ??
-          null
+          templatesForManagement(templateResponse).find(
+            (item) => item.id === templateId
+          ) ?? null
         setResolvedTemplateId(templateId)
         setTemplate(found)
         setNotFound(!found)
@@ -193,25 +196,34 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
     return null
   }
 
+  const codexOnly = isCodexOnlyTemplate(template)
+
   return (
     <PageFrame>
       <BackRow />
       <WorkspaceHeader
         actions={
-          <Button asChild className="min-h-11 sm:min-h-9">
-            <a href={routeHref(productionStartRoute(template))}>
-              开始制作
-              <ArrowRight data-icon="inline-end" />
-            </a>
-          </Button>
+          codexOnly ? undefined : (
+            <Button asChild className="min-h-11 sm:min-h-9">
+              <a href={routeHref(productionStartRoute(template))}>
+                开始制作
+                <ArrowRight data-icon="inline-end" />
+              </a>
+            </Button>
+          )
         }
         description={
-          <span>调整长期默认值。开始制作后，仍可以对当次内容单独调整。</span>
+          <span>
+            {codexOnly
+              ? "调整长期默认值；保存后，Codex 下次制作时自动读取。"
+              : "调整长期默认值。开始制作后，仍可以对当次内容单独调整。"}
+          </span>
         }
         title={
           <span className="flex flex-wrap items-center gap-2">
             {template.display_name}
             <Badge variant="secondary">{productionLineSummary(template)}</Badge>
+            {codexOnly ? <Badge variant="info">仅 Codex 发起</Badge> : null}
             {template.is_custom ? (
               <Badge variant="outline">我的配方</Badge>
             ) : null}
@@ -229,6 +241,7 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
             />
           ) : null}
           <RecipeGenerationSettings
+            codexOnly={codexOnly}
             expertMode={expertMode}
             onDirtyChange={setGenerationDirty}
             templateId={template.id}
@@ -278,6 +291,16 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
             </p>
           </WorkspacePanel>
 
+          {codexOnly ? (
+            <WorkspacePanel title="如何使用">
+              <ol className="space-y-2 text-sm leading-6 text-muted-foreground">
+                <li>1. 在 Codex 对话中提供主题或文案。</li>
+                <li>2. 确认 Codex 给出的分镜和图片提示词。</li>
+                <li>3. Codex 生成配图后，Pixelle 自动配音并合成视频。</li>
+              </ol>
+            </WorkspacePanel>
+          ) : null}
+
           <WorkspacePanel title="管理配方">
             <CloneRecipeButton template={template} />
             <Button
@@ -298,14 +321,16 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
         </aside>
       </div>
 
-      <div className="sticky bottom-[calc(4.25rem+var(--safe-area-bottom))] z-10 -mx-2 rounded-xl border bg-background/95 p-2 shadow-lg backdrop-blur lg:hidden">
-        <Button asChild className="min-h-11 w-full">
-          <a href={routeHref(productionStartRoute(template))}>
-            开始制作
-            <ArrowRight data-icon="inline-end" />
-          </a>
-        </Button>
-      </div>
+      {!codexOnly ? (
+        <div className="sticky bottom-[calc(4.25rem+var(--safe-area-bottom))] z-10 -mx-2 rounded-xl border bg-background/95 p-2 shadow-lg backdrop-blur lg:hidden">
+          <Button asChild className="min-h-11 w-full">
+            <a href={routeHref(productionStartRoute(template))}>
+              开始制作
+              <ArrowRight data-icon="inline-end" />
+            </a>
+          </Button>
+        </div>
+      ) : null}
       <UnsavedChangesGuard
         currentPath={path}
         dirty={draftingDirty || generationDirty}
@@ -369,7 +394,7 @@ function RecipeDraftingPanel({
         setIsOverridden(config.is_overridden)
         setScriptTemplates(prompts.script_templates)
         setSplitTemplates(prompts.split_templates)
-        setAllRecipes(recipes.templates)
+        setAllRecipes(templatesForManagement(recipes))
       })
       .catch((loadError: unknown) => {
         if (!cancelled) setError(readableError(loadError))

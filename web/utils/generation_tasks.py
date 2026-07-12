@@ -14,6 +14,8 @@ VIDEO_PARAM_KEYS = (
     "n_scenes",
     "split_mode",
     "media_workflow",
+    "image_provider",
+    "image_model",
     "frame_template",
     "prompt_prefix",
     "image_prompt_visual_context",
@@ -75,9 +77,7 @@ def build_generation_request_from_video_params(
         input_payload = {entry: video_params.get(entry)}
 
     params = {
-        key: video_params.get(key)
-        for key in VIDEO_PARAM_KEYS
-        if video_params.get(key) is not None
+        key: video_params.get(key) for key in VIDEO_PARAM_KEYS if video_params.get(key) is not None
     }
 
     return GenerationRequest(

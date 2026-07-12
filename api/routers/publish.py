@@ -14,7 +14,7 @@ from pixelle_video.services.publish_manager import (
     PUBLISH_PLATFORM_LABELS,
     SUPPORTED_PUBLISH_PLATFORMS,
 )
-from web.utils.publish_helpers import (
+from pixelle_video.utils.publish_helpers import (
     DEFAULT_PUBLISH_TIMEZONE,
     PUBLISH_TIMEZONE_OPTIONS,
 )

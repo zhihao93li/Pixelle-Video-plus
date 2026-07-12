@@ -34,6 +34,30 @@ except ImportError:
     sys.exit(1)
 
 
+WINDOWS_RELEASE_PATHS = (
+    "api",
+    "apps/console/dist",
+    "bgm",
+    "codex_plugin",
+    "data/prompt_templates/script/bazi_storyboard_oral_script.md",
+    "data/prompt_templates/script/bazi_storyboard_oral_script_english.md",
+    "docs/en/faq.md",
+    "docs/images",
+    "docs/zh/faq.md",
+    "ops",
+    "pixelle_video",
+    "resources",
+    "templates",
+    "workflows",
+    "config.example.yaml",
+    "LICENSE",
+    "NOTICE",
+    "pyproject.toml",
+    "README.md",
+    "README_EN.md",
+)
+
+
 class Color:
     """ANSI color codes for terminal output"""
     HEADER = '\033[95m'
@@ -107,142 +131,106 @@ class WindowsPackageBuilder:
         color = colors.get(level, Color.RESET)
         print(f"{color}[{level}]{Color.RESET} {message}")
     
-    def download_file(self, url: str, output_path: Path, description: str = "", max_retries: int = 3) -> bool:
-        """Download file with progress indication and retry support"""
-        import ssl
-        import urllib.request
-        
+    def _verify_sha256(self, path: Path, expected_sha256: str) -> bool:
+        """Verify a downloaded build input against its pinned digest."""
+        digest = hashlib.sha256()
+        with open(path, "rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest().lower() == expected_sha256.strip().lower()
+
+    def download_file(
+        self,
+        url: str,
+        output_path: Path,
+        expected_sha256: str,
+        description: str = "",
+        max_retries: int = 3,
+    ) -> bool:
+        """Download through verified TLS and require the pinned SHA-256 digest."""
         for attempt in range(max_retries):
             try:
                 if attempt > 0:
                     self.log(f"Retry {attempt}/{max_retries}...")
-                
+
                 self.log(f"Downloading {description or url}...")
-                
-                # Create SSL context that's more lenient
-                ssl_context = ssl.create_default_context()
-                ssl_context.check_hostname = False
-                ssl_context.verify_mode = ssl.CERT_NONE
-                
+
                 def report_progress(block_num, block_size, total_size):
                     downloaded = block_num * block_size
                     percent = min(downloaded / total_size * 100, 100) if total_size > 0 else 0
-                    print(f"\r  Progress: {percent:.1f}%", end='', flush=True)
-                
-                # Try with urllib first
-                opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
-                urllib.request.install_opener(opener)
+                    print(f"\r  Progress: {percent:.1f}%", end="", flush=True)
+
+                # urlretrieve uses Python's default verified TLS context.
                 urlretrieve(url, output_path, reporthook=report_progress)
-                print()  # New line after progress
-                self.log(f"Downloaded to {output_path}", "SUCCESS")
+                print()
+                if not self._verify_sha256(output_path, expected_sha256):
+                    output_path.unlink(missing_ok=True)
+                    raise RuntimeError("downloaded file SHA-256 does not match the pinned digest")
+
+                self.log(f"Downloaded and verified {output_path}", "SUCCESS")
                 return True
-                
-            except Exception as e:
-                self.log(f"Download attempt {attempt + 1} failed: {e}", "WARNING")
+            except Exception as exc:
+                self.log(f"Download attempt {attempt + 1} failed: {exc}", "WARNING")
+                output_path.unlink(missing_ok=True)
                 if attempt < max_retries - 1:
                     import time
-                    time.sleep(2)  # Wait before retry
+
+                    time.sleep(2)
                 else:
-                    self.log("All download attempts failed", "ERROR")
-                    # Try with curl as fallback
-                    return self._download_with_curl(url, output_path, description)
-        
+                    self.log("All urllib download attempts failed", "ERROR")
+                    return self._download_with_curl(
+                        url,
+                        output_path,
+                        expected_sha256,
+                        description,
+                    )
         return False
-    
-    def _find_suitable_python(self) -> Optional[str]:
-        """Find a suitable Python 3.11+ for installing dependencies"""
-        candidates = [
-            # Try common locations for newer Python versions
-            '/Users/puke/miniforge3/bin/python3',  # User's conda
-            '/opt/homebrew/bin/python3',           # Homebrew
-            '/usr/local/bin/python3',              # Manual install
-        ]
-        
-        # Also check what's in PATH
-        for i in range(11, 14):  # Python 3.11, 3.12, 3.13
-            for py_name in [f'python3.{i}', f'python{i}']:
-                found = shutil.which(py_name)
-                if found and found not in candidates:
-                    candidates.append(found)
-        
-        # Check generic python3
-        python3_path = shutil.which('python3')
-        if python3_path and '.venv' not in python3_path:
-            candidates.append(python3_path)
-        
-        # Test each candidate
-        for candidate in candidates:
-            try:
-                if not candidate:
-                    continue
-                    
-                # Skip if in project venv
-                if '.venv' in candidate or 'venv' in candidate:
-                    continue
-                
-                # Check if path exists
-                if not os.path.exists(candidate):
-                    continue
-                
-                # Check Python version
-                result = subprocess.run(
-                    [candidate, '-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                
-                if result.returncode == 0:
-                    version = result.stdout.strip()
-                    major, minor = map(int, version.split('.'))
-                    
-                    # Need Python 3.11+
-                    if major == 3 and minor >= 11:
-                        # Check if pip is available
-                        pip_check = subprocess.run(
-                            [candidate, '-m', 'pip', '--version'],
-                            capture_output=True,
-                            timeout=5
-                        )
-                        if pip_check.returncode == 0:
-                            self.log(f"Found Python {version} at {candidate}", "SUCCESS")
-                            return candidate
-            except Exception:
-                continue
-        
-        return None
-    
-    def _download_with_curl(self, url: str, output_path: Path, description: str = "") -> bool:
-        """Fallback download method using curl"""
+
+    def _download_with_curl(
+        self,
+        url: str,
+        output_path: Path,
+        expected_sha256: str,
+        description: str = "",
+    ) -> bool:
+        """Fallback download using curl's normal TLS verification."""
         try:
             self.log(f"Trying curl fallback for {description}...")
-            result = subprocess.run(
-                ['curl', '-L', '-o', str(output_path), url, '--progress-bar'],
+            subprocess.run(
+                ["curl", "--fail", "--location", "--output", str(output_path), url],
                 check=True,
-                capture_output=False
             )
-            if result.returncode == 0 and output_path.exists():
-                self.log(f"Downloaded with curl to {output_path}", "SUCCESS")
-                return True
-        except Exception as e:
-            self.log(f"Curl download also failed: {e}", "ERROR")
-        return False
-    
+            if not self._verify_sha256(output_path, expected_sha256):
+                output_path.unlink(missing_ok=True)
+                raise RuntimeError("curl download SHA-256 does not match the pinned digest")
+            self.log(f"Downloaded and verified with curl: {output_path}", "SUCCESS")
+            return True
+        except Exception as exc:
+            output_path.unlink(missing_ok=True)
+            self.log(f"Curl download also failed: {exc}", "ERROR")
+            return False
     def download_python(self) -> Path:
         """Download Python embedded distribution"""
         python_config = self.config['python']
         cache_file = self.cache_dir / f"python-{python_config['version']}-embed-amd64.zip"
         
-        if cache_file.exists():
-            self.log(f"Using cached Python: {cache_file}")
+        expected_sha256 = python_config['sha256']
+        if cache_file.exists() and self._verify_sha256(cache_file, expected_sha256):
+            self.log(f"Using verified cached Python: {cache_file}")
             return cache_file
+        cache_file.unlink(missing_ok=True)
         
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         # Choose URL based on mirror setting
         url = python_config['mirror_url'] if self.config['mirrors']['use_cn_mirror'] else python_config['download_url']
         
-        if self.download_file(url, cache_file, f"Python {python_config['version']}"):
+        if self.download_file(
+            url,
+            cache_file,
+            expected_sha256=expected_sha256,
+            description=f"Python {python_config['version']}",
+        ):
             return cache_file
         else:
             raise RuntimeError("Failed to download Python")
@@ -252,15 +240,22 @@ class WindowsPackageBuilder:
         ffmpeg_config = self.config['ffmpeg']
         cache_file = self.cache_dir / f"ffmpeg-{ffmpeg_config['version']}-win64.zip"
         
-        if cache_file.exists():
-            self.log(f"Using cached FFmpeg: {cache_file}")
+        expected_sha256 = ffmpeg_config['sha256']
+        if cache_file.exists() and self._verify_sha256(cache_file, expected_sha256):
+            self.log(f"Using verified cached FFmpeg: {cache_file}")
             return cache_file
+        cache_file.unlink(missing_ok=True)
         
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         url = ffmpeg_config['mirror_url'] if self.config['mirrors']['use_cn_mirror'] else ffmpeg_config['download_url']
         
-        if self.download_file(url, cache_file, f"FFmpeg {ffmpeg_config['version']}"):
+        if self.download_file(
+            url,
+            cache_file,
+            expected_sha256=expected_sha256,
+            description=f"FFmpeg {ffmpeg_config['version']}",
+        ):
             return cache_file
         else:
             raise RuntimeError("Failed to download FFmpeg")
@@ -310,27 +305,34 @@ class WindowsPackageBuilder:
         """Prepare Python environment: enable site-packages"""
         self.log("Preparing Python environment...")
         
-        # Modify python311._pth to enable site-packages
+        # Embedded Python ignores PYTHONPATH while python311._pth is present.
+        # Add the packaged project root explicitly and enable site-packages.
         pth_file = python_dir / "python311._pth"
-        if pth_file.exists():
-            with open(pth_file, 'r') as f:
-                lines = f.readlines()
+        if not pth_file.exists():
+            raise RuntimeError("Embedded Python is missing python311._pth")
+
+        with open(pth_file, 'r') as f:
+            lines = f.readlines()
+
+        packaged_project_path = r"..\..\Pixelle-Video"
+        if packaged_project_path not in {line.strip() for line in lines}:
+            lines.append(f"{packaged_project_path}\n")
+
+        # Uncomment "import site" line or add it
+        modified = False
+        for i, line in enumerate(lines):
+            if line.strip().startswith('#import site'):
+                lines[i] = 'import site\n'
+                modified = True
+                break
             
-            # Uncomment "import site" line or add it
-            modified = False
-            for i, line in enumerate(lines):
-                if line.strip().startswith('#import site'):
-                    lines[i] = 'import site\n'
-                    modified = True
-                    break
+        if not modified and 'import site' not in ''.join(lines):
+            lines.append('import site\n')
             
-            if not modified and 'import site' not in ''.join(lines):
-                lines.append('import site\n')
+        with open(pth_file, 'w') as f:
+            f.writelines(lines)
             
-            with open(pth_file, 'w') as f:
-                f.writelines(lines)
-            
-            self.log("Enabled site-packages in Python", "SUCCESS")
+        self.log("Enabled packaged project and site-packages paths", "SUCCESS")
         
         # Note: On non-Windows systems, we can't run python.exe directly
         # Pip and dependencies will be installed using system Python
@@ -338,11 +340,22 @@ class WindowsPackageBuilder:
             # On Windows, we can install pip directly
             python_exe = python_dir / "python.exe"
             get_pip_path = self.cache_dir / "get-pip.py"
-            
-            if not get_pip_path.exists():
-                self.log("Downloading get-pip.py...")
-                pip_url = "https://bootstrap.pypa.io/get-pip.py"
-                self.download_file(pip_url, get_pip_path, "get-pip.py")
+
+            pip_bootstrap = self.config["pip_bootstrap"]
+            pip_sha256 = pip_bootstrap["sha256"]
+            if not (
+                get_pip_path.exists()
+                and self._verify_sha256(get_pip_path, pip_sha256)
+            ):
+                get_pip_path.unlink(missing_ok=True)
+                self.cache_dir.mkdir(parents=True, exist_ok=True)
+                if not self.download_file(
+                    pip_bootstrap["download_url"],
+                    get_pip_path,
+                    expected_sha256=pip_sha256,
+                    description="get-pip.py",
+                ):
+                    raise RuntimeError("Failed to download verified get-pip.py")
             
             self.log("Installing pip...")
             result = subprocess.run(
@@ -351,174 +364,119 @@ class WindowsPackageBuilder:
                 text=True
             )
             
-            if result.returncode == 0:
-                self.log("Pip installed successfully", "SUCCESS")
-            else:
-                self.log(f"Pip installation warning: {result.stderr}", "WARNING")
+            if result.returncode != 0:
+                self.log(f"Pip installation failed: {result.stderr}", "ERROR")
+                raise RuntimeError("Failed to install pip into embedded Python")
+            self.log("Pip installed successfully", "SUCCESS")
         else:
-            self.log("Cross-platform build detected (building on non-Windows)", "INFO")
-            self.log("Dependencies will be installed using system Python", "INFO")
+            raise RuntimeError("Windows portable packages must be built on Windows")
     
+    def _read_project_dependencies(self) -> list[str]:
+        """Read runtime dependencies without installing an editable source checkout."""
+        import tomllib
+
+        pyproject_path = self.project_root / "pyproject.toml"
+        with open(pyproject_path, "rb") as file:
+            pyproject = tomllib.load(file)
+
+        dependencies = pyproject.get("project", {}).get("dependencies", [])
+        if not dependencies:
+            raise RuntimeError("No runtime dependencies found in pyproject.toml")
+        return [str(dependency) for dependency in dependencies]
+
     def install_dependencies(self, python_dir: Path):
-        """Install project dependencies"""
-        self.log("Installing project dependencies...")
-        
-        # Determine target directory for site-packages
-        site_packages = python_dir / "Lib" / "site-packages"
-        site_packages.mkdir(parents=True, exist_ok=True)
-        
-        if os.name == 'nt':
-            # On Windows, use the embedded Python
-            python_exe = python_dir / "python.exe"
-            
-            # Install uv first if configured
-            if self.config['build'].get('use_uv', True):
-                self.log("Installing uv...")
-                subprocess.run(
-                    [str(python_exe), "-m", "pip", "install", "uv"],
-                    check=True
-                )
-            
-            # Install dependencies
-            if self.config['build'].get('use_uv', True):
-                cmd = [str(python_exe), "-m", "uv", "pip", "install", "-e", str(self.project_root)]
-                if self.config['mirrors']['use_cn_mirror']:
-                    cmd.extend(["--index-url", self.config['mirrors']['pypi_mirror']])
-            else:
-                cmd = [str(python_exe), "-m", "pip", "install", "-e", str(self.project_root)]
-                if self.config['mirrors']['use_cn_mirror']:
-                    cmd.extend(["--index-url", self.config['mirrors']['pypi_mirror']])
-            
-            self.log(f"Running: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                self.log("Dependencies installed successfully", "SUCCESS")
-            else:
-                self.log(f"Dependency installation failed:\n{result.stderr}", "ERROR")
-                raise RuntimeError("Failed to install dependencies")
-        else:
-            # Cross-platform build: use system Python to install to target directory
-            self.log("Cross-platform build: using system Python to install dependencies")
-            
-            # Find a Python 3.11+ executable (not from project venv)
-            python_cmd = self._find_suitable_python()
-            
-            if not python_cmd:
-                self.log("No suitable Python 3.11+ found. Please install Python 3.11+ or use Windows to build.", "ERROR")
-                raise RuntimeError("Python 3.11+ required for cross-platform build")
-            
-            self.log(f"Using Python: {python_cmd}")
-            
-            # Use pip with --target to install to specific directory
-            cmd = [
-                python_cmd, "-m", "pip", "install",
-                "--target", str(site_packages),
-                "--no-user",
-                "--no-warn-script-location"
-            ]
-            
-            # Read dependencies from pyproject.toml
-            try:
-                import tomllib
-            except ImportError:
-                try:
-                    import tomli as tomllib
-                except ImportError:
-                    self.log("tomllib/tomli not available, trying simple parsing", "WARNING")
-                    tomllib = None
-            
-            if tomllib:
-                pyproject_path = self.project_root / "pyproject.toml"
-                with open(pyproject_path, 'rb') as f:
-                    pyproject = tomllib.load(f)
-                    deps = pyproject.get('project', {}).get('dependencies', [])
-            else:
-                # Simple fallback: read from pyproject.toml manually
-                import re
-                pyproject_path = self.project_root / "pyproject.toml"
-                with open(pyproject_path, 'r') as f:
-                    content = f.read()
-                    # Find dependencies section
-                    deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
-                    if deps_match:
-                        deps_str = deps_match.group(1)
-                        deps = [dep.strip(' "\',\n') for dep in deps_str.split('\n') if dep.strip() and not dep.strip().startswith('#')]
-                    else:
-                        deps = []
-            
-            if deps:
-                cmd.extend(deps)
-                
-                if self.config['mirrors']['use_cn_mirror']:
-                    cmd.extend(["--index-url", self.config['mirrors']['pypi_mirror']])
-                
-                self.log(f"Installing {len(deps)} dependencies...")
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                if result.returncode == 0:
-                    self.log("Dependencies installed successfully", "SUCCESS")
-                else:
-                    self.log(f"Dependency installation output:\n{result.stdout}", "INFO")
-                    if result.stderr:
-                        self.log(f"Warnings: {result.stderr}", "WARNING")
-            else:
-                self.log("No dependencies found in pyproject.toml", "WARNING")
-    
+        """Install Windows runtime dependencies into the embedded Python."""
+        if os.name != "nt":
+            raise RuntimeError(
+                "Windows portable dependencies must be built on Windows; "
+                "host-platform wheels cannot be copied into a Windows package"
+            )
+
+        python_exe = python_dir / "python.exe"
+        dependencies = self._read_project_dependencies()
+        cmd = [str(python_exe), "-m", "pip", "install", *dependencies]
+        if self.config["mirrors"]["use_cn_mirror"]:
+            cmd.extend(["--index-url", self.config["mirrors"]["pypi_mirror"]])
+
+        self.log(f"Installing {len(dependencies)} runtime dependencies with embedded Python")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            self.log(f"Dependency installation failed:\n{result.stderr}", "ERROR")
+            raise RuntimeError("Failed to install Windows runtime dependencies")
+        self.log("Dependencies installed successfully", "SUCCESS")
+
+    def install_playwright_browser(self, python_dir: Path):
+        """Install Chromium inside the portable package instead of the user profile."""
+        if not self.config.get("playwright", {}).get("install_browsers", True):
+            return
+        if os.name != "nt":
+            raise RuntimeError("Portable Playwright Chromium must be installed on Windows")
+
+        browsers_dir = self.build_dir / "tools" / "playwright"
+        browsers_dir.mkdir(parents=True, exist_ok=True)
+        env = os.environ.copy()
+        env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_dir)
+
+        python_exe = python_dir / "python.exe"
+        result = subprocess.run(
+            [str(python_exe), "-m", "playwright", "install", "chromium"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            self.log(f"Playwright Chromium installation failed:\n{result.stderr}", "ERROR")
+            raise RuntimeError("Failed to install portable Playwright Chromium")
+        self.log("Portable Playwright Chromium installed", "SUCCESS")
+
+    def build_console(self):
+        """Build the React console that the packaged FastAPI service will host."""
+        console_dir = self.project_root / "apps" / "console"
+        npm = shutil.which("npm") or shutil.which("npm.cmd")
+        if npm is None:
+            raise RuntimeError(
+                "Node.js 20.19+ or 22.12+ and npm are required to build the React console"
+            )
+
+        env = os.environ.copy()
+        env["VITE_PIXELLE_API_BASE_URL"] = "/api"
+        commands = ([npm, "ci"], [npm, "run", "build"])
+        for command in commands:
+            self.log(f"Running console build command: {' '.join(command)}")
+            subprocess.run(command, cwd=console_dir, env=env, check=True)
+
+        dist_dir = console_dir / "dist"
+        if not (dist_dir / "index.html").is_file() or not (dist_dir / "assets").is_dir():
+            raise RuntimeError("React console build completed without index.html or assets")
+        self.log("React console built successfully", "SUCCESS")
+
     def copy_project_files(self, target_dir: Path):
-        """Copy project files to build directory"""
-        self.log(f"Copying project files to {target_dir}...")
-        
-        exclude_patterns = self.config['build']['exclude_patterns']
-        
-        def should_exclude(path: Path) -> bool:
-            path_str = str(path.relative_to(self.project_root))
-            for pattern in exclude_patterns:
-                if pattern.endswith('/*'):
-                    # Directory content exclusion - must match exact directory name or start with "dirname/"
-                    dir_name = pattern[:-2]
-                    if path_str == dir_name or path_str.startswith(f"{dir_name}/"):
-                        return True
-                elif pattern.endswith('*'):
-                    # Wildcard pattern
-                    if path_str.startswith(pattern[:-1]):
-                        return True
-                elif '*' in pattern:
-                    # Glob pattern (simple check)
-                    import fnmatch
-                    if fnmatch.fnmatch(path_str, pattern):
-                        return True
-                else:
-                    # Exact match or directory
-                    if path_str == pattern or path_str.startswith(f"{pattern}/"):
-                        return True
-            return False
-        
+        """Copy an explicit release allowlist, never arbitrary workspace state."""
+        self.log(f"Copying release files to {target_dir}...")
+
         target_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Copy files
         copied_count = 0
-        for item in self.project_root.iterdir():
-            if item.name in ['.git', 'packaging', 'dist', '.venv', 'venv']:
-                continue
-            
-            if should_exclude(item):
-                continue
-            
-            target_path = target_dir / item.name
-            
-            if item.is_file():
-                shutil.copy2(item, target_path)
+        for relative_path in WINDOWS_RELEASE_PATHS:
+            source = self.project_root / relative_path
+            if not source.exists():
+                raise RuntimeError(f"Required release path is missing: {relative_path}")
+
+            target = target_dir / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_dir():
+                shutil.copytree(
+                    source,
+                    target,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.py[cod]", ".DS_Store"),
+                )
+                copied_count += sum(1 for path in target.rglob("*") if path.is_file())
+            else:
+                shutil.copy2(source, target)
                 copied_count += 1
-            elif item.is_dir():
-                shutil.copytree(item, target_path, ignore=lambda d, names: [
-                    n for n in names if should_exclude(Path(d) / n)
-                ])
-                # Count files in copied directory
-                copied_count += sum(1 for _ in target_path.rglob('*') if _.is_file())
-        
-        self.log(f"Copied {copied_count} files", "SUCCESS")
-    
+
+        self.log(f"Copied {copied_count} release files", "SUCCESS")
+
     def generate_launcher_scripts(self):
         """Generate launcher scripts from templates"""
         self.log("Generating launcher scripts...")
@@ -606,6 +564,12 @@ class WindowsPackageBuilder:
         self.log("=" * 60, "HEADER")
         
         try:
+            if os.name != "nt":
+                raise RuntimeError(
+                    "Windows portable packages must be built on Windows. "
+                    "Cross-platform host wheels are not compatible with Windows."
+                )
+
             # Clean build directory
             if self.build_dir.exists():
                 self.log(f"Cleaning existing build directory: {self.build_dir}")
@@ -632,6 +596,10 @@ class WindowsPackageBuilder:
             # Install dependencies
             if self.config['build'].get('pre_install_deps', True):
                 self.install_dependencies(python_dir)
+                self.install_playwright_browser(python_dir)
+
+            # Build the production console before copying project files.
+            self.build_console()
             
             # Copy project files
             project_target = self.build_dir / "Pixelle-Video"
@@ -687,4 +655,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

@@ -28,6 +28,8 @@ OVERRIDABLE_PARAMS: dict[str, type | tuple[type, ...]] = {
     "split_mode": str,
     "frame_template": str,
     "media_workflow": str,
+    "image_provider": str,
+    "image_model": str,
     "media_width": int,
     "media_height": int,
     "prompt_prefix": str,
@@ -40,6 +42,7 @@ OVERRIDABLE_PARAMS: dict[str, type | tuple[type, ...]] = {
     "tts_workflow": str,
     "tts_voice": str,
     "tts_speed": (int, float),
+    "ref_audio": str,
     # 素材分析/媒体 workflow 的执行端（selfhost=本地 ComfyUI / runninghub=云端）
     "source": str,
     # 单 workflow 直跑玩法的 workflow 文件（相对 workflows/，如 runninghub/i2v_LTX2.json）
@@ -58,6 +61,7 @@ WORD_COUNT_MAX = 20000
 
 # compose_runtime 合法枚举（与 compose_runtime.py 注册的运行时一致）
 COMPOSE_RUNTIMES = ("html_ffmpeg", "hyperframes")
+IMAGE_PROVIDERS = ("comfy_workflow", "aliyun_bailian", "volcengine_ark")
 
 _lock = threading.Lock()
 
@@ -79,41 +83,30 @@ def available_workflow_keys() -> list[str]:
     base = _workflows_dir()
     if not base.is_dir():
         return []
-    return sorted(
-        str(path.relative_to(base)).replace(os.sep, "/")
-        for path in base.rglob("*.json")
-    )
+    return sorted(str(path.relative_to(base)).replace(os.sep, "/") for path in base.rglob("*.json"))
 
 
 def _validate_workflow_key(value: str) -> None:
     if not (_workflows_dir() / value).is_file():
         available = available_workflow_keys()
         listed = "、".join(available) if available else "（无）"
-        raise TemplateOverrideError(
-            f"workflow 文件不存在：{value}。可用：{listed}"
-        )
+        raise TemplateOverrideError(f"workflow 文件不存在：{value}。可用：{listed}")
 
 
 def _validate_compose_runtime(value: str) -> None:
     if value not in COMPOSE_RUNTIMES:
         listed = " / ".join(COMPOSE_RUNTIMES)
-        raise TemplateOverrideError(
-            f"合成方式只能是 {listed}；收到 {value!r}。"
-        )
+        raise TemplateOverrideError(f"合成方式只能是 {listed}；收到 {value!r}。")
     # 动效合成（hyperframes）在合成时调 `npx hyperframes`，本机缺 Node 会失败——
     # 保存时就拦下来，别等到出片才报错。
     if value == "hyperframes" and not shutil.which("npx"):
-        raise TemplateOverrideError(
-            "动效合成需要本机 Node 环境（npx），请先安装 Node.js。"
-        )
+        raise TemplateOverrideError("动效合成需要本机 Node 环境（npx），请先安装 Node.js。")
 
 
 def _validate_long_form_prompt(value: str) -> None:
     # 空值已在 validate_overrides 里被当作"清除覆盖"跳过；这里只校验非空提示词
     if "{script}" not in value:
-        raise TemplateOverrideError(
-            "长文提示词缺少 {script} 占位符，确认稿将无法注入。"
-        )
+        raise TemplateOverrideError("长文提示词缺少 {script} 占位符，确认稿将无法注入。")
 
 
 def _validate_word_count(value: int) -> None:
@@ -141,9 +134,7 @@ def _parse_entry(value: Any) -> tuple[dict[str, Any], bool | None, dict[str, Any
         drafting = raw_drafting if isinstance(raw_drafting, dict) else None
     else:
         overrides, enabled, drafting = value, None, None
-    filtered = {
-        key: val for key, val in overrides.items() if key in OVERRIDABLE_PARAMS
-    }
+    filtered = {key: val for key, val in overrides.items() if key in OVERRIDABLE_PARAMS}
     return filtered, enabled, drafting
 
 
@@ -256,9 +247,7 @@ def validate_overrides(
         if key not in OVERRIDABLE_PARAMS:
             raise TemplateOverrideError(f"参数 {key!r} 不允许作为模板默认值覆盖。")
         if key not in allowed_user_params:
-            raise TemplateOverrideError(
-                f"当前模板不支持参数 {key!r}，不能为它设置默认值。"
-            )
+            raise TemplateOverrideError(f"当前模板不支持参数 {key!r}，不能为它设置默认值。")
         if value is None or value == "":
             # 空值表示清除该项覆盖
             continue
@@ -273,6 +262,10 @@ def validate_overrides(
             _validate_workflow_key(value)
         if key == "compose_runtime":
             _validate_compose_runtime(value)
+        if key == "image_provider" and value not in IMAGE_PROVIDERS:
+            raise TemplateOverrideError(
+                "图片 Provider 只能是 comfy_workflow / aliyun_bailian / volcengine_ark。"
+            )
         if key == "long_form_prompt":
             _validate_long_form_prompt(value)
         if key == "word_count":

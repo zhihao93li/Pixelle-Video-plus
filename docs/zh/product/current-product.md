@@ -51,6 +51,15 @@ flowchart LR
 | 运营状态 | `ops` | 运营项目、周期和写入状态 |
 | Agent 接口 | `codex_plugin` | 对外暴露受控操作能力 |
 
+## Legacy Streamlit 边界
+
+`web/` 是冻结中的迁移期界面，不属于正式产品表面。新 Provider、新管线、设置和
+任务能力不得继续接入 Streamlit；默认本地、Docker、Dev Container 与 Windows
+入口只运行 React + FastAPI。`api/` 与 `pixelle_video/` 也不得反向导入 `web/`。
+
+旧界面只允许用于尚未完成的兼容性排查，并且不能与 React 控制台同时修改配置。
+待 Docker 与 Windows 发行形态完成真实验收后，删除旧界面及 Streamlit 依赖。
+
 ## 数据所有权
 
 - 项目与内容事实由后端持久化层拥有，前端本地状态不能充当业务真源。

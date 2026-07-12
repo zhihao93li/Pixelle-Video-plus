@@ -17,6 +17,7 @@ import {
 import { HelpWorkspace } from "@/components/HelpWorkspace"
 import { ProjectsPanel } from "@/components/ProjectsPanel"
 import { UnsavedChangesGuard } from "@/components/settings/UnsavedChangesGuard"
+import { ImageProviderSettings } from "@/components/settings/ImageProviderSettings"
 import { AsyncState } from "@/components/shared/AsyncState"
 import { InlineError } from "@/components/shared/feedback"
 import { PageFrame } from "@/components/shared/PageFrame"
@@ -1095,6 +1096,10 @@ export function SettingsWorkspace() {
                     />
                   </Field>
                 </div>
+              </Section>
+
+              <Section id="image-providers" title="图片生成服务">
+                <ImageProviderSettings />
               </Section>
 
               {expertMode ? (

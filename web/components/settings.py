@@ -18,12 +18,12 @@ import streamlit as st
 
 from pixelle_video.config import config_manager
 from pixelle_video.services.buffer_publisher import BufferPublisher
-from web.i18n import get_language, tr
-from web.utils.async_helpers import run_async
-from web.utils.runninghub_workflows import (
+from pixelle_video.utils.runninghub_workflows import (
     create_runninghub_workflow_file,
     list_custom_runninghub_workflows,
 )
+from web.i18n import get_language, tr
+from web.utils.async_helpers import run_async
 from web.utils.streamlit_helpers import safe_rerun
 
 BUFFER_CHANNEL_WIDGET_KEYS = {

@@ -75,6 +75,7 @@ class PipelineManifest(BaseModel):
     outputs: list[PipelineOutputSpec]
     required_capabilities: list[str] = Field(default_factory=list)
     default_entry: EntryId | None = None
+    access_scope: Literal["public", "codex"] = "public"
 
     @model_validator(mode="after")
     def validate_entries(self):

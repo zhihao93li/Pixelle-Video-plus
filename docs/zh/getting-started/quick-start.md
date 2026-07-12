@@ -40,12 +40,14 @@ npm run dev
 
 批量不是独立页面。在支持批量的配方生成页中切换到「批量」即可。
 
-## 其他入口
+## 单进程正式入口
 
-Windows 整合包和底层能力排查仍可独立启动 Streamlit：
+需要模拟 Docker 或 Windows 整合包时，先构建 React，再由 FastAPI 同源托管：
 
 ```bash
-uv run streamlit run web/app.py
+./start_web.sh
 ```
+
+legacy Streamlit 已冻结，仅在迁移排查时手动运行，不再作为默认或正式入口。
 
 API 文档默认位于 `http://127.0.0.1:8000/docs`。

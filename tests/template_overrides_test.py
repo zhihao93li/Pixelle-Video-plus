@@ -22,9 +22,7 @@ TEMPLATE_ID = "pipeline_standard_base_v1"
 @pytest.fixture(autouse=True)
 def isolated_overrides(tmp_path, monkeypatch):
     path = tmp_path / "production-template-overrides.json"
-    monkeypatch.setattr(
-        template_overrides, "_overrides_path", lambda: str(path)
-    )
+    monkeypatch.setattr(template_overrides, "_overrides_path", lambda: str(path))
     yield path
 
 
@@ -35,28 +33,20 @@ def _allowed_params():
 
 def test_validate_rejects_non_whitelisted_key():
     with pytest.raises(TemplateOverrideError):
-        validate_overrides(
-            {"pipeline_id": "evil"}, allowed_user_params=_allowed_params()
-        )
+        validate_overrides({"pipeline_id": "evil"}, allowed_user_params=_allowed_params())
 
 
 def test_validate_rejects_key_not_allowed_by_template():
     # media_workflow 在白名单里，但素材骨架不允许它
     registry = build_default_production_template_registry()
-    asset_allowed = registry.get(
-        "pipeline_asset_based_base_v1"
-    ).allowed_user_params
+    asset_allowed = registry.get("pipeline_asset_based_base_v1").allowed_user_params
     with pytest.raises(TemplateOverrideError):
-        validate_overrides(
-            {"media_workflow": "wf"}, allowed_user_params=asset_allowed
-        )
+        validate_overrides({"media_workflow": "wf"}, allowed_user_params=asset_allowed)
 
 
 def test_validate_rejects_wrong_type():
     with pytest.raises(TemplateOverrideError):
-        validate_overrides(
-            {"tts_speed": "fast"}, allowed_user_params=_allowed_params()
-        )
+        validate_overrides({"tts_speed": "fast"}, allowed_user_params=_allowed_params())
 
 
 def test_validate_drops_empty_values():
@@ -65,6 +55,22 @@ def test_validate_drops_empty_values():
         allowed_user_params=_allowed_params(),
     )
     assert cleaned == {"tts_speed": 1.5}
+
+
+def test_validate_accepts_reference_audio_for_recipe_defaults():
+    cleaned = validate_overrides(
+        {"ref_audio": "/tmp/voice-reference.wav"},
+        allowed_user_params=_allowed_params(),
+    )
+    assert cleaned == {"ref_audio": "/tmp/voice-reference.wav"}
+
+
+def test_validate_rejects_unknown_image_provider():
+    with pytest.raises(TemplateOverrideError, match="图片 Provider"):
+        validate_overrides(
+            {"image_provider": "mystery"},
+            allowed_user_params=["image_provider"],
+        )
 
 
 def test_save_and_apply_overrides(isolated_overrides):
@@ -104,9 +110,7 @@ def test_compile_request_uses_override(isolated_overrides):
         ),
     )
     registry = build_default_production_template_registry()
-    request = registry.compile_request(
-        TEMPLATE_ID, input={"script": "测试文案"}
-    )
+    request = registry.compile_request(TEMPLATE_ID, input={"script": "测试文案"})
     assert request.params["tts_voice"] == "zh-CN-XiaoxiaoNeural"
 
 
@@ -147,9 +151,7 @@ def test_validate_accepts_compose_runtime(monkeypatch):
         {"compose_runtime": "html_ffmpeg"}, allowed_user_params=_allowed_params()
     ) == {"compose_runtime": "html_ffmpeg"}
     # hyperframes 在有 npx 时通过
-    monkeypatch.setattr(
-        template_overrides.shutil, "which", lambda name: "/usr/bin/npx"
-    )
+    monkeypatch.setattr(template_overrides.shutil, "which", lambda name: "/usr/bin/npx")
     assert validate_overrides(
         {"compose_runtime": "hyperframes"}, allowed_user_params=_allowed_params()
     ) == {"compose_runtime": "hyperframes"}
@@ -157,9 +159,7 @@ def test_validate_accepts_compose_runtime(monkeypatch):
 
 def test_validate_rejects_unknown_compose_runtime():
     with pytest.raises(TemplateOverrideError, match="合成方式"):
-        validate_overrides(
-            {"compose_runtime": "premiere"}, allowed_user_params=_allowed_params()
-        )
+        validate_overrides({"compose_runtime": "premiere"}, allowed_user_params=_allowed_params())
 
 
 def test_validate_hyperframes_requires_local_npx(monkeypatch):
@@ -199,13 +199,9 @@ def test_validate_rejects_long_form_prompt_without_script():
 
 def test_validate_rejects_word_count_out_of_range():
     with pytest.raises(TemplateOverrideError, match="目标字数"):
-        validate_overrides(
-            {"word_count": 50}, allowed_user_params=_long_form_allowed()
-        )
+        validate_overrides({"word_count": 50}, allowed_user_params=_long_form_allowed())
     with pytest.raises(TemplateOverrideError, match="目标字数"):
-        validate_overrides(
-            {"word_count": 30000}, allowed_user_params=_long_form_allowed()
-        )
+        validate_overrides({"word_count": 30000}, allowed_user_params=_long_form_allowed())
 
 
 def test_save_and_load_enabled_flag(isolated_overrides):
@@ -222,9 +218,7 @@ def test_save_and_load_enabled_flag(isolated_overrides):
 def test_enabled_flag_and_overrides_coexist(isolated_overrides):
     save_overrides(
         TEMPLATE_ID,
-        validate_overrides(
-            {"tts_voice": "keep-me"}, allowed_user_params=_allowed_params()
-        ),
+        validate_overrides({"tts_voice": "keep-me"}, allowed_user_params=_allowed_params()),
     )
     save_enabled(TEMPLATE_ID, False)
 

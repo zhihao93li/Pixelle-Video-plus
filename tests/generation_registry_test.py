@@ -16,6 +16,7 @@ def test_default_pipeline_manifests_describe_current_pipeline_entries():
 
     assert [manifest.id for manifest in manifests] == [
         "standard",
+        "codex_scene_video",
         "custom",
         "asset_based",
         "image_post",
@@ -37,6 +38,21 @@ def test_default_pipeline_manifests_describe_current_pipeline_entries():
     assert _field_names(script_entry.required_fields) == ["script"]
     assert script_entry.start_stage == "split_scenes"
     assert "generate_script" in script_entry.skipped_stages
+
+    codex_scene_video = next(
+        manifest for manifest in manifests if manifest.id == "codex_scene_video"
+    )
+    assert codex_scene_video.default_entry == "scenes"
+    assert codex_scene_video.access_scope == "codex"
+    assert _field_names(codex_scene_video.entry("scenes").required_fields) == ["scenes"]
+    assert _field_names(codex_scene_video.entry("scenes").optional_fields) == ["title"]
+    assert all(
+        field.name != "n_scenes"
+        for field in (
+            codex_scene_video.entry("scenes").required_fields
+            + codex_scene_video.entry("scenes").optional_fields
+        )
+    )
 
     asset_based = next(manifest for manifest in manifests if manifest.id == "asset_based")
     assert asset_based.default_entry == "assets"
@@ -82,6 +98,7 @@ def test_default_pipeline_registry_can_be_built_without_running_generation():
 
     assert registry.pipeline_ids() == [
         "standard",
+        "codex_scene_video",
         "custom",
         "asset_based",
         "image_post",
@@ -103,6 +120,7 @@ async def test_pixelle_core_registers_pipeline_instances_and_manifests():
 
     assert core.pipeline_registry.pipeline_ids() == [
         "standard",
+        "codex_scene_video",
         "custom",
         "asset_based",
         "image_post",
@@ -113,6 +131,10 @@ async def test_pixelle_core_registers_pipeline_instances_and_manifests():
     ]
     assert set(core.pipeline_registry.pipeline_ids()) == set(core.pipelines.keys())
     assert core.pipeline_registry.get_pipeline("standard") is core.pipelines["standard"]
+    assert (
+        core.pipeline_registry.get_pipeline("codex_scene_video")
+        is core.pipelines["codex_scene_video"]
+    )
     assert core.pipeline_registry.get_manifest("asset_based").default_entry == "assets"
     assert core.pipeline_registry.get_pipeline("i2v") is core.pipelines["i2v"]
     assert core.pipeline_registry.get_manifest("digital_human").default_entry == "assets"

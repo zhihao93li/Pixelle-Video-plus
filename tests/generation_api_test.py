@@ -156,6 +156,7 @@ def test_generation_pipelines_endpoint_lists_registered_manifests():
         "digital_human",
     ]
     assert payload["pipelines"][0]["entries"][0]["id"] == "topic"
+    assert "codex_scene_video" not in {pipeline["id"] for pipeline in payload["pipelines"]}
 
 
 def test_generation_pipeline_detail_endpoint_returns_manifest():
@@ -185,6 +186,17 @@ def test_generation_pipeline_detail_endpoint_returns_404_for_unknown_pipeline():
     assert "missing" in response.json()["detail"]
 
 
+def test_generation_pipeline_detail_hides_codex_only_pipeline():
+    app.dependency_overrides[get_pixelle_video] = get_fake_pixelle_video
+
+    try:
+        response = TestClient(app).get("/api/generation/pipelines/codex_scene_video")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+
+
 def test_generation_templates_endpoint_lists_builtin_production_templates():
     response = TestClient(app).get("/api/generation/templates")
 
@@ -192,6 +204,11 @@ def test_generation_templates_endpoint_lists_builtin_production_templates():
     payload = response.json()
     assert payload["default_template"] == "pipeline_standard_base_v1"
     ids = [template["id"] for template in payload["templates"]]
+    assert "codex_image_story_v1" not in ids
+    assert [template["id"] for template in payload["codex_templates"]] == [
+        "codex_image_story_v1"
+    ]
+    assert payload["codex_templates"][0]["access_scope"] == "codex"
     # 新的中性骨架排在最前，退役的 PetWoods 预设仍在（退役≠删除）
     assert ids[0] == "pipeline_standard_base_v1"
     assert ids[1] == "pipeline_asset_based_base_v1"

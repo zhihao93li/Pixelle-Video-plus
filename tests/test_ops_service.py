@@ -890,6 +890,67 @@ async def test_generation_request_blocks_completed_experiment(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_generation_request_allows_new_approved_draft_after_completion(tmp_path):
+    generated_paths = []
+
+    async def fake_generation_runner(**kwargs):
+        path = tmp_path / f"version-{len(generated_paths) + 1}.mp4"
+        path.write_bytes(b"new video")
+        generated_paths.append(str(path))
+        return {"video_path": str(path), "file_size": path.stat().st_size}
+
+    store = OpsStore(tmp_path / "ops.db")
+    store.init_db()
+    service = OpsService(store, generation_runner=fake_generation_runner)
+    _, _, experiment = _seed_experiment(service)
+    service.lock_prediction(
+        experiment_id=experiment["id"],
+        prediction={"expected_metric": "save_rate"},
+        source=_source(),
+    )
+    original = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="Original scene narration.",
+        source=_source(),
+    )
+    original_approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=original["event"]["id"],
+        source=_source(),
+    )
+    await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=original_approval["event"]["id"],
+        source=_source(),
+    )
+
+    revised = service.submit_generation_draft(
+        experiment_id=experiment["id"],
+        text="Revised scene narration.",
+        source=_source(),
+    )
+    approval = service.approve_generation_draft(
+        experiment_id=experiment["id"],
+        draft_id=revised["event"]["id"],
+        source=_source(),
+    )
+    result = await service.request_generation(
+        experiment_id=experiment["id"],
+        approved_draft_id=approval["event"]["id"],
+        source=_source(),
+    )
+
+    assert result["entity"]["stage"] == "generation_completed"
+    assert generated_paths == [
+        str(tmp_path / "version-1.mp4"),
+        str(tmp_path / "version-2.mp4"),
+    ]
+    content_items = store.list_content_items_for_experiment(experiment["id"])
+    assert len(content_items) == 2
+    assert [item["asset_ref"]["video_path"] for item in content_items] == generated_paths
+
+
+@pytest.mark.asyncio
 async def test_generation_request_allows_retry_after_failed_asset_check(tmp_path):
     attempts = []
 

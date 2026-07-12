@@ -3,6 +3,7 @@ import json
 
 import pytest
 from fastmcp import Client
+from PIL import Image
 
 from codex_plugin import server
 from ops.service import OpsService
@@ -84,7 +85,8 @@ def plugin_service(tmp_path, monkeypatch):
     service = OpsService(
         store,
         generation_runner=fake_generation_runner,
-        available_pipelines=("standard", "custom", "asset_based"),
+        available_pipelines=("standard", "codex_scene_video", "custom", "asset_based"),
+        surface="codex",
     )
     monkeypatch.setattr(server, "_build_service", lambda: service)
     return service
@@ -243,13 +245,14 @@ async def test_plugin_reports_capabilities(plugin_service):
 
     assert result["status"] == "ok"
     assert result["plugin"] == "pixelle-ops"
-    assert result["protocol_version"] == "p0.9.20260622"
+    assert result["protocol_version"] == "p1.0.20260712"
     assert "pixelle_list_projects" in result["required_tools"]
     assert "pixelle_create_channel_account" in result["required_tools"]
     assert "pixelle_get_capabilities" in result["required_tools"]
     assert "pixelle_list_production_templates" in result["required_tools"]
     assert "pixelle_set_project_generation_settings" in result["required_tools"]
     assert "pixelle_submit_generation_draft" in result["required_tools"]
+    assert "pixelle_save_agent_image" in result["required_tools"]
     assert "pixelle_approve_generation_draft" in result["required_tools"]
     assert "pixelle_set_project_cheat_workspace" in result["required_tools"]
     assert "pixelle_get_cheat_workspace_summary" in result["required_tools"]
@@ -268,8 +271,14 @@ async def test_plugin_reports_capabilities(plugin_service):
     assert result["conversation_gates"]["content_shape_gate"] is True
     assert result["conversation_gates"]["existing_generation_gate"] is True
     assert result["conversation_gates"]["pipeline_selection_gate"] is False
+    assert result["conversation_gates"]["codex_storyboard_approval_gate"] is True
+    story_contract = result["codex_image_story"]
+    assert story_contract["scene_count"]["default"] is None
+    assert story_contract["scene_count"]["user_specified_count_takes_precedence"] is True
+    assert story_contract["before_image_generation"]["requires_user_confirmation"] is True
+    assert story_contract["after_confirmation"]["second_confirmation_required"] is False
     assert result["conversation_gates"]["production_template_selection_gate"] is True
-    assert result["conversation_contract_version"] == "p0.9.20260622"
+    assert result["conversation_contract_version"] == "p1.0.20260712"
     assert result["conversation_contract"]["requires_capability_first"] is True
     assert result["conversation_contract"]["first_tool"] == "pixelle_get_capabilities"
     assert result["conversation_contract"]["primary_entry"] == "codex_natural_language"
@@ -494,7 +503,12 @@ async def test_plugin_lists_generation_pipelines(plugin_service):
     result = await server.pixelle_list_generation_pipelines()
 
     assert result["status"] == "ok"
-    assert result["pipeline_names"] == ["standard", "custom", "asset_based"]
+    assert result["pipeline_names"] == [
+        "standard",
+        "codex_scene_video",
+        "custom",
+        "asset_based",
+    ]
     assert result["default_pipeline"] == "standard"
     assert result["next_action"]["kind"] == "select_generation_pipeline"
 
@@ -521,6 +535,7 @@ async def test_plugin_lists_production_templates_and_sets_project_default(plugin
     assert listed["default_template"] == "pipeline_standard_base_v1"
     assert listed["templates"][0]["user_selectable_providers"] == []
     templates = {template["id"]: template for template in listed["templates"]}
+    assert templates["codex_image_story_v1"]["access_scope"] == "codex"
     assert templates["petwoods_xhs_topic_to_video_v1"]["input_requirements"] == ["topic"]
     assert templates["petwoods_xhs_quality_explainer_v1"]["runtime_label"] == "高质量动效合成"
     assert settings["generation_settings"]["default_production_template_id"] == (
@@ -529,6 +544,102 @@ async def test_plugin_lists_production_templates_and_sets_project_default(plugin
     assert current["project"]["generation_settings"]["default_production_template_id"] == (
         "petwoods_xhs_quality_explainer_v1"
     )
+
+
+@pytest.mark.asyncio
+async def test_plugin_saves_confirmed_codex_image_idempotently(
+    plugin_service,
+    tmp_path,
+    monkeypatch,
+):
+    from pixelle_video.generation import agent_images
+
+    monkeypatch.setattr(
+        agent_images,
+        "get_data_path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    project = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = await server.pixelle_create_cycle(
+        project_id=project["entity"]["id"],
+        name="Codex image story",
+        goal="Validate the handoff",
+        source=_source(),
+    )
+    experiment = await server.pixelle_create_experiment(
+        project_id=project["entity"]["id"],
+        cycle_id=cycle["entity"]["id"],
+        title="Cat boxes",
+        hypothesis="A visual explainer will retain viewers.",
+        source=_source(),
+    )
+    image_path = tmp_path / "codex.png"
+    Image.new("RGB", (32, 48), color="orange").save(image_path)
+
+    saved = await server.pixelle_save_agent_image(
+        experiment_id=experiment["entity"]["id"],
+        scene_id="scene-1",
+        prompt="A curious cat looking into a cardboard box",
+        file_path=str(image_path),
+        source=_source(),
+    )
+    repeated = await server.pixelle_save_agent_image(
+        experiment_id=experiment["entity"]["id"],
+        scene_id="scene-1",
+        prompt="A curious cat looking into a cardboard box",
+        file_path=str(image_path),
+        source=_source(),
+    )
+
+    assert saved["status"] == "ok"
+    assert saved["asset"]["width"] == 32
+    assert saved["asset"]["height"] == 48
+    assert repeated["asset"]["idempotent"] is True
+    assert saved["asset"]["path"] == repeated["asset"]["path"]
+
+
+@pytest.mark.asyncio
+async def test_plugin_rejects_agent_image_before_user_confirmation(
+    plugin_service,
+    tmp_path,
+):
+    project = await server.pixelle_create_project(
+        name="PetWoods",
+        product="PetWoods",
+        channel="xiaohongshu",
+        source=_source(),
+    )
+    cycle = await server.pixelle_create_cycle(
+        project_id=project["entity"]["id"],
+        name="Codex image story",
+        goal="Validate confirmation",
+        source=_source(),
+    )
+    experiment = await server.pixelle_create_experiment(
+        project_id=project["entity"]["id"],
+        cycle_id=cycle["entity"]["id"],
+        title="Cat boxes",
+        hypothesis="A visual explainer will retain viewers.",
+        source=_source(),
+    )
+    image_path = tmp_path / "codex.png"
+    Image.new("RGB", (32, 48), color="orange").save(image_path)
+
+    result = await server.pixelle_save_agent_image(
+        experiment_id=experiment["entity"]["id"],
+        scene_id="scene-1",
+        prompt="A curious cat looking into a cardboard box",
+        file_path=str(image_path),
+        source=_source(confirmed=False),
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "source_not_confirmed"
 
 
 @pytest.mark.asyncio
@@ -578,7 +689,7 @@ async def test_plugin_rejects_unknown_generation_pipeline(plugin_service):
 
     assert result["status"] == "error"
     assert result["error"]["code"] == "unknown_generation_pipeline"
-    assert "standard, custom, asset_based" in result["error"]["message"]
+    assert "standard, codex_scene_video, custom, asset_based" in result["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -743,6 +854,7 @@ async def test_fastmcp_client_can_call_pixelle_tools(plugin_service):
     assert "pixelle_list_production_templates" in tool_names
     assert "pixelle_set_project_generation_settings" in tool_names
     assert "pixelle_list_generation_pipelines" in tool_names
+    assert "pixelle_save_agent_image" in tool_names
     assert "pixelle_submit_generation_draft" in tool_names
     assert "pixelle_approve_generation_draft" in tool_names
     assert "pixelle_get_generation_status" in tool_names

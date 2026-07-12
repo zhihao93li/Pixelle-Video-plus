@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from web.utils.runninghub_workflows import (
+from pixelle_video.utils.runninghub_workflows import (
     build_runninghub_workflow_filename,
     create_runninghub_workflow_file,
     list_custom_runninghub_workflows,

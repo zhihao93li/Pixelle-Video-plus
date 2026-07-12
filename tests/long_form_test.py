@@ -54,7 +54,7 @@ def patched(monkeypatch, tmp_path):
         return await llm_service(**kwargs)
 
     monkeypatch.setattr(
-        "web.utils.script_review._call_llm_retrying_empty", fake_retry
+        "pixelle_video.generation.script_review._call_llm_retrying_empty", fake_retry
     )
     monkeypatch.setattr(
         long_form_module,

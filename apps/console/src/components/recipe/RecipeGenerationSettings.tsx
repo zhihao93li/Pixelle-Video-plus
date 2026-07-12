@@ -23,12 +23,14 @@ import { useToast } from "@/components/ui/toast"
 import { readableError } from "@/lib/format"
 import {
   getTemplateGenerationConfig,
+  listImageProviderResources,
   listResourceMediaWorkflows,
   listResourceTemplates,
   listResourceTtsWorkflows,
   updateTemplateGenerationConfig,
   type ResourceTemplate,
   type ResourceWorkflow,
+  type ImageProviderSetting,
   type TemplateGenerationConfig,
 } from "@/lib/generationApi"
 import {
@@ -46,6 +48,8 @@ const CONTENT_KEYS = [
   "llm_model",
 ]
 const VISUAL_KEYS = [
+  "image_provider",
+  "image_model",
   "media_workflow",
   "workflow_key",
   "source",
@@ -58,6 +62,7 @@ const VOICE_KEYS = [
   "tts_workflow",
   "tts_voice",
   "tts_speed",
+  "ref_audio",
 ]
 const OUTPUT_KEYS = [
   "frame_template",
@@ -99,10 +104,12 @@ export function RecipeGenerationSettings({
   templateId,
   expertMode,
   onDirtyChange,
+  codexOnly = false,
 }: {
   templateId: string
   expertMode: boolean
   onDirtyChange: (dirty: boolean) => void
+  codexOnly?: boolean
 }) {
   const toast = useToast()
   const [config, setConfig] = useState<TemplateGenerationConfig | null>(null)
@@ -111,6 +118,9 @@ export function RecipeGenerationSettings({
   )
   const [frameTemplates, setFrameTemplates] = useState<ResourceTemplate[]>([])
   const [mediaWorkflows, setMediaWorkflows] = useState<ResourceWorkflow[]>([])
+  const [imageProviders, setImageProviders] = useState<ImageProviderSetting[]>(
+    []
+  )
   const [ttsWorkflows, setTtsWorkflows] = useState<ResourceWorkflow[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -122,28 +132,39 @@ export function RecipeGenerationSettings({
   useEffect(() => {
     let cancelled = false
     const resourceErrors: string[] = []
+    const mediaWorkflowRequest = codexOnly
+      ? Promise.resolve({ workflows: [] as ResourceWorkflow[] })
+      : listResourceMediaWorkflows().catch((error: unknown) => {
+          resourceErrors.push(`画面生成方式：${readableError(error)}`)
+          return { workflows: [] }
+        })
+    const imageProviderRequest = codexOnly
+      ? Promise.resolve({ providers: [] as ImageProviderSetting[] })
+      : listImageProviderResources().catch((error: unknown) => {
+          resourceErrors.push(`图片 Provider：${readableError(error)}`)
+          return { providers: [] }
+        })
     void Promise.all([
       getTemplateGenerationConfig(templateId),
       listResourceTemplates().catch((error: unknown) => {
         resourceErrors.push(`画面模板：${readableError(error)}`)
         return { templates: [] }
       }),
-      listResourceMediaWorkflows().catch((error: unknown) => {
-        resourceErrors.push(`画面生成方式：${readableError(error)}`)
-        return { workflows: [] }
-      }),
+      mediaWorkflowRequest,
       listResourceTtsWorkflows().catch((error: unknown) => {
         resourceErrors.push(`配音生成方式：${readableError(error)}`)
         return { workflows: [] }
       }),
+      imageProviderRequest,
     ])
-      .then(([nextConfig, frames, media, tts]) => {
+      .then(([nextConfig, frames, media, tts, providers]) => {
         if (cancelled) return
         setConfig(nextConfig)
         setDraftOverrides(nextConfig.overrides)
         setFrameTemplates(frames.templates)
         setMediaWorkflows(media.workflows)
         setTtsWorkflows(tts.workflows)
+        setImageProviders(providers.providers)
         setResourceWarning(
           resourceErrors.length > 0 ? resourceErrors.join("；") : null
         )
@@ -158,7 +179,7 @@ export function RecipeGenerationSettings({
     return () => {
       cancelled = true
     }
-  }, [reloadToken, templateId])
+  }, [codexOnly, reloadToken, templateId])
 
   const dirty = config ? !sameRecord(draftOverrides, config.overrides) : false
   useEffect(() => {
@@ -228,7 +249,9 @@ export function RecipeGenerationSettings({
       setDraftOverrides(next.overrides)
       toast({
         title: "生产设置已保存",
-        description: "下次使用这份配方时自动生效。",
+        description: codexOnly
+          ? "Codex 下次使用这份配方时自动读取。"
+          : "下次使用这份配方时自动生效。",
         variant: "success",
       })
     } catch (error) {
@@ -456,6 +479,86 @@ export function RecipeGenerationSettings({
     )
   }
 
+  function renderImageProviderFields() {
+    if (!allowed.has("image_provider")) return null
+    const currentProvider = String(
+      currentValue("image_provider") || "comfy_workflow"
+    )
+    const selected = imageProviders.find(
+      (provider) => provider.id === currentProvider
+    )
+    const currentModel = String(
+      currentValue("image_model") || selected?.default_model || ""
+    )
+
+    return (
+      <div className="grid gap-4 sm:col-span-2 sm:grid-cols-2">
+        <div>
+          <div className="mb-1.5 text-xs text-muted-foreground">
+            图片 Provider
+          </div>
+          <Select
+            onValueChange={(provider) => {
+              updateValue("image_provider", provider)
+              if (provider === "comfy_workflow") {
+                restoreKey("image_model")
+                return
+              }
+              const next = imageProviders.find((item) => item.id === provider)
+              if (next) updateValue("image_model", next.default_model)
+            }}
+            value={currentProvider}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="comfy_workflow">
+                RunningHub / ComfyUI Workflow
+              </SelectItem>
+              {imageProviders.map((provider) => (
+                <SelectItem
+                  disabled={!provider.enabled || !provider.configured}
+                  key={provider.id}
+                  value={provider.id}
+                >
+                  {provider.id === "aliyun_bailian" ? "阿里云百炼" : "火山方舟"}
+                  {!provider.enabled || !provider.configured
+                    ? "（未就绪）"
+                    : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {currentProvider === "comfy_workflow" ? (
+          <div className="flex min-h-9 items-end rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            模型由所选 Workflow 决定
+          </div>
+        ) : (
+          <div>
+            <div className="mb-1.5 text-xs text-muted-foreground">图片模型</div>
+            <Select
+              onValueChange={(model) => updateValue("image_model", model)}
+              value={currentModel}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="选择模型" />
+              </SelectTrigger>
+              <SelectContent>
+                {(selected?.models ?? []).map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {model.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   function section(
     title: string,
     description: string,
@@ -533,15 +636,21 @@ export function RecipeGenerationSettings({
       )}
 
       {section(
-        "画面生成",
-        "先选择执行 Provider，再选择该 Provider 下的 Workflow；画面风格与生成规则在同一区域设置。",
+        codexOnly ? "Codex 生图风格" : "画面生成",
+        codexOnly
+          ? "设置 Codex 为每个分镜生成图片时使用的整体风格、视觉背景和提示词规则。"
+          : "选择图片 Provider 与模型；使用工作流时再选择 RunningHub 或本机 ComfyUI Workflow。",
         <>
+          {renderImageProviderFields()}
           {allowed.has("media_workflow")
-            ? renderWorkflowField(
-                "media_workflow",
-                "画面生成方式",
-                mediaWorkflows
-              )
+            ? String(currentValue("image_provider") || "comfy_workflow") ===
+              "comfy_workflow"
+              ? renderWorkflowField(
+                  "media_workflow",
+                  "画面生成方式",
+                  mediaWorkflows
+                )
+              : null
             : null}
           {allowed.has("workflow_key")
             ? renderWorkflowField("workflow_key", "生成方式", mediaWorkflows)
@@ -552,7 +661,13 @@ export function RecipeGenerationSettings({
           {visualKeys
             .filter(
               (key) =>
-                !["media_workflow", "workflow_key", "source"].includes(key)
+                ![
+                  "image_provider",
+                  "image_model",
+                  "media_workflow",
+                  "workflow_key",
+                  "source",
+                ].includes(key)
             )
             .map(renderField)}
         </>,

@@ -18,6 +18,17 @@ npm install
 npm run dev
 ```
 
+开发服务器会将同源 `/api` 请求代理到 `127.0.0.1:8000`。生产构建由 FastAPI
+直接托管：
+
+```bash
+npm run build
+cd ../..
+uv run uvicorn api.app:app --host 127.0.0.1 --port 8000
+```
+
+随后打开 `http://127.0.0.1:8000/#/board`。
+
 ## 验证
 
 ```bash

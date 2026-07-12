@@ -81,7 +81,7 @@ class LongFormPipeline(BasePipeline):
         progress_callback: Optional[Callable[[ProgressEvent], None]] = None,
         **kwargs,
     ) -> LongFormResult:
-        from web.utils.script_review import _call_llm_retrying_empty
+        from pixelle_video.generation.script_review import _call_llm_retrying_empty
 
         params = kwargs
         script = (text or "").strip()

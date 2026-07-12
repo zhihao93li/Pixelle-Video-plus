@@ -6,14 +6,16 @@ Automated build system for creating Windows portable packages of Pixelle-Video.
 
 ### Prerequisites
 
+- Windows 10/11 x64 build host (cross-platform builds are rejected because native wheels are platform-specific)
 - Python 3.11+ (for running the build script)
+- Node.js 20.19+ or 22.12+ and npm (required by the locked Vite toolchain)
 - PyYAML: `pip install pyyaml`
 - Internet connection (for downloading Python, FFmpeg, etc.)
 
 ### Build Package
 
 ```bash
-# Basic build
+# Run these commands on Windows. Basic build:
 python packaging/windows/build.py
 
 # Build with China mirrors (faster in China)
@@ -41,13 +43,13 @@ The build process creates:
 dist/windows/
 ├── Pixelle-Video-v*-win64/             # Build directory (version number varies)
 │   ├── python/                         # Python embedded
-│   ├── tools/                          # FFmpeg, etc.
-│   ├── Pixelle-Video/                  # Project files
-│   ├── data/                           # User data (empty)
-│   ├── output/                         # Output (empty)
+│   ├── tools/                          # FFmpeg and portable Chromium
+│   ├── Pixelle-Video/                  # Allowlisted project files
+│   │   ├── apps/console/dist/          # Production React console
+│   │   ├── data/                       # Runtime data (empty except built-in prompts)
+│   │   └── output/                     # Generated output (empty)
 │   ├── start.bat                       # Main launcher
-│   ├── start_api.bat                   # API launcher
-│   ├── start_web.bat                   # Web launcher
+│   ├── open_browser.py                 # Health-aware browser launcher
 │   └── README.txt                      # User guide
 ├── Pixelle-Video-v*-win64.zip          # ZIP package (version number varies)
 └── Pixelle-Video-v*-win64.zip.sha256   # Checksum (version number varies)
@@ -69,18 +71,22 @@ The builder performs these steps:
 3. **Prepare Phase**
    - Enable site-packages in Python
    - Install pip
-   - Install uv (if configured)
 
 4. **Install Phase**
-   - Install project dependencies using uv/pip
+   - Install runtime dependencies using the embedded Windows Python
+   - Install portable Playwright Chromium
    - Pre-install all packages
 
-5. **Copy Phase**
+5. **Console Build Phase**
+   - Install locked npm dependencies
+   - Build the React console with same-origin `/api` requests
+
+6. **Copy Phase**
    - Copy project files (excluding test/docs/cache)
    - Generate launcher scripts from templates
    - Create empty directories
 
-6. **Package Phase**
+7. **Package Phase**
    - Create ZIP archive
    - Generate SHA256 checksum
 
@@ -88,9 +94,8 @@ The builder performs these steps:
 
 Launcher script templates in `templates/`:
 
-- `start.bat` - Main Web UI launcher
-- `start_api.bat` - API server launcher  
-- `start_web.bat` - Web UI only launcher
+- `start.bat` - Unified React console and API launcher
+- `open_browser.py` - Opens the console after the API health check passes
 - `README.txt` - User documentation
 
 Templates support placeholders:
@@ -104,11 +109,12 @@ Downloaded files are cached in `.cache/`:
 ```
 .cache/
 ├── python-3.11.9-embed-amd64.zip
-├── ffmpeg-6.1.1-win64.zip
+├── ffmpeg-autobuild-2026-06-30-13-34-win64.zip
 └── get-pip.py
 ```
 
-Delete cache to force re-download.
+Every cached build input is checked against its pinned SHA-256 digest. Delete the
+cache to force a verified re-download.
 
 ## Troubleshooting
 
@@ -213,4 +219,3 @@ Compare with `.sha256` file.
 ## License
 
 Same as Pixelle-Video project license.
-

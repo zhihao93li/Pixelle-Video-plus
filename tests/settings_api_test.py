@@ -70,6 +70,37 @@ def test_settings_config_endpoint_returns_current_configuration():
     assert payload["configured"] is True
     assert payload["config"]["llm"]["api_key"] == "llm-key"
     assert payload["config"]["publish"]["buffer"]["channels"]["youtube"] == "yt-channel"
+    assert payload["config"]["image_generation"]["aliyun_bailian"]["api_key"] == ""
+
+
+def test_image_provider_settings_preserve_secret_when_update_omits_key():
+    fake_config_manager.config = PixelleVideoConfig(
+        image_generation={
+            "aliyun_bailian": {
+                "enabled": True,
+                "api_key": "existing-secret",
+                "workspace_id": "workspace-1",
+            }
+        }
+    )
+    app.dependency_overrides[get_config_manager] = get_fake_config_manager
+
+    try:
+        client = TestClient(app)
+        listed = client.get("/api/settings/image-providers")
+        updated = client.put(
+            "/api/settings/image-providers/aliyun_bailian",
+            json={"concurrency_limit": 3},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert listed.status_code == 200
+    assert listed.json()["providers"][0]["configured"] is True
+    assert "api_key" not in listed.json()["providers"][0]
+    assert updated.status_code == 200
+    assert fake_config_manager.config.image_generation.aliyun_bailian.api_key == "existing-secret"
+    assert fake_config_manager.config.image_generation.aliyun_bailian.concurrency_limit == 3
 
 
 def test_settings_diagnostics_endpoint_returns_redacted_readiness_checks():
@@ -308,9 +339,7 @@ def test_settings_runninghub_workflow_endpoints_register_wrapper(tmp_path):
     assert payload["workflow"]["key"] == "runninghub/video_wan_custom.json"
     assert payload["workflow"]["workflow_id"] == "1985909483975188481"
     assert list_response.status_code == 200
-    assert list_response.json()["workflows"][0]["key"] == (
-        "runninghub/video_wan_custom.json"
-    )
+    assert list_response.json()["workflows"][0]["key"] == ("runninghub/video_wan_custom.json")
 
 
 def test_settings_buffer_channels_endpoint_maps_supported_channels(monkeypatch):

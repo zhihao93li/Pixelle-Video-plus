@@ -1,5 +1,21 @@
 # Pixelle-Video Docker Image
-# Based on Python 3.11 slim for smaller image size
+# Build the React console once, then serve it from the Python application image.
+
+FROM node:22-alpine AS console-builder
+
+ARG USE_CN_MIRROR=false
+WORKDIR /console
+
+COPY apps/console/package.json apps/console/package-lock.json ./
+RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
+        npm config set registry https://registry.npmmirror.com; \
+    fi && \
+    npm ci
+
+COPY apps/console ./
+RUN npm run build && \
+    test -f dist/index.html && \
+    test -d dist/assets
 
 FROM python:3.11-slim
 
@@ -56,22 +72,23 @@ RUN export UV_HTTP_TIMEOUT=300 && \
 
 # Copy rest of application code
 COPY api ./api
-COPY web ./web
+COPY ops ./ops
+COPY --from=console-builder /console/dist ./apps/console/dist
 COPY bgm ./bgm
 COPY templates ./templates
 COPY workflows ./workflows
 COPY resources ./resources
+COPY data/prompt_templates/script/bazi_storyboard_oral_script.md ./data/prompt_templates/script/bazi_storyboard_oral_script.md
+COPY data/prompt_templates/script/bazi_storyboard_oral_script_english.md ./data/prompt_templates/script/bazi_storyboard_oral_script_english.md
 COPY docs/images ./docs/images
-COPY docs/FAQ*.md ./docs/
+COPY docs/en/faq.md ./docs/en/faq.md
+COPY docs/zh/faq.md ./docs/zh/faq.md
 
 # Create output, data and temp directories
 RUN mkdir -p /app/output /app/data /app/temp
 
-# Expose ports
-# 8000: API service
-# 8501: Web UI service
-EXPOSE 8000 8501
+# Port 8000 serves both the React console and the API.
+EXPOSE 8000
 
 # Default command (can be overridden in docker-compose)
 CMD ["uv", "run", "python", "api/app.py"]
-

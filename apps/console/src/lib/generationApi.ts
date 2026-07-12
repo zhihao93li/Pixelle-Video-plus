@@ -6,7 +6,7 @@ type ImportMetaWithEnv = ImportMeta & {
 
 export const API_BASE_URL =
   (import.meta as ImportMetaWithEnv).env?.VITE_PIXELLE_API_BASE_URL ??
-  "http://127.0.0.1:8000/api"
+  "/api"
 
 export type GenerationStatus =
   "pending" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
@@ -52,11 +52,17 @@ export type ProductionTemplate = {
   allowed_user_params: string[]
   passthrough_input_fields: string[]
   is_custom?: boolean
+  access_scope?: "public" | "codex"
 }
 
 export type TemplateListResponse = {
   default_template: string | null
   templates: ProductionTemplate[]
+  codex_templates?: ProductionTemplate[]
+}
+
+export function templatesForManagement(response: TemplateListResponse) {
+  return [...response.templates, ...(response.codex_templates ?? [])]
 }
 
 export type GenerationProgress = {
@@ -484,6 +490,41 @@ export type SettingsDiagnosticCheck = {
 export type SettingsDiagnosticsResponse = {
   ok: boolean
   checks: SettingsDiagnosticCheck[]
+}
+
+export type ImageProviderModel = { id: string; label: string }
+
+export type ImageProviderSetting = {
+  id: "aliyun_bailian" | "volcengine_ark"
+  enabled: boolean
+  configured: boolean
+  base_url: string
+  default_model: string
+  timeout: number
+  concurrency_limit: number
+  region?: "cn-beijing" | "ap-southeast-1"
+  workspace_id?: string
+  models: ImageProviderModel[]
+}
+
+export type ImageProviderListResponse = {
+  default_provider: "comfy_workflow" | "aliyun_bailian" | "volcengine_ark"
+  providers: ImageProviderSetting[]
+}
+
+export type ImageProviderUpdate = Partial<
+  Omit<ImageProviderSetting, "id" | "configured" | "models">
+> & {
+  api_key?: string
+  clear_api_key?: boolean
+}
+
+export type ImageProviderTestResponse = {
+  ok: boolean
+  provider: string
+  model: string
+  request_id?: string | null
+  image_url: string
 }
 
 export type SettingsConfigUpdate = Partial<{
@@ -1183,6 +1224,33 @@ export async function getSettingsDiagnostics() {
   return fetchJson<SettingsDiagnosticsResponse>("/settings/diagnostics")
 }
 
+export async function listImageProviders() {
+  return fetchJson<ImageProviderListResponse>("/settings/image-providers")
+}
+
+export async function listImageProviderResources() {
+  return fetchJson<ImageProviderListResponse>("/resources/image-providers")
+}
+
+export async function updateImageProvider(
+  providerId: ImageProviderSetting["id"],
+  updates: ImageProviderUpdate
+) {
+  return fetchJson<ImageProviderListResponse>(
+    `/settings/image-providers/${providerId}`,
+    { method: "PUT", body: JSON.stringify(updates) }
+  )
+}
+
+export async function testImageProvider(
+  providerId: ImageProviderSetting["id"]
+) {
+  return fetchJson<ImageProviderTestResponse>(
+    `/settings/image-providers/${providerId}/test`,
+    { method: "POST" }
+  )
+}
+
 export async function updateSettingsConfig(updates: SettingsConfigUpdate) {
   return fetchJson<SettingsConfigResponse>("/settings/config", {
     method: "PUT",
@@ -1350,7 +1418,7 @@ async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
     })
   } catch (error) {
     throw new ApiError(
-      "无法连接 Pixelle API。请确认 http://127.0.0.1:8000 正在运行。",
+      "无法连接 Pixelle API。请确认 Pixelle 服务正在运行并可访问。",
       0,
       error instanceof Error ? error.message : error
     )

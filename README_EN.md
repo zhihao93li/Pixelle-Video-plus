@@ -21,14 +21,14 @@ Pixelle is an AI content production workspace for solo content operators. It kee
 | `pixelle_video` | Content generation, recipes, pipelines, and media services |
 | `ops` | Operating-project state and persistence |
 | `codex_plugin` | Codex operations interface |
-| `web` | Independently runnable Streamlit interface |
+| `web` | Frozen legacy Streamlit interface pending compatibility removal |
 | `tests` | Python unit and integration tests |
 
 See the [current product contract](docs/zh/product/current-product.md) and the console [design and implementation contract](apps/console/DESIGN.md).
 
 ## Local Development
 
-Requires Python 3.11+, Node.js 20+, FFmpeg, and `uv`.
+Requires Python 3.11+, Node.js 20.19+ or 22.12+, FFmpeg, and `uv`.
 
 Install backend dependencies:
 
@@ -52,11 +52,14 @@ npm run dev
 
 Open `http://127.0.0.1:5173`. API documentation is available at `http://127.0.0.1:8000/docs` by default.
 
-The Streamlit interface can be started independently:
+To build the console and run the production product as one process:
 
 ```bash
-uv run streamlit run web/app.py
+./start_web.sh
 ```
+
+`web/app.py` is retained only as a migration-period legacy tool. It receives no
+new features and must not edit configuration concurrently with the React console.
 
 ## Verification
 

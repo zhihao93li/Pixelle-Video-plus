@@ -2,8 +2,8 @@ from datetime import date, time
 
 import pytest
 
-from web.utils import publish_helpers
-from web.utils.publish_helpers import (
+from pixelle_video.utils import publish_helpers
+from pixelle_video.utils.publish_helpers import (
     append_hashtags_to_caption,
     build_default_caption,
     build_default_title,

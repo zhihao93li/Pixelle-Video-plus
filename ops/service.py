@@ -48,6 +48,7 @@ BLOCKED_GENERATION_DRAFT_MARKERS = (
 
 PIPELINE_DESCRIPTIONS = {
     "standard": "Default Pixelle generation pipeline.",
+    "codex_scene_video": "Codex-confirmed storyboard images composed by Pixelle.",
     "custom": "Custom generation pipeline for explicit generation parameters.",
     "asset_based": "Generation pipeline that starts from existing source assets.",
 }
@@ -70,12 +71,16 @@ class OpsService:
         generation_runner: GenerationRunner | None = None,
         generation_service: Any | None = None,
         available_pipelines: Iterable[str] | None = None,
+        surface: str = "public",
     ):
         self.store = store or OpsStore()
         self.store.init_db()
         self.generation_runner = generation_runner
         self.generation_service = generation_service
         self.available_pipelines = tuple(dict.fromkeys(available_pipelines)) if available_pipelines is not None else None
+        if surface not in {"public", "codex"}:
+            raise ValueError(f"Unknown Ops surface: {surface}")
+        self.surface = surface
         self.production_template_registry = build_default_production_template_registry()
 
     def create_project(
@@ -122,12 +127,21 @@ class OpsService:
             project="PetWoods",
             channel="xiaohongshu",
         )
+        templates = [
+            template
+            for template in self.production_template_registry.list()
+            if template.access_scope == "public" or self.surface == "codex"
+        ]
+        if default_template_id not in {template.id for template in templates}:
+            default_template_id = self.production_template_registry.default_template_id(
+                project="PetWoods", channel="xiaohongshu"
+            )
         return {
             "status": "ok",
             "default_template": default_template_id,
             "templates": [
                 template.model_dump(mode="json")
-                for template in self.production_template_registry.list()
+                for template in templates
             ],
             "next_action": {"kind": "select_production_template", "blocked": False},
         }
@@ -147,6 +161,10 @@ class OpsService:
             template = self.production_template_registry.get(default_production_template_id)
         except ProductionTemplateError as exc:
             raise OpsError("production_template_not_found", str(exc)) from None
+        try:
+            self.production_template_registry.require_access(template, surface=self.surface)
+        except ProductionTemplateError as exc:
+            raise OpsError("production_template_forbidden", str(exc)) from None
         generation_settings = {
             **(project.get("generation_settings") or {}),
             "default_production_template_id": template.id,
@@ -445,6 +463,15 @@ class OpsService:
         events = self.store.list_events_for_experiment(experiment_id)
         if not _has_event(events, OpsEventType.PREDICTION_LOCKED):
             raise OpsError("prediction_required", "Generation draft requires a locked prediction.")
+        if production_template_id:
+            try:
+                template = self.production_template_registry.get(production_template_id)
+                self.production_template_registry.require_access(
+                    template,
+                    surface=self.surface,
+                )
+            except ProductionTemplateError as exc:
+                raise OpsError("production_template_forbidden", str(exc)) from None
         _require_clean_generation_draft_text(text)
         event = self.store.append_event(
             project_id=experiment["project_id"],
@@ -461,6 +488,57 @@ class OpsService:
             source=source,
         )
         return _transition("generation_drafted", event, "approve_generation_draft")
+
+    def save_agent_image(
+        self,
+        *,
+        experiment_id: str,
+        scene_id: str,
+        prompt: str,
+        source: dict[str, Any],
+        image_data_url: str | None = None,
+        file_path: str | None = None,
+        replace: bool = False,
+        max_size: int = 100 * 1024 * 1024,
+    ) -> dict[str, Any]:
+        """Save one user-confirmed Codex scene image without calling a provider."""
+
+        _require_confirmed_source(source)
+        if source.get("kind") != "codex":
+            raise OpsError(
+                "codex_source_required",
+                "Agent image import requires a confirmed Codex source.",
+            )
+        self._get_experiment_or_raise(experiment_id)
+        if self.surface != "codex":
+            raise OpsError(
+                "codex_surface_required",
+                "Agent image import is only available through the Codex MCP surface.",
+            )
+
+        from pixelle_video.generation.agent_images import AgentImageError, save_agent_image
+
+        try:
+            asset = save_agent_image(
+                experiment_id=experiment_id,
+                scene_id=scene_id,
+                prompt=prompt,
+                source=source,
+                image_data_url=image_data_url,
+                file_path=file_path,
+                replace=replace,
+                max_size=max_size,
+            )
+        except AgentImageError as exc:
+            raise OpsError("agent_image_invalid", str(exc)) from None
+        return {
+            "status": "ok",
+            "asset": asset,
+            "next_action": {
+                "kind": "save_next_scene_image_or_submit_generation_draft",
+                "blocked": False,
+            },
+        }
 
     def approve_generation_draft(
         self,
@@ -499,7 +577,7 @@ class OpsService:
         events = self.store.list_events_for_experiment(experiment_id)
         if not _has_event(events, OpsEventType.PREDICTION_LOCKED):
             raise OpsError("prediction_required", "Content generation requires a locked prediction.")
-        _require_generation_request_window(events)
+        _require_generation_request_window(events, approved_draft_id=approved_draft_id)
         draft = _approved_draft_for_generation(events, approved_draft_id)
         if draft is None:
             raise OpsError("approved_draft_required", "Content generation requires an approved generation draft.")
@@ -522,6 +600,7 @@ class OpsService:
                 generation_params=draft_generation_params,
                 production_template_id=production_template_id,
                 registry=self.production_template_registry,
+                surface=self.surface,
             )
             pipeline = generation_request.pipeline_id
             generation_params = _generation_runner_params_for_request(
@@ -1474,9 +1553,20 @@ def _require_clean_generation_draft_text(text: str) -> None:
         )
 
 
-def _require_generation_request_window(events: list[dict[str, Any]]) -> None:
+def _require_generation_request_window(
+    events: list[dict[str, Any]],
+    *,
+    approved_draft_id: str | None = None,
+) -> None:
     latest_generation_event = _latest_generation_event(events)
     if latest_generation_event and latest_generation_event["event_type"] == OpsEventType.GENERATION_COMPLETED.value:
+        approval = (
+            _find_event(events, approved_draft_id, OpsEventType.GENERATION_DRAFT_APPROVED)
+            if approved_draft_id
+            else None
+        )
+        if approval and _event_is_after(events, approval["id"], latest_generation_event["id"]):
+            return
         latest_check = _latest_asset_check(events, latest_generation_event.get("content_item_id"))
         if latest_check and latest_check["payload"].get("status") == "failed":
             return
@@ -1484,6 +1574,11 @@ def _require_generation_request_window(events: list[dict[str, Any]]) -> None:
 
     if latest_generation_event and latest_generation_event["event_type"] == OpsEventType.GENERATION_REQUESTED.value:
         raise OpsError("generation_in_progress", "Generation is already requested and has not completed or failed.")
+
+
+def _event_is_after(events: list[dict[str, Any]], later_id: str, earlier_id: str) -> bool:
+    positions = {event["id"]: index for index, event in enumerate(events)}
+    return positions.get(later_id, -1) > positions.get(earlier_id, -1)
 
 
 def _generation_request_already_completed(events: list[dict[str, Any]], generation_event_id: str) -> bool:
@@ -1579,6 +1674,7 @@ def _generation_request_for_ops_draft(
     generation_params: dict[str, Any],
     production_template_id: str | None = None,
     registry: Any | None = None,
+    surface: str = "public",
 ) -> GenerationRequest:
     if production_template_id:
         if registry is None:
@@ -1594,6 +1690,7 @@ def _generation_request_for_ops_draft(
                 production_template_id,
                 input=input_payload,
                 metadata={"source": "ops"},
+                surface=surface,
             )
         except ProductionTemplateError as exc:
             raise OpsError("production_template_invalid", str(exc)) from None
@@ -1639,6 +1736,11 @@ def _production_template_input_for_ops_draft(
         return input_payload
     if template.entry == "script":
         return {"script": text}
+    if template.entry == "scenes":
+        return {
+            **generation_params,
+            "scenes": generation_params.get("scenes"),
+        }
     return {template.entry: generation_params.get(template.entry) or text}
 
 

@@ -258,6 +258,43 @@ const settings = {
   },
 }
 
+const imageProviders = {
+  default_provider: "comfy_workflow",
+  providers: [
+    {
+      id: "aliyun_bailian",
+      enabled: false,
+      configured: false,
+      base_url: "https://dashscope.aliyuncs.com/api/v1",
+      default_model: "qwen-image-2.0",
+      timeout: 300,
+      concurrency_limit: 2,
+      region: "cn-beijing",
+      workspace_id: "",
+      models: [
+        { id: "qwen-image-2.0", label: "Qwen-Image 2.0" },
+        { id: "qwen-image-2.0-pro", label: "Qwen-Image 2.0 Pro" },
+        { id: "wan2.6-t2i", label: "通义万相 2.6 文生图" },
+      ],
+    },
+    {
+      id: "volcengine_ark",
+      enabled: false,
+      configured: false,
+      base_url: "https://ark.cn-beijing.volces.com/api/v3",
+      default_model: "doubao-seedream-5-0-lite",
+      timeout: 300,
+      concurrency_limit: 2,
+      models: [
+        {
+          id: "doubao-seedream-5-0-lite",
+          label: "Seedream 5.0 Lite",
+        },
+      ],
+    },
+  ],
+}
+
 const generationProgress = (
   percentage: number,
   message: string,
@@ -1168,6 +1205,13 @@ function responseFor(
       return { status: 503, body: { detail: "设置服务暂时不可用。" } }
     }
     return { body: { configured: true, config: settings } }
+  }
+  if (
+    method === "GET" &&
+    (path === "/settings/image-providers" ||
+      path === "/resources/image-providers")
+  ) {
+    return { body: imageProviders }
   }
   if (method === "GET" && path === "/settings/diagnostics") {
     if (options.settingsDiagnosticsState === "error") {

@@ -90,7 +90,11 @@ def _service_for_pipeline(pipeline, storage_dir=None):
 
 
 def _service_for_asset_pipeline(pipeline):
-    manifest = build_default_pipeline_manifests()[2]
+    manifest = next(
+        manifest
+        for manifest in build_default_pipeline_manifests()
+        if manifest.id == "asset_based"
+    )
     registry = build_pipeline_registry([manifest], pipelines={"asset_based": pipeline})
     return GenerationService(pipeline_registry=registry, task_id_factory=lambda: "gen-task-1")
 

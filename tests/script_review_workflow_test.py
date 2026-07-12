@@ -3,16 +3,7 @@ from pathlib import Path
 import pytest
 
 from pixelle_video.config.schema import AIHUBMIX_BASE_URL
-from pixelle_video.models.progress import ProgressEvent
-from pixelle_video.services.llm_service import LLMService, build_completion_token_kwargs
-from web.components.script_review_workflow import (
-    _language_script_model_defaults_for_template,
-    _overall_video_progress,
-    _script_model_default_for_template,
-    _split_model_default_for_template,
-    _video_event_label,
-)
-from web.utils.script_review import (
+from pixelle_video.generation.script_review import (
     SOURCE_LANGUAGE_KEY,
     DraftParseError,
     DraftTranslationCountError,
@@ -30,6 +21,15 @@ from web.utils.script_review import (
     render_language_title_prompt,
     render_prompt_template,
     validate_language_tts_overrides,
+)
+from pixelle_video.models.progress import ProgressEvent
+from pixelle_video.services.llm_service import LLMService, build_completion_token_kwargs
+from web.components.script_review_workflow import (
+    _language_script_model_defaults_for_template,
+    _overall_video_progress,
+    _script_model_default_for_template,
+    _split_model_default_for_template,
+    _video_event_label,
 )
 
 

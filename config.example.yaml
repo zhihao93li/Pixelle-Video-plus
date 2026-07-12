@@ -60,6 +60,27 @@ comfyui:
     # Video prompt prefix (optional)
     prompt_prefix: "Minimalist black-and-white matchstick figure style illustration, clean lines, simple sketch style"
 
+# ==================== Direct Image Providers ====================
+# Existing recipes keep using comfy_workflow unless explicitly changed.
+image_generation:
+  default_provider: comfy_workflow
+  aliyun_bailian:
+    enabled: false
+    api_key: ""
+    region: cn-beijing
+    workspace_id: ""
+    base_url: ""  # Optional full endpoint; otherwise derived from region + workspace_id
+    default_model: qwen-image-2.0
+    timeout: 300
+    concurrency_limit: 2
+  volcengine_ark:
+    enabled: false
+    api_key: ""
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    default_model: doubao-seedream-5-0-lite
+    timeout: 300
+    concurrency_limit: 2
+
 # ==================== Template Configuration ====================
 # Configure default template for video generation
 template:

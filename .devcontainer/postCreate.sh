@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
 echo "[devcontainer] Running postCreate tasks..."
 
-cd /workspaces/Pixelle-Video
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
 # ============================================================================
 # System Dependencies Installation
@@ -18,10 +19,7 @@ sudo rm -f /etc/apt/sources.list.d/yarn.list 2>/dev/null || true
 
 # Update package lists
 echo "[devcontainer] Updating package lists..."
-sudo apt-get update -y || {
-  echo "[devcontainer] Warning: apt-get update had issues, continuing anyway..."
-  true
-}
+sudo apt-get update -y
 
 # Install system packages needed by the project
 echo "[devcontainer] Installing system packages..."
@@ -32,7 +30,7 @@ sudo apt-get install -y --no-install-recommends \
   fonts-noto-cjk \
   wget \
   xdg-utils \
-  ca-certificates || true
+  ca-certificates
 
 # Verify installation
 echo "[devcontainer] Verifying system packages..."
@@ -51,8 +49,16 @@ pip install uv --quiet
 echo "[devcontainer] Installing Python dependencies with uv..."
 uv sync --frozen
 
+# Build the production React console served by FastAPI.
+echo "[devcontainer] Installing and building the React console..."
+(
+  cd apps/console
+  npm ci
+  npm run build
+)
+
 # Install Playwright browser (Chromium for HTML template rendering)
 echo "[devcontainer] Installing Playwright Chromium browser..."
-uv run playwright install --with-deps chromium || true
+uv run playwright install --with-deps chromium
 
-echo "[devcontainer] postCreate complete. Streamlit will start automatically via postStart.sh"
+echo "[devcontainer] postCreate complete. React + FastAPI will start via postStart.sh"

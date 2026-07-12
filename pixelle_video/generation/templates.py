@@ -76,6 +76,7 @@ class ProductionTemplate(BaseModel):
     allowed_user_params: list[str] = Field(default_factory=list)
     passthrough_input_fields: list[str] = Field(default_factory=list)
     is_custom: bool = False
+    access_scope: Literal["public", "codex"] = "public"
 
     def identity_metadata(self) -> dict[str, Any]:
         return {
@@ -134,8 +135,10 @@ class ProductionTemplateRegistry:
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
         available_capabilities: set[str] | None = None,
+        surface: Literal["public", "codex"] = "public",
     ) -> GenerationRequest:
         template = self.get(template_id)
+        self.require_access(template, surface=surface)
         if not template.enabled:
             raise ProductionTemplateError(
                 f"Production template {template.id!r} is not available through the generic "
@@ -185,6 +188,17 @@ class ProductionTemplateRegistry:
             },
             idempotency_key=idempotency_key,
         )
+
+    @staticmethod
+    def require_access(
+        template: ProductionTemplate,
+        *,
+        surface: Literal["public", "codex"],
+    ) -> None:
+        if template.access_scope == "codex" and surface != "codex":
+            raise ProductionTemplateError(
+                f"Production template {template.id!r} is only available through Codex."
+            )
 
     def _require_capabilities(
         self,
@@ -330,6 +344,8 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                     "frame_template",
                     "template_params",
                     "media_workflow",
+                    "image_provider",
+                    "image_model",
                     "media_width",
                     "media_height",
                     "prompt_prefix",
@@ -351,6 +367,57 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                     "frame_template": "1080x1920/image_default.html",
                     "tts_inference_mode": "local",
                     "tts_voice": "zh-CN-YunjianNeural",
+                    "video_fps": 30,
+                    "bgm_volume": 0.2,
+                    "bgm_mode": "loop",
+                    "compose_runtime": "html_ffmpeg",
+                    "quality_profile": "basic",
+                    "allow_silent": False,
+                },
+            ),
+            ProductionTemplate(
+                id="codex_image_story_v1",
+                version="v1",
+                display_name="Codex \u914d\u56fe\u53e3\u64ad\u89c6\u9891",
+                description=(
+                    "Codex \u6839\u636e\u7528\u6237\u786e\u8ba4\u7684\u5206\u955c\u751f\u6210\u56fe\u7247\uff0cPixelle \u8d1f\u8d23\u914d\u97f3\u3001\u5b57\u5e55\u548c\u89c6\u9891\u5408\u6210\u3002"
+                ),
+                use_case="codex_image_story",
+                runtime_label="Codex \u56fe\u7247\u4ea4\u63a5\u5408\u6210",
+                estimated_turnaround="\u53d6\u51b3\u4e8e\u5206\u955c\u6570\u91cf\u548c\u914d\u97f3\u65f6\u957f",
+                failure_guidance="\u68c0\u67e5\u5206\u955c\u56fe\u7247\u3001TTS \u548c FFmpeg \u914d\u7f6e\u540e\u91cd\u8bd5\u3002",
+                requires_user_assets=True,
+                template_tags=["Codex", "\u5206\u955c", "\u914d\u56fe\u53e3\u64ad"],
+                input_requirements=["scenes"],
+                quality_tier="daily",
+                pipeline_id="codex_scene_video",
+                entry="scenes",
+                access_scope="codex",
+                required_capabilities=["tts", "ffmpeg", "persistence"],
+                migration_status="ready",
+                migration_notes="Codex \u4e13\u7528\uff1b\u4e0d\u4f7f\u7528 Pixelle \u56fe\u7247 Provider \u6216 OpenAI API\u3002",
+                allowed_user_params=[
+                    "title",
+                    "frame_template",
+                    "template_params",
+                    "prompt_prefix",
+                    "image_prompt_visual_context",
+                    "image_prompt_generation_rules",
+                    "bgm_path",
+                    "bgm_volume",
+                    "bgm_mode",
+                    "tts_inference_mode",
+                    "tts_workflow",
+                    "tts_voice",
+                    "tts_speed",
+                    "ref_audio",
+                    "compose_runtime",
+                ],
+                fixed_params={
+                    "frame_template": "1080x1920/image_default.html",
+                    "tts_inference_mode": "local",
+                    "tts_voice": "zh-CN-YunjianNeural",
+                    "tts_speed": 1.0,
                     "video_fps": 30,
                     "bgm_volume": 0.2,
                     "bgm_mode": "loop",
@@ -438,6 +505,8 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                     "frame_template",
                     "template_params",
                     "media_workflow",
+                    "image_provider",
+                    "image_model",
                     "media_width",
                     "media_height",
                     "prompt_prefix",
@@ -516,6 +585,8 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                     "frame_template",
                     "template_params",
                     "media_workflow",
+                    "image_provider",
+                    "image_model",
                     "media_width",
                     "media_height",
                     "prompt_prefix",
@@ -622,6 +693,8 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                     "frame_template",
                     "template_params",
                     "media_workflow",
+                    "image_provider",
+                    "image_model",
                     "media_width",
                     "media_height",
                     "prompt_prefix",
@@ -684,6 +757,8 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                     "frame_template",
                     "template_params",
                     "media_workflow",
+                    "image_provider",
+                    "image_model",
                     "media_width",
                     "media_height",
                     "prompt_prefix",

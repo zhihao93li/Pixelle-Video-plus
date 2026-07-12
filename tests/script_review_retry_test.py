@@ -2,7 +2,7 @@
 
 import asyncio
 
-from web.utils.script_review import _call_llm_retrying_empty
+from pixelle_video.generation.script_review import _call_llm_retrying_empty
 
 
 def test_retries_until_non_empty_response():

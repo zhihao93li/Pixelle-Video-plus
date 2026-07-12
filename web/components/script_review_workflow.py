@@ -10,11 +10,7 @@ import streamlit as st
 from loguru import logger
 
 from pixelle_video.config import config_manager
-from pixelle_video.models.progress import ProgressEvent
-from web.components.content_input import parse_batch_text_input
-from web.i18n import tr
-from web.utils.async_helpers import run_async
-from web.utils.script_review import (
+from pixelle_video.generation.script_review import (
     DEFAULT_REVIEW_LANGUAGES,
     DEFAULT_TARGET_LANGUAGES,
     SOURCE_LANGUAGE_KEY,
@@ -27,6 +23,10 @@ from web.utils.script_review import (
     validate_draft_translation_counts,
     validate_language_tts_overrides,
 )
+from pixelle_video.models.progress import ProgressEvent
+from web.components.content_input import parse_batch_text_input
+from web.i18n import tr
+from web.utils.async_helpers import run_async
 
 DRAFTS_KEY = "script_review_drafts"
 RESULTS_KEY = "script_review_generation_results"

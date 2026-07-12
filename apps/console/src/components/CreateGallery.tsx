@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import {
   ArrowRight,
+  Bot,
   FileText,
   Images,
   Languages,
@@ -55,6 +56,7 @@ type ConfigSummaryState = "loading" | "ready" | "stale" | "error"
 type RecipeDefaultsState = "loading" | "ready" | "error"
 
 const FLOW_ENTRIES = new Set(["script_review"])
+const CODEX_FAMILY_ID = "codex"
 
 function isFlowEntry(template: ProductionTemplate) {
   return FLOW_ENTRIES.has(template.product_entry)
@@ -247,6 +249,89 @@ function RecipeCard({
   )
 }
 
+function configText(template: ProductionTemplate, key: string) {
+  const value = template.fixed_params[key]
+  return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+function CodexRecipeCard({ template }: { template: ProductionTemplate }) {
+  const style =
+    configText(template, "prompt_prefix") ??
+    configText(template, "image_prompt_visual_context") ??
+    "尚未设置专属风格"
+  const voice = configText(template, "tts_voice") ?? "跟随系统音色"
+  const frameTemplate = configText(template, "frame_template")
+  const layout = frameTemplate?.includes("1080x1920")
+    ? "竖版字幕画面"
+    : (frameTemplate ?? "跟随配方版式")
+
+  return (
+    <article className="rounded-lg border bg-muted/15 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary">视频</Badge>
+        <Badge variant="info">仅 Codex 发起</Badge>
+        {!template.enabled ? <Badge variant="outline">已停用</Badge> : null}
+      </div>
+      <h3 className="mt-3 text-base font-medium">{template.display_name}</h3>
+      <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+        {productionDescription(template)}请在 Codex
+        对话中提出主题或文案，确认分镜后自动进入合成。
+      </p>
+
+      <ol className="mt-4 grid gap-2 sm:grid-cols-3">
+        {["规划分镜并确认", "Codex 生成配图", "Pixelle 配音与合成"].map(
+          (step, index) => (
+            <li
+              className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"
+              key={step}
+            >
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
+                {index + 1}
+              </span>
+              {step}
+            </li>
+          )
+        )}
+      </ol>
+
+      <dl className="mt-4 grid gap-3 border-t pt-3 sm:grid-cols-3">
+        <div className="min-w-0">
+          <dt className="text-xs text-muted-foreground">图片风格</dt>
+          <dd className="mt-0.5 truncate text-sm" title={style}>
+            {style}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs text-muted-foreground">默认音色</dt>
+          <dd className="mt-0.5 truncate text-sm" title={voice}>
+            {voice}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs text-muted-foreground">画面版式</dt>
+          <dd className="mt-0.5 truncate text-sm" title={layout}>
+            {layout}
+          </dd>
+        </div>
+      </dl>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+        <p className="text-xs leading-5 text-muted-foreground">
+          {template.enabled
+            ? "这里仅展示和配置；制作必须从 Codex 发起。"
+            : "这份配方已停用；调整配方后可在设置中重新启用。"}
+        </p>
+        <Button asChild size="sm" variant="outline">
+          <a href={routeHref(`/create/recipes/${template.id}`)}>
+            <Settings2 data-icon="inline-start" />
+            调整配方
+          </a>
+        </Button>
+      </div>
+    </article>
+  )
+}
+
 function NewRecipeForm({
   family,
   onCancel,
@@ -379,6 +464,7 @@ export function CreateGallery() {
   const [loadState, setLoadState] = useState<LoadState>("loading")
   const [error, setError] = useState<string | null>(null)
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
+  const [codexTemplates, setCodexTemplates] = useState<ProductionTemplate[]>([])
   const [reloadToken, setReloadToken] = useState(0)
   const [configReloadToken, setConfigReloadToken] = useState(0)
   const [selectedFamilyId, setSelectedFamilyId] = useState<string | null>(null)
@@ -406,6 +492,7 @@ export function CreateGallery() {
         setConfigFailures({})
         setConfigSummaryState("loading")
         setTemplates(response.templates)
+        setCodexTemplates(response.codex_templates ?? [])
         setLoadState("ready")
       } catch (loadError) {
         if (!cancelled) {
@@ -504,6 +591,9 @@ export function CreateGallery() {
       ),
     [templates]
   )
+  const visibleCodexTemplates = codexTemplates.filter(
+    (template) => !isRetiredTemplate(template)
+  )
   const defaultTemplateId = project?.default_production_template_id || ""
   const defaultTemplate = productTemplates.find(
     (template) => template.id === defaultTemplateId
@@ -515,6 +605,8 @@ export function CreateGallery() {
     FAMILIES.find((family) => family.id === selectedFamilyId) ??
     defaultFamily ??
     FAMILIES[0]
+  const codexSelected =
+    selectedFamilyId === CODEX_FAMILY_ID && visibleCodexTemplates.length > 0
   const selectedTemplates = productTemplates.filter((template) =>
     selectedFamily.pipelineIds.includes(template.pipeline_id)
   )
@@ -531,7 +623,10 @@ export function CreateGallery() {
     .join(
       "；"
     )}${selectedConfigFailures.length > 2 ? "；还有其他配方未能读取" : ""}`
-  const hasAnyEntry = productTemplates.length > 0 || flowTemplates.length > 0
+  const hasAnyEntry =
+    productTemplates.length > 0 ||
+    flowTemplates.length > 0 ||
+    visibleCodexTemplates.length > 0
 
   return (
     <PageFrame>
@@ -600,7 +695,7 @@ export function CreateGallery() {
             >
               {FAMILIES.map((family) => {
                 const Icon = family.icon
-                const active = selectedFamily.id === family.id
+                const active = !codexSelected && selectedFamily.id === family.id
                 const count = productTemplates.filter((template) =>
                   family.pipelineIds.includes(template.pipeline_id)
                 ).length
@@ -633,142 +728,188 @@ export function CreateGallery() {
                   </button>
                 )
               })}
+              {visibleCodexTemplates.length > 0 ? (
+                <button
+                  aria-current={codexSelected ? "page" : undefined}
+                  className={cn(
+                    "flex min-h-11 min-w-40 items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-[var(--motion-duration-fast)] focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none lg:min-w-0",
+                    codexSelected
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                  onClick={() => {
+                    setSelectedFamilyId(CODEX_FAMILY_ID)
+                    setNewRecipeFamily(null)
+                  }}
+                  type="button"
+                >
+                  <Bot className="size-4 shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium text-foreground">
+                      Codex 专用制作
+                    </span>
+                    <span className="mt-0.5 hidden truncate text-xs text-muted-foreground lg:block">
+                      Codex 配图，Pixelle 合成
+                    </span>
+                  </span>
+                  <Badge variant={codexSelected ? "info" : "outline"}>
+                    {visibleCodexTemplates.length}
+                  </Badge>
+                </button>
+              ) : null}
             </nav>
           </WorkspacePanel>
 
           <div className="flex min-w-0 flex-col gap-5">
-            <WorkspacePanel
-              description={selectedFamily.tagline}
-              headerAction={
-                <Button
-                  aria-expanded={newRecipeFamily === selectedFamily.id}
-                  className="min-h-11 sm:min-h-0"
-                  onClick={() =>
-                    setNewRecipeFamily((current) =>
-                      current === selectedFamily.id ? null : selectedFamily.id
-                    )
-                  }
-                  size="sm"
-                  variant="outline"
-                >
-                  <Plus data-icon="inline-start" />
-                  新建配方
-                </Button>
-              }
-              title={selectedFamily.label}
-            >
-              {selectedConfigFailures.length > 0 ? (
-                <AsyncState
-                  action={
-                    <Button
-                      onClick={() => {
-                        setConfigSummaryState("loading")
-                        setConfigFailures({})
-                        setConfigReloadToken((token) => token + 1)
-                      }}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      重新读取默认设置
-                    </Button>
-                  }
-                  className="mb-4 max-w-none"
-                  description={selectedConfigError}
-                  state={selectedConfigState}
-                  title={
-                    selectedConfigState === "error"
-                      ? "无法读取配方默认设置"
-                      : "部分配方默认设置可能已过期"
-                  }
-                />
-              ) : null}
-
-              {newRecipeFamily === selectedFamily.id ? (
-                <NewRecipeForm
-                  family={selectedFamily}
-                  onCancel={() => setNewRecipeFamily(null)}
-                  onCreated={(template) =>
-                    navigate(`/create/recipes/${template.id}`)
-                  }
-                />
-              ) : null}
-
-              {selectedTemplates.length > 0 ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  {selectedTemplates.map((template) => (
-                    <RecipeCard
-                      customizedSummary={customized[template.id] ?? null}
-                      defaultsState={
-                        configSummaryState === "loading"
-                          ? "loading"
-                          : configFailures[template.id]
-                            ? "error"
-                            : "ready"
-                      }
-                      isProjectDefault={template.id === defaultTemplateId}
-                      key={template.id}
-                      template={template}
-                    />
+            {codexSelected ? (
+              <WorkspacePanel
+                description="了解 Codex 与 Pixelle 协作生成配图视频的方式，并调整长期默认设置"
+                title="Codex 专用制作"
+              >
+                <div className="grid gap-3">
+                  {visibleCodexTemplates.map((template) => (
+                    <CodexRecipeCard key={template.id} template={template} />
                   ))}
                 </div>
-              ) : (
-                <EmptyState
-                  actions={
+              </WorkspacePanel>
+            ) : (
+              <>
+                <WorkspacePanel
+                  description={selectedFamily.tagline}
+                  headerAction={
                     <Button
-                      className="min-h-11 sm:min-h-8"
-                      onClick={() => setNewRecipeFamily(selectedFamily.id)}
+                      aria-expanded={newRecipeFamily === selectedFamily.id}
+                      className="min-h-11 sm:min-h-0"
+                      onClick={() =>
+                        setNewRecipeFamily((current) =>
+                          current === selectedFamily.id
+                            ? null
+                            : selectedFamily.id
+                        )
+                      }
                       size="sm"
-                      type="button"
                       variant="outline"
                     >
                       <Plus data-icon="inline-start" />
                       新建配方
                     </Button>
                   }
-                  className="min-h-64"
-                  description="可以从这条生产方式的出厂设置创建一份。"
-                  icon={selectedFamily.icon}
-                  title="还没有可用配方"
-                />
-              )}
-            </WorkspacePanel>
+                  title={selectedFamily.label}
+                >
+                  {selectedConfigFailures.length > 0 ? (
+                    <AsyncState
+                      action={
+                        <Button
+                          onClick={() => {
+                            setConfigSummaryState("loading")
+                            setConfigFailures({})
+                            setConfigReloadToken((token) => token + 1)
+                          }}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          重新读取默认设置
+                        </Button>
+                      }
+                      className="mb-4 max-w-none"
+                      description={selectedConfigError}
+                      state={selectedConfigState}
+                      title={
+                        selectedConfigState === "error"
+                          ? "无法读取配方默认设置"
+                          : "部分配方默认设置可能已过期"
+                      }
+                    />
+                  ) : null}
 
-            {flowTemplates.length > 0 ? (
-              <WorkspacePanel
-                description="需要先审核内容，再一次提交多个结果"
-                title="审核流程"
-              >
-                <div className="divide-y">
-                  {flowTemplates.map((template) => (
-                    <a
-                      className="flex min-h-14 items-center gap-3 py-3 text-left transition-colors duration-[var(--motion-duration-fast)] hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-                      href={routeHref(productionStartRoute(template))}
-                      key={template.id}
-                    >
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                        <Languages className="size-4" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium">
-                          {template.display_name}
-                        </span>
-                        <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                          {productionDescription(template)}
-                        </span>
-                      </span>
-                      <Badge
-                        className="hidden sm:inline-flex"
-                        variant="outline"
-                      >
-                        审核后批量
-                      </Badge>
-                      <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
-                    </a>
-                  ))}
-                </div>
-              </WorkspacePanel>
-            ) : null}
+                  {newRecipeFamily === selectedFamily.id ? (
+                    <NewRecipeForm
+                      family={selectedFamily}
+                      onCancel={() => setNewRecipeFamily(null)}
+                      onCreated={(template) =>
+                        navigate(`/create/recipes/${template.id}`)
+                      }
+                    />
+                  ) : null}
+
+                  {selectedTemplates.length > 0 ? (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {selectedTemplates.map((template) => (
+                        <RecipeCard
+                          customizedSummary={customized[template.id] ?? null}
+                          defaultsState={
+                            configSummaryState === "loading"
+                              ? "loading"
+                              : configFailures[template.id]
+                                ? "error"
+                                : "ready"
+                          }
+                          isProjectDefault={template.id === defaultTemplateId}
+                          key={template.id}
+                          template={template}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      actions={
+                        <Button
+                          className="min-h-11 sm:min-h-8"
+                          onClick={() => setNewRecipeFamily(selectedFamily.id)}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          <Plus data-icon="inline-start" />
+                          新建配方
+                        </Button>
+                      }
+                      className="min-h-64"
+                      description="可以从这条生产方式的出厂设置创建一份。"
+                      icon={selectedFamily.icon}
+                      title="还没有可用配方"
+                    />
+                  )}
+                </WorkspacePanel>
+
+                {flowTemplates.length > 0 ? (
+                  <WorkspacePanel
+                    description="需要先审核内容，再一次提交多个结果"
+                    title="审核流程"
+                  >
+                    <div className="divide-y">
+                      {flowTemplates.map((template) => (
+                        <a
+                          className="flex min-h-14 items-center gap-3 py-3 text-left transition-colors duration-[var(--motion-duration-fast)] hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                          href={routeHref(productionStartRoute(template))}
+                          key={template.id}
+                        >
+                          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                            <Languages className="size-4" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-medium">
+                              {template.display_name}
+                            </span>
+                            <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                              {productionDescription(template)}
+                            </span>
+                          </span>
+                          <Badge
+                            className="hidden sm:inline-flex"
+                            variant="outline"
+                          >
+                            审核后批量
+                          </Badge>
+                          <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+                        </a>
+                      ))}
+                    </div>
+                  </WorkspacePanel>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
       ) : null}

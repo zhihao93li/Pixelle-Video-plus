@@ -31,10 +31,10 @@ from pixelle_video.services.provider_execution import (
 class MediaService(ComfyBaseService):
     """
     Media generation service - Workflow-based
-    
+
     Uses ComfyKit to execute image/video generation workflows.
     Supports both image_ and video_ workflow prefixes.
-    
+
     Usage:
         # Use default workflow (workflows/image_flux.json)
         media = await pixelle_video.media(prompt="a cat")
@@ -42,35 +42,37 @@ class MediaService(ComfyBaseService):
             print(f"Generated image: {media.url}")
         elif media.is_video:
             print(f"Generated video: {media.url} ({media.duration}s)")
-        
+
         # Use specific workflow
         media = await pixelle_video.media(
             prompt="a cat",
             workflow="image_flux.json"
         )
-        
+
         # List available workflows
         workflows = pixelle_video.media.list_workflows()
     """
-    
+
     WORKFLOW_PREFIX = ""  # Will be overridden by _scan_workflows
     DEFAULT_WORKFLOW = None  # No hardcoded default, must be configured
     WORKFLOWS_DIR = "workflows"
-    
+
     def __init__(self, config: dict, core=None):
         """
         Initialize media service
-        
+
         Args:
             config: Full application config dict
             core: PixelleVideoCore instance (for accessing shared ComfyKit)
         """
-        super().__init__(config, service_name="image", core=core)  # Keep "image" for config compatibility
-    
+        super().__init__(
+            config, service_name="image", core=core
+        )  # Keep "image" for config compatibility
+
     def _scan_workflows(self):
         """
         Scan workflows for both image_ and video_ prefixes
-        
+
         Override parent method to support multiple prefixes
         """
         from pathlib import Path
@@ -80,27 +82,28 @@ class MediaService(ComfyBaseService):
             list_resource_dirs,
             list_resource_files,
         )
-        
+
         workflows = []
-        
+
         # Get all workflow source directories
         source_dirs = list_resource_dirs("workflows")
-        
+
         if not source_dirs:
             logger.warning("No workflow source directories found")
             return workflows
-        
+
         # Scan each source directory for workflow files
         for source_name in source_dirs:
             # Get all JSON files for this source
             workflow_files = list_resource_files("workflows", source_name)
-            
+
             # Filter to only files matching image_ or video_ prefix
             matching_files = [
-                f for f in workflow_files 
-                if (f.startswith("image_") or f.startswith("video_")) and f.endswith('.json')
+                f
+                for f in workflow_files
+                if (f.startswith("image_") or f.startswith("video_")) and f.endswith(".json")
             ]
-            
+
             for filename in matching_files:
                 try:
                     # Get actual file path
@@ -110,10 +113,10 @@ class MediaService(ComfyBaseService):
                     logger.debug(f"Found workflow: {workflow_info['key']}")
                 except Exception as e:
                     logger.error(f"Failed to parse workflow {source_name}/{filename}: {e}")
-        
+
         # Sort by key (source/name)
         return sorted(workflows, key=lambda w: w["key"])
-    
+
     async def __call__(
         self,
         prompt: str,
@@ -133,14 +136,16 @@ class MediaService(ComfyBaseService):
         cfg: Optional[float] = None,
         sampler: Optional[str] = None,
         provider_progress_callback: Optional[Callable[[dict], None]] = None,
-        **params
+        image_provider: Optional[str] = None,
+        image_model: Optional[str] = None,
+        **params,
     ) -> MediaResult:
         """
         Generate media (image or video) using workflow
-        
+
         Media type must be specified explicitly via media_type parameter.
         Returns a MediaResult object containing media type and URL.
-        
+
         Args:
             prompt: Media generation prompt
             workflow: Workflow filename (default: from config or "image_flux.json")
@@ -156,22 +161,22 @@ class MediaService(ComfyBaseService):
             cfg: CFG scale
             sampler: Sampler name
             **params: Additional workflow parameters
-        
+
         Returns:
             MediaResult object with media_type ("image" or "video") and url
-        
+
         Examples:
             # Simplest: use default workflow (workflows/image_flux.json)
             media = await pixelle_video.media(prompt="a beautiful cat")
             if media.is_image:
                 print(f"Image: {media.url}")
-            
+
             # Use specific workflow
             media = await pixelle_video.media(
                 prompt="a cat",
                 workflow="image_flux.json"
             )
-            
+
             # Video workflow
             media = await pixelle_video.media(
                 prompt="a cat running",
@@ -179,7 +184,7 @@ class MediaService(ComfyBaseService):
             )
             if media.is_video:
                 print(f"Video: {media.url}, duration: {media.duration}s")
-            
+
             # With additional parameters
             media = await pixelle_video.media(
                 prompt="a cat",
@@ -189,25 +194,60 @@ class MediaService(ComfyBaseService):
                 steps=20,
                 seed=42
             )
-            
+
             # With absolute path
             media = await pixelle_video.media(
                 prompt="a cat",
                 workflow="/path/to/custom.json"
             )
-            
+
             # With custom ComfyUI server
             media = await pixelle_video.media(
                 prompt="a cat",
                 comfyui_url="http://192.168.1.100:8188"
             )
         """
+        if media_type == "image" and image_provider not in (None, "", "comfy_workflow"):
+            from pixelle_video.config import config_manager
+            from pixelle_video.services.image_providers import (
+                ImageGenerationRequest,
+                ImageProviderRegistry,
+            )
+
+            registry = ImageProviderRegistry(config_manager.config.image_generation)
+            provider = registry.get(image_provider)
+            provider_config = getattr(config_manager.config.image_generation, image_provider)
+            model = image_model or provider_config.default_model
+            result = await provider.generate(
+                ImageGenerationRequest(
+                    prompt=prompt,
+                    model=model,
+                    target_width=width,
+                    target_height=height,
+                    negative_prompt=negative_prompt,
+                    seed=seed,
+                    count=1,
+                    frame_index=params.get("index"),
+                ),
+                progress_callback=provider_progress_callback,
+            )
+            return MediaResult(
+                media_type="image",
+                url=result.image_url,
+                provider=result.provider,
+                model=result.model,
+                request_id=result.request_id,
+                width=result.actual_width,
+                height=result.actual_height,
+                metadata=result.metadata,
+            )
+
         # 1. Resolve workflow (returns structured info)
         workflow_info = self._resolve_workflow(workflow=workflow)
-        
+
         # 2. Build workflow parameters (ComfyKit config is now managed by core)
         workflow_params = {"prompt": prompt}
-        
+
         # Add optional parameters
         if width is not None:
             workflow_params["width"] = width
@@ -227,17 +267,17 @@ class MediaService(ComfyBaseService):
             workflow_params["cfg"] = cfg
         if sampler is not None:
             workflow_params["sampler"] = sampler
-        
+
         # Add any additional parameters
         workflow_params.update(params)
-        
+
         logger.debug(f"Workflow parameters: {workflow_params}")
-        
+
         # 4. Execute workflow using shared ComfyKit instance from core
         try:
             # Get shared ComfyKit instance (lazy initialization + config hot-reload)
             kit = await self.core._get_or_create_comfykit()
-            
+
             # Determine what to pass to ComfyKit based on source
             if workflow_info["source"] == "runninghub" and "workflow_id" in workflow_info:
                 # RunningHub: pass workflow_id (ComfyKit will use runninghub backend)
@@ -247,7 +287,7 @@ class MediaService(ComfyBaseService):
                 # Selfhost: pass file path (ComfyKit will use local ComfyUI)
                 workflow_input = workflow_info["path"]
                 logger.info(f"Executing selfhost workflow: {workflow_input}")
-            
+
             result = await execute_workflow_with_provider_progress(
                 kit,
                 workflow_input,
@@ -255,47 +295,40 @@ class MediaService(ComfyBaseService):
                 source=workflow_info["source"],
                 provider_progress_callback=provider_progress_callback,
             )
-            
+
             # 5. Handle result based on specified media_type
             if result.status != "completed":
                 error_msg = result.msg or "Unknown error"
                 logger.error(f"Media generation failed: {error_msg}")
                 raise Exception(f"Media generation failed: {error_msg}")
-            
+
             # Extract media based on specified type
             if media_type == "video":
                 # Video workflow - get video from result
                 if not result.videos:
                     logger.error("No video generated (workflow returned no videos)")
                     raise Exception("No video generated")
-                
+
                 video_url = result.videos[0]
                 logger.info(f"✅ Generated video: {video_url}")
-                
+
                 # Try to extract duration from result (if available)
                 duration = None
-                if hasattr(result, 'duration') and result.duration:
+                if hasattr(result, "duration") and result.duration:
                     duration = result.duration
-                
-                return MediaResult(
-                    media_type="video",
-                    url=video_url,
-                    duration=duration
-                )
+
+                return MediaResult(media_type="video", url=video_url, duration=duration)
             else:  # image
                 # Image workflow - get image from result
                 if not result.images:
                     logger.error("No image generated (workflow returned no images)")
                     raise Exception("No image generated")
-                
+
                 image_url = result.images[0]
                 logger.info(f"✅ Generated image: {image_url}")
-                
-                return MediaResult(
-                    media_type="image",
-                    url=image_url
-                )
-        
+
+                return MediaResult(media_type="image", url=image_url)
+
         except Exception as e:
             logger.error(f"Media generation error: {e}")
             raise

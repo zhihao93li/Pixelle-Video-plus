@@ -11,9 +11,9 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from pixelle_video.generation.script_review import load_prompt_templates
 from pixelle_video.generation.templates import build_default_production_template_registry
 from pixelle_video.utils.os_util import get_data_path
-from web.utils.script_review import load_prompt_templates
 
 router = APIRouter(prefix="/drafting", tags=["Prompt Templates"])
 

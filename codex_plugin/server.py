@@ -13,8 +13,8 @@ from ops.service import WRITEBACK_OPERATIONS, OpsError, OpsService
 mcp = FastMCP("pixelle-ops")
 _BACKGROUND_GENERATION_TASKS: set[asyncio.Task] = set()
 _GENERATION_SERVICE = None
-PIXELLE_OPS_PROTOCOL_VERSION = "p0.9.20260622"
-PIXELLE_OPS_CONVERSATION_CONTRACT_VERSION = "p0.9.20260622"
+PIXELLE_OPS_PROTOCOL_VERSION = "p1.0.20260712"
+PIXELLE_OPS_CONVERSATION_CONTRACT_VERSION = "p1.0.20260712"
 PIXELLE_OPS_REQUIRED_TOOLS = (
     "pixelle_get_capabilities",
     "pixelle_list_projects",
@@ -28,6 +28,7 @@ PIXELLE_OPS_REQUIRED_TOOLS = (
     "pixelle_set_project_generation_settings",
     "pixelle_list_generation_pipelines",
     "pixelle_submit_generation_draft",
+    "pixelle_save_agent_image",
     "pixelle_approve_generation_draft",
     "pixelle_request_generation",
     "pixelle_get_generation_status",
@@ -53,6 +54,7 @@ PIXELLE_OPS_CONVERSATION_GATES = {
     "pipeline_selection_gate": False,
     "production_template_selection_gate": True,
     "draft_approval_gate": True,
+    "codex_storyboard_approval_gate": True,
     "async_generation_status": True,
     "asset_check_gate": True,
 }
@@ -129,6 +131,38 @@ PIXELLE_OPS_INTENT_ROUTES = {
         "requires_draft_approval": True,
         "writes_state": True,
     },
+    "codex_image_story_video": {
+        "pipeline": "codex_scene_video",
+        "production_template": "codex_image_story_v1",
+        "codex_only": True,
+        "scene_count": {
+            "default": None,
+            "minimum": 1,
+            "maximum": 20,
+            "user_specified_count_takes_precedence": True,
+            "otherwise_codex_decides_from_copy_and_pacing": True,
+        },
+        "before_image_generation": {
+            "show_scene_count_and_reason": True,
+            "show_each_narration": True,
+            "show_each_image_prompt": True,
+            "show_each_estimated_duration": True,
+            "requires_user_confirmation": True,
+        },
+        "after_confirmation": {
+            "generate_images_with_codex": True,
+            "save_every_image_with": "pixelle_save_agent_image",
+            "submit_and_approve_generation_draft": True,
+            "request_generation_automatically": True,
+            "second_confirmation_required": False,
+        },
+        "style_fields": [
+            "prompt_prefix",
+            "image_prompt_visual_context",
+            "image_prompt_generation_rules",
+        ],
+        "writes_state": True,
+    },
     "existing_generation": {
         "requires_reuse_decision": True,
         "reuse_options": ["reuse_existing", "regenerate_from_reviewed_draft", "new_clean_experiment"],
@@ -151,7 +185,7 @@ PIXELLE_OPS_INTENT_ROUTES = {
 
 
 def _build_service() -> OpsService:
-    return OpsService()
+    return OpsService(surface="codex")
 
 
 async def _get_plugin_generation_service():
@@ -160,10 +194,15 @@ async def _get_plugin_generation_service():
     if _GENERATION_SERVICE is None:
         from pixelle_video import pixelle_video
         from pixelle_video.generation import GenerationService
+        from pixelle_video.generation.task_store import task_directory
 
         if not pixelle_video.generate_video:
             await pixelle_video.initialize()
-        _GENERATION_SERVICE = GenerationService(pixelle_video.pipeline_registry)
+        _GENERATION_SERVICE = GenerationService(
+            pixelle_video.pipeline_registry,
+            storage_dir=task_directory(),
+            surface="codex",
+        )
     return _GENERATION_SERVICE
 
 
@@ -192,6 +231,7 @@ async def pixelle_get_capabilities() -> dict[str, Any]:
         "content_shape_options": [
             "xiaohongshu_short_video_subtitles",
             "xiaohongshu_image_text_note",
+            "codex_image_story_video",
             "topic_and_hook_only",
             "full_operations_experiment",
         ],
@@ -205,6 +245,7 @@ async def pixelle_get_capabilities() -> dict[str, Any]:
             "writeback_operations": sorted(WRITEBACK_OPERATIONS),
             "ui_is_cheat_operation_entry": False,
         },
+        "codex_image_story": PIXELLE_OPS_INTENT_ROUTES["codex_image_story_video"],
         "next_action": {"kind": "route_user_request", "blocked": False},
     }
 
@@ -500,6 +541,32 @@ async def pixelle_submit_generation_draft(
     )
 
 
+async def pixelle_save_agent_image(
+    experiment_id: str,
+    scene_id: str,
+    prompt: str,
+    source: dict[str, Any],
+    image_data_url: str | None = None,
+    file_path: str | None = None,
+    replace: bool = False,
+) -> dict[str, Any]:
+    """Save one user-confirmed Codex image for a Pixelle scene."""
+    from api.config import api_config
+
+    return await _run_tool(
+        lambda: _build_service().save_agent_image(
+            experiment_id=experiment_id,
+            scene_id=scene_id,
+            prompt=prompt,
+            source=source,
+            image_data_url=image_data_url,
+            file_path=file_path,
+            replace=replace,
+            max_size=api_config.max_upload_size,
+        )
+    )
+
+
 async def pixelle_approve_generation_draft(
     experiment_id: str,
     draft_id: str,
@@ -696,6 +763,7 @@ for tool in (
     pixelle_list_production_templates,
     pixelle_set_project_generation_settings,
     pixelle_list_generation_pipelines,
+    pixelle_save_agent_image,
     pixelle_submit_generation_draft,
     pixelle_approve_generation_draft,
     pixelle_request_generation,

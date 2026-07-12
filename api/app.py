@@ -35,11 +35,14 @@ if str(_project_root) not in sys.path:
 import argparse
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from api.config import api_config
+from api.console import resolve_console_dist
 from api.dependencies import shutdown_pixelle_video
 
 # Import routers
@@ -149,9 +152,18 @@ app.include_router(publish_router, prefix=api_config.api_prefix)
 app.include_router(settings_router, prefix=api_config.api_prefix)
 
 
-@app.get("/")
-async def root():
-    """Root endpoint with API information"""
+_console_dist = resolve_console_dist(_project_root)
+if _console_dist is not None:
+    app.mount(
+        "/assets",
+        StaticFiles(directory=_console_dist / "assets"),
+        name="console-assets",
+    )
+
+
+@app.get(f"{api_config.api_prefix}/info")
+async def api_info():
+    """Return service discovery information without occupying the UI root."""
     return {
         "service": "Pixelle-Video API",
         "version": "0.1.0",
@@ -172,8 +184,22 @@ async def root():
             "help": f"{api_config.api_prefix}/help",
             "history": f"{api_config.api_prefix}/history",
             "publish": f"{api_config.api_prefix}/publish",
-        }
+        },
     }
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """Serve the production React console from the same process as the API."""
+    if _console_dist is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "React console build is missing. Run `npm ci && npm run build` "
+                "inside apps/console before starting the production service."
+            ),
+        )
+    return FileResponse(_console_dist / "index.html", media_type="text/html")
 
 
 if __name__ == "__main__":

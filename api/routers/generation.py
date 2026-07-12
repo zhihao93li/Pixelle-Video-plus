@@ -22,8 +22,7 @@ from pixelle_video.generation import (
     build_default_production_template_registry,
     detect_available_generation_capabilities,
 )
-from pixelle_video.utils.os_util import get_data_path
-from web.utils.script_review import (
+from pixelle_video.generation.script_review import (
     DEFAULT_REVIEW_LANGUAGES,
     PromptTemplate,
     build_generation_jobs,
@@ -32,6 +31,7 @@ from web.utils.script_review import (
     validate_draft_translation_counts,
     validate_language_tts_overrides,
 )
+from pixelle_video.utils.os_util import get_data_path
 
 router = APIRouter(prefix="/generation", tags=["Generation Pipelines"])
 
@@ -66,6 +66,7 @@ class PipelineListResponse(BaseModel):
 class ProductionTemplateListResponse(BaseModel):
     default_template: str | None
     templates: list[ProductionTemplate]
+    codex_templates: list[ProductionTemplate] = Field(default_factory=list)
 
 
 class ProductionTemplateTaskRequest(BaseModel):
@@ -221,7 +222,11 @@ class ScriptReviewSubmitResponse(BaseModel):
 
 @router.get("/pipelines", response_model=PipelineListResponse)
 async def list_generation_pipelines(pixelle_video: PixelleVideoDep):
-    manifests = pixelle_video.pipeline_registry.list_manifests()
+    manifests = [
+        manifest
+        for manifest in pixelle_video.pipeline_registry.list_manifests()
+        if manifest.access_scope == "public"
+    ]
     default_pipeline = (
         "standard" if "standard" in pixelle_video.pipeline_registry.pipeline_ids() else None
     )
@@ -237,11 +242,16 @@ async def list_generation_templates(project: str | None = None):
     from pixelle_video.generation.templates import annotate_retired
 
     registry = build_default_production_template_registry()
-    templates = registry.list()
-    annotate_retired(templates)  # 展示用退役标记（代码层停用的 generate 预设）
+    all_templates = registry.list()
+    annotate_retired(all_templates)  # 展示用退役标记（代码层停用的 generate 预设）
+    templates = [template for template in all_templates if template.access_scope == "public"]
+    codex_templates = [
+        template for template in all_templates if template.access_scope == "codex"
+    ]
     return ProductionTemplateListResponse(
         default_template=_default_template_for_project(project),
         templates=templates,
+        codex_templates=codex_templates,
     )
 
 
@@ -1126,7 +1136,10 @@ async def submit_script_review_draft_set_tasks(
 @router.get("/pipelines/{pipeline_id}", response_model=PipelineManifest)
 async def get_generation_pipeline(pipeline_id: str, pixelle_video: PixelleVideoDep):
     try:
-        return pixelle_video.pipeline_registry.get_manifest(pipeline_id)
+        manifest = pixelle_video.pipeline_registry.get_manifest(pipeline_id)
+        if manifest.access_scope != "public":
+            raise KeyError(pipeline_id)
+        return manifest
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Unknown pipeline: {pipeline_id}") from None
 

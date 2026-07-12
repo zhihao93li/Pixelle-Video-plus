@@ -40,12 +40,14 @@ Each section saves independently. The diagnostics summary shows connections that
 
 Batch is a submission mode, not a separate page. Switch to Batch inside a recipe that supports it.
 
-## Other Entry Points
+## Single-process Production Entry
 
-The Streamlit interface remains independently runnable for the Windows package and low-level diagnostics:
+To mirror the Docker or Windows bundle, build React and let FastAPI serve it from the same origin:
 
 ```bash
-uv run streamlit run web/app.py
+./start_web.sh
 ```
+
+The legacy Streamlit surface is frozen and may only be started manually for migration diagnostics. It is no longer a default or production entry point.
 
 API documentation is available at `http://127.0.0.1:8000/docs` by default.

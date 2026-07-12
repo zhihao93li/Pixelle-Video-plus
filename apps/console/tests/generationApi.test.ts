@@ -21,6 +21,7 @@ import {
   getSettingsDiagnostics,
   getTemplateDraftingConfig,
   listResourceBgm,
+  listImageProviderResources,
   listResourceMediaWorkflows,
   listResourceTemplates,
   listResourceTtsWorkflows,
@@ -46,12 +47,43 @@ import {
   updateScriptReviewDraftSet,
   updateSettingsConfig,
   updateTemplateDraftingConfig,
+  templatesForManagement,
+  type ProductionTemplate,
 } from "../src/lib/generationApi.ts"
 
 type FetchCall = {
   url: string
   init?: RequestInit
 }
+
+test("management template view combines launchable and Codex-only recipes", () => {
+  const launchable = { id: "standard" } as ProductionTemplate
+  const codexOnly = { id: "codex" } as ProductionTemplate
+  const combined = templatesForManagement({
+    default_template: "standard",
+    templates: [launchable],
+    codex_templates: [codexOnly],
+  })
+
+  assert.deepEqual(
+    combined.map((template) => template.id),
+    ["standard", "codex"]
+  )
+})
+
+test("recipe image provider discovery uses the redacted resource endpoint", async () => {
+  const calls = installFetchMock({
+    default_provider: "comfy_workflow",
+    providers: [],
+  })
+
+  await listImageProviderResources()
+
+  assert.equal(
+    calls[0].url,
+    "/api/resources/image-providers"
+  )
+})
 
 function installFetchMock(responseBody: unknown, status = 200) {
   const calls: FetchCall[] = []
@@ -88,7 +120,7 @@ test("history list API sends pagination and filter query parameters", async () =
 
   assert.equal(
     calls[0].url,
-    "http://127.0.0.1:8000/api/history/tasks?page=2&page_size=10&status=completed&sort_by=completed_at&sort_order=asc"
+    "/api/history/tasks?page=2&page_size=10&status=completed&sort_by=completed_at&sort_order=asc"
   )
 })
 
@@ -98,10 +130,10 @@ test("history detail and publish record APIs use task-scoped routes", async () =
   await getHistoryTaskDetail("task-1")
   await getPublishRecord("task-1")
 
-  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/history/tasks/task-1")
+  assert.equal(calls[0].url, "/api/history/tasks/task-1")
   assert.equal(
     calls[1].url,
-    "http://127.0.0.1:8000/api/publish/tasks/task-1/record"
+    "/api/publish/tasks/task-1/record"
   )
 })
 
@@ -117,13 +149,13 @@ test("publish APIs send selected platforms and copy without provider choices", a
     dueAt: "2026-07-04T09:00:00+08:00",
   })
 
-  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/publish/timezones")
-  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/publish/check")
+  assert.equal(calls[0].url, "/api/publish/timezones")
+  assert.equal(calls[1].url, "/api/publish/check")
   assert.equal(
     calls[1].init?.body,
     JSON.stringify({ platforms: ["youtube", "instagram"] })
   )
-  assert.equal(calls[2].url, "http://127.0.0.1:8000/api/publish/tasks/task-1")
+  assert.equal(calls[2].url, "/api/publish/tasks/task-1")
   assert.equal(
     calls[2].init?.body,
     JSON.stringify({
@@ -147,15 +179,15 @@ test("resource APIs read BGM templates and workflows", async () => {
   await listResourceMediaWorkflows()
   await listResourceTtsWorkflows()
 
-  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/resources/bgm")
-  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/resources/templates")
+  assert.equal(calls[0].url, "/api/resources/bgm")
+  assert.equal(calls[1].url, "/api/resources/templates")
   assert.equal(
     calls[2].url,
-    "http://127.0.0.1:8000/api/resources/workflows/media"
+    "/api/resources/workflows/media"
   )
   assert.equal(
     calls[3].url,
-    "http://127.0.0.1:8000/api/resources/workflows/tts"
+    "/api/resources/workflows/tts"
   )
 })
 
@@ -195,7 +227,7 @@ test("preview APIs call existing TTS and frame endpoints", async () => {
   })
   await getFrameTemplateParams("1080x1920/image_default.html")
 
-  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/tts/synthesize")
+  assert.equal(calls[0].url, "/api/tts/synthesize")
   assert.equal(
     calls[0].init?.body,
     JSON.stringify({
@@ -206,7 +238,7 @@ test("preview APIs call existing TTS and frame endpoints", async () => {
       fish_model: "s2-pro",
     })
   )
-  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/frame/render")
+  assert.equal(calls[1].url, "/api/frame/render")
   assert.equal(
     calls[1].init?.body,
     JSON.stringify({
@@ -216,7 +248,7 @@ test("preview APIs call existing TTS and frame endpoints", async () => {
       template_params: { accent_color: "#ff0000" },
     })
   )
-  assert.equal(calls[2].url, "http://127.0.0.1:8000/api/media/generate")
+  assert.equal(calls[2].url, "/api/media/generate")
   assert.equal(
     calls[2].init?.body,
     JSON.stringify({
@@ -229,7 +261,7 @@ test("preview APIs call existing TTS and frame endpoints", async () => {
   )
   assert.equal(
     calls[3].url,
-    "http://127.0.0.1:8000/api/frame/template/params?template=1080x1920%2Fimage_default.html"
+    "/api/frame/template/params?template=1080x1920%2Fimage_default.html"
   )
 })
 
@@ -252,8 +284,8 @@ test("settings config APIs read and save shared app configuration", async () => 
   })
   await resetSettingsConfig()
 
-  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/settings/config")
-  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/settings/config")
+  assert.equal(calls[0].url, "/api/settings/config")
+  assert.equal(calls[1].url, "/api/settings/config")
   assert.equal(calls[1].init?.method, "PUT")
   assert.equal(
     calls[1].init?.body,
@@ -271,7 +303,7 @@ test("settings config APIs read and save shared app configuration", async () => 
       },
     })
   )
-  assert.equal(calls[2].url, "http://127.0.0.1:8000/api/settings/config/reset")
+  assert.equal(calls[2].url, "/api/settings/config/reset")
   assert.equal(calls[2].init?.method, "POST")
 })
 
@@ -280,7 +312,7 @@ test("settings diagnostics API reads redacted readiness checks", async () => {
 
   await getSettingsDiagnostics()
 
-  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/settings/diagnostics")
+  assert.equal(calls[0].url, "/api/settings/diagnostics")
 })
 
 test("settings action APIs call real backend utilities", async () => {
@@ -307,24 +339,24 @@ test("settings action APIs call real backend utilities", async () => {
   await fetchBufferChannels("buffer-key")
   await getHelpFaq("zh_CN")
 
-  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/settings/llm/models")
+  assert.equal(calls[0].url, "/api/settings/llm/models")
   assert.equal(
     calls[0].init?.body,
     JSON.stringify({ api_key: "llm-key", base_url: "https://aihubmix.com/v1" })
   )
-  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/settings/llm/test")
-  assert.equal(calls[2].url, "http://127.0.0.1:8000/api/settings/comfyui/test")
+  assert.equal(calls[1].url, "/api/settings/llm/test")
+  assert.equal(calls[2].url, "/api/settings/comfyui/test")
   assert.equal(
     calls[2].init?.body,
     JSON.stringify({ comfyui_url: "http://127.0.0.1:8188" })
   )
   assert.equal(
     calls[3].url,
-    "http://127.0.0.1:8000/api/settings/runninghub/workflows"
+    "/api/settings/runninghub/workflows"
   )
   assert.equal(
     calls[4].url,
-    "http://127.0.0.1:8000/api/settings/runninghub/workflows"
+    "/api/settings/runninghub/workflows"
   )
   assert.equal(
     calls[4].init?.body,
@@ -337,12 +369,12 @@ test("settings action APIs call real backend utilities", async () => {
   )
   assert.equal(
     calls[5].url,
-    "http://127.0.0.1:8000/api/settings/buffer/channels"
+    "/api/settings/buffer/channels"
   )
   assert.equal(calls[5].init?.body, JSON.stringify({ api_key: "buffer-key" }))
   assert.equal(
     calls[6].url,
-    "http://127.0.0.1:8000/api/help/faq?language=zh_CN"
+    "/api/help/faq?language=zh_CN"
   )
 })
 
@@ -354,7 +386,7 @@ test("asset upload API sends multipart form data without JSON content type", asy
   await uploadGenerationAssets([file])
   await uploadResourceBgm(bgmFile)
 
-  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/generation/assets")
+  assert.equal(calls[0].url, "/api/generation/assets")
   assert.equal(calls[0].init?.method, "POST")
   assert.ok(calls[0].init?.body instanceof FormData)
   assert.equal(
@@ -363,7 +395,7 @@ test("asset upload API sends multipart form data without JSON content type", asy
     ],
     undefined
   )
-  assert.equal(calls[1].url, "http://127.0.0.1:8000/api/resources/bgm/upload")
+  assert.equal(calls[1].url, "/api/resources/bgm/upload")
   assert.equal(calls[1].init?.method, "POST")
   assert.ok(calls[1].init?.body instanceof FormData)
   assert.equal(
@@ -396,7 +428,7 @@ test("generic production template task API sends asset template input and metada
 
   assert.equal(
     calls[0].url,
-    "http://127.0.0.1:8000/api/generation/templates/pipeline_asset_based_base_v1/tasks"
+    "/api/generation/templates/pipeline_asset_based_base_v1/tasks"
   )
   assert.equal(
     calls[0].init?.body,
@@ -434,7 +466,7 @@ test("special template task API preserves recipe input and current project ident
 
   assert.equal(
     calls[0].url,
-    "http://127.0.0.1:8000/api/generation/templates/my_digital_human/tasks"
+    "/api/generation/templates/my_digital_human/tasks"
   )
   assert.equal(
     calls[0].init?.body,
@@ -460,7 +492,7 @@ test("generation task cancel API uses task-scoped delete route", async () => {
 
   assert.equal(
     calls[0].url,
-    "http://127.0.0.1:8000/api/generation/tasks/task-1"
+    "/api/generation/tasks/task-1"
   )
   assert.equal(calls[0].init?.method, "DELETE")
 })
@@ -484,7 +516,7 @@ test("recipe drafting config APIs use the recipe-scoped contract", async () => {
   await resetTemplateDraftingConfig("recipe-1")
 
   const url =
-    "http://127.0.0.1:8000/api/generation/templates/recipe-1/drafting-config"
+    "/api/generation/templates/recipe-1/drafting-config"
   assert.equal(calls[0].url, url)
   assert.equal(calls[1].url, url)
   assert.equal(calls[1].init?.method, "PUT")
@@ -503,7 +535,7 @@ test("template enabled API PUTs the toggle to the enabled route", async () => {
 
   assert.equal(
     calls[0].url,
-    "http://127.0.0.1:8000/api/generation/templates/pipeline_asset_based_base_v1/enabled"
+    "/api/generation/templates/pipeline_asset_based_base_v1/enabled"
   )
   assert.equal(calls[0].init?.method, "PUT")
   assert.equal(calls[0].init?.body, JSON.stringify({ enabled: false }))
@@ -532,7 +564,7 @@ test("generation batch APIs persist real task batches", async () => {
   await retryGenerationBatchItem("batch-1", 2)
   await listGenerationBatches()
 
-  assert.equal(calls[0].url, "http://127.0.0.1:8000/api/generation/batches")
+  assert.equal(calls[0].url, "/api/generation/batches")
   assert.equal(
     calls[0].init?.body,
     JSON.stringify({
@@ -550,19 +582,19 @@ test("generation batch APIs persist real task batches", async () => {
   )
   assert.equal(
     calls[1].url,
-    "http://127.0.0.1:8000/api/generation/batches/batch-1"
+    "/api/generation/batches/batch-1"
   )
   assert.equal(
     calls[2].url,
-    "http://127.0.0.1:8000/api/generation/batches/batch-1"
+    "/api/generation/batches/batch-1"
   )
   assert.equal(calls[2].init?.method, "DELETE")
   assert.equal(
     calls[3].url,
-    "http://127.0.0.1:8000/api/generation/batches/batch-1/items/2/retry"
+    "/api/generation/batches/batch-1/items/2/retry"
   )
   assert.equal(calls[3].init?.method, "POST")
-  assert.equal(calls[4].url, "http://127.0.0.1:8000/api/generation/batches")
+  assert.equal(calls[4].url, "/api/generation/batches")
 })
 
 test("script review APIs persist drafts and submit reviewed tasks", async () => {
@@ -609,11 +641,11 @@ test("script review APIs persist drafts and submit reviewed tasks", async () => 
 
   assert.equal(
     calls[0].url,
-    "http://127.0.0.1:8000/api/generation/script-review/templates"
+    "/api/generation/script-review/templates"
   )
   assert.equal(
     calls[1].url,
-    "http://127.0.0.1:8000/api/generation/script-review/draft-sets"
+    "/api/generation/script-review/draft-sets"
   )
   assert.equal(
     calls[1].init?.body,
@@ -634,11 +666,11 @@ test("script review APIs persist drafts and submit reviewed tasks", async () => 
   )
   assert.equal(
     calls[2].url,
-    "http://127.0.0.1:8000/api/generation/script-review/draft-sets"
+    "/api/generation/script-review/draft-sets"
   )
   assert.equal(
     calls[3].url,
-    "http://127.0.0.1:8000/api/generation/script-review/draft-sets/draft-set-1"
+    "/api/generation/script-review/draft-sets/draft-set-1"
   )
   assert.equal(calls[4].init?.method, "PUT")
   assert.equal(
@@ -650,7 +682,7 @@ test("script review APIs persist drafts and submit reviewed tasks", async () => 
   )
   assert.equal(
     calls[5].url,
-    "http://127.0.0.1:8000/api/generation/script-review/draft-sets/draft-set-1/tasks"
+    "/api/generation/script-review/draft-sets/draft-set-1/tasks"
   )
   assert.equal(
     calls[5].init?.body,

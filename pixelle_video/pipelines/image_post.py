@@ -91,9 +91,7 @@ class ImagePostPipeline(BasePipeline):
             )
 
         # 2. 标题（封面用）
-        title = params.get("title") or await generate_title(
-            self.llm, text, strategy="llm"
-        )
+        title = params.get("title") or await generate_title(self.llm, text, strategy="llm")
 
         # 3. 每页配图提示词
         self._report_progress(progress_callback, "generate_image_prompts", 0.1)
@@ -118,15 +116,13 @@ class ImagePostPipeline(BasePipeline):
             task_id=task_id,
             n_storyboard=len(narrations),
             media_workflow=params.get("media_workflow"),
+            image_provider=params.get("image_provider"),
+            image_model=params.get("image_model"),
             frame_template=params.get("frame_template") or DEFAULT_PAGE_TEMPLATE,
             template_params=params.get("template_params"),
         )
-        storyboard = Storyboard(
-            title=title, config=page_config, created_at=datetime.now()
-        )
-        for index, (narration, image_prompt) in enumerate(
-            zip(narrations, image_prompts)
-        ):
+        storyboard = Storyboard(title=title, config=page_config, created_at=datetime.now())
+        for index, (narration, image_prompt) in enumerate(zip(narrations, image_prompts)):
             storyboard.frames.append(
                 StoryboardFrame(
                     index=index,
@@ -186,10 +182,7 @@ class ImagePostPipeline(BasePipeline):
         )
         await self._persist(storyboard, result, params)
         self._report_progress(progress_callback, "completed", 1.0)
-        logger.success(
-            f"🖼️ Image post generated: cover + {len(page_paths)} pages "
-            f"(task {task_id})"
-        )
+        logger.success(f"🖼️ Image post generated: cover + {len(page_paths)} pages (task {task_id})")
         return result
 
     async def _render_cover(
@@ -212,9 +205,7 @@ class ImagePostPipeline(BasePipeline):
             generation_rules=params.get("image_prompt_generation_rules"),
             all_narrations=[title],
         )
-        cover_prompt = build_image_prompt(
-            cover_prompts[0] if cover_prompts else title, prefix
-        )
+        cover_prompt = build_image_prompt(cover_prompts[0] if cover_prompts else title, prefix)
         cover_frame = StoryboardFrame(
             index=cover_index,
             narration="",
@@ -229,9 +220,7 @@ class ImagePostPipeline(BasePipeline):
             get_task_frame_path(task_id, cover_index, "composed"),
         )
 
-    async def _persist(
-        self, storyboard: Storyboard, result: ImagePostResult, params: dict
-    ) -> None:
+    async def _persist(self, storyboard: Storyboard, result: ImagePostResult, params: dict) -> None:
         """落 task metadata，让作品库能列出图集。失败静默——持久化失败不该中断出片。"""
         try:
             input_with_title = dict(params)
@@ -240,9 +229,7 @@ class ImagePostPipeline(BasePipeline):
             input_with_title.setdefault("title", result.title)
             metadata = {
                 "task_id": result.task_id,
-                "created_at": storyboard.created_at.isoformat()
-                if storyboard.created_at
-                else None,
+                "created_at": storyboard.created_at.isoformat() if storyboard.created_at else None,
                 "completed_at": datetime.now().isoformat(),
                 "status": "completed",
                 "input": input_with_title,

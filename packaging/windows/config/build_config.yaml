@@ -5,20 +5,26 @@ package:
   name: Pixelle-Video
   version_source: pyproject.toml  # Read version from pyproject.toml
   architecture: win64
-  
+
 # Python configuration
 python:
   version: "3.11.9"
   download_url: "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip"
+  sha256: "009d6bf7e3b2ddca3d784fa09f90fe54336d5b60f0e0f305c37f400bf83cfd3b"
   # Mirror for China users (optional)
   mirror_url: "https://mirrors.huaweicloud.com/python/3.11.9/python-3.11.9-embed-amd64.zip"
 
+pip_bootstrap:
+  download_url: "https://bootstrap.pypa.io/pip/get-pip.py"
+  sha256: "a341e1a43e38001c551a1508a73ff23636a11970b61d901d9a1cad2a18f57055"
+
 # FFmpeg configuration
 ffmpeg:
-  version: "6.1.1"
-  download_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+  version: "autobuild-2026-06-30-13-34"
+  download_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-30-13-34/ffmpeg-N-125365-g9a01c1cb6a-win64-gpl.zip"
+  sha256: "52c0383c460f0ec1039088f1591921fb82e3b870b32aab8faf2ff1e5ae14bf9d"
   # Alternative mirror
-  mirror_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+  mirror_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-30-13-34/ffmpeg-N-125365-g9a01c1cb6a-win64-gpl.zip"
 
 # Playwright configuration (for HTML template rendering)
 playwright:
@@ -27,39 +33,12 @@ playwright:
 
 # Build options
 build:
-  # Files/folders to exclude from project copy
-  exclude_patterns:
-    - ".git"
-    - ".github"
-    - "__pycache__"
-    - "*.pyc"
-    - ".pytest_cache"
-    - ".ruff_cache"
-    - "*.log"
-    - ".DS_Store"
-    - "output/*"  # Don't include output files
-    - "temp/*"
-    - "plans/*"  # Don't include planning docs
-    - "repositories/*"  # Don't include referenced repos
-    - "docs/en/*"  # Don't include English docs
-    - "docs/zh/*"  # Don't include Chinese docs
-    - "docs/gallery/*"  # Don't include gallery docs
-    - "docs/stylesheets/*"  # Don't include doc stylesheets
-    # Note: FAQ.md and FAQ_CN.md are included for in-app FAQ feature
-    - "test_*.py"  # Don't include test files
-    - ".venv"
-    - "venv"
-    - "node_modules"
-    - "uv.lock"
-    - "config.yaml"  # User configuration file (sensitive)
-    - "config.yaml.bak"  # Configuration backup
-    - "*.yaml.bak"  # All YAML backups
-    - ".env"  # Environment variables
-  
+  # Project files are copied from a release allowlist in build.py. Local data,
+  # credentials, databases, uploads, tests, and caches are never considered.
+
   # Dependencies installation
-  use_uv: true  # Use uv for faster dependency installation
   pre_install_deps: true  # Install deps during build (recommended for end users)
-  
+
   # Output
   output_dir: "dist/windows"
   create_zip: true
@@ -69,16 +48,16 @@ build:
   include_readme: true
   include_license: true
   create_empty_dirs:
-    - "data"
-    - "output"
+    - "Pixelle-Video/data"
+    - "Pixelle-Video/output"
+    - "Pixelle-Video/temp"
 
 # Download cache
 cache:
   enabled: true
   cache_dir: "packaging/windows/.cache"
-  
+
 # Mirror settings (for China users)
 mirrors:
   use_cn_mirror: false  # Set to true for faster downloads in China
   pypi_mirror: "https://pypi.tuna.tsinghua.edu.cn/simple"
-

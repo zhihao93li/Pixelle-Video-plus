@@ -3,7 +3,7 @@
 ## 环境要求
 
 - Python 3.11+
-- Node.js 20+
+- Node.js 20.19+ 或 22.12+
 - `uv`
 - FFmpeg 与 FFprobe
 - macOS、Linux 或 Windows
@@ -48,4 +48,5 @@ npm run build
 
 ## 可选运行面
 
-`web/app.py` 是独立的 Streamlit 工具面，主要用于 Windows 整合包和底层能力排查；正式产品入口是 React 控制台。
+`web/app.py` 是冻结中的 legacy Streamlit 工具面，只用于迁移期排查。Windows
+整合包和正式产品入口均使用 React 控制台；完成兼容验收后将删除旧工具面。

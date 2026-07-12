@@ -11,19 +11,19 @@ Build Date: {BUILD_DATE}
   Quick Start
 ========================================
 
-1. Double-click "start.bat" to launch the Web UI
+1. Double-click "start.bat" to launch the React console and API
 2. Browser will open automatically
-3. Configure your API keys in the Web UI (Settings section)
+3. Configure your API keys in the React console (Settings section)
 
 That's it! Just one click to start.
-You can launch multiple instances - each will use a different port automatically.
+Pixelle uses fixed port 8000 so the console and API stay on the same origin.
 
 ========================================
   First-Time Setup
 ========================================
 
-1. On first run, the Web UI will start with default configuration
-2. Click on "Settings" in the Web UI to configure:
+1. On first run, the React console will start with default configuration
+2. Click on "Settings" in the React console to configure:
    - LLM API Key (OpenAI/Qwen/DeepSeek/etc)
    - LLM Base URL and Model
    - ComfyUI settings (use RunningHub or local ComfyUI)
@@ -34,10 +34,10 @@ You can launch multiple instances - each will use a different port automatically
   Configuration
 ========================================
 
-Configuration is done through the Web UI:
+Configuration is done through the React console:
 
 1. Launch the application using start.bat
-2. Click on "Settings" in the Web UI
+2. Click on "Settings" in the React console
 3. Fill in the required fields:
    - LLM API Key: Your LLM provider API key
    - LLM Base URL: LLM API endpoint
@@ -48,17 +48,15 @@ Configuration is done through the Web UI:
 
 The configuration will be automatically saved to Pixelle-Video/config.yaml.
 
-Note: You can also manually edit config.yaml if needed, but the Web UI is recommended.
+Note: You can also manually edit config.yaml if needed, but the React console is recommended.
 
 ========================================
   Folder Structure
 ========================================
 
 python/           - Python 3.11 embedded runtime
-tools/            - FFmpeg and other utilities
-Pixelle-Video/    - Main application
-data/             - User data (BGM, templates, workflows)
-output/           - Generated videos
+tools/            - FFmpeg, Chromium, and other utilities
+Pixelle-Video/    - Main application, configuration, user data, and output
 
 ========================================
   System Requirements
@@ -79,8 +77,8 @@ Solution: Ensure python/ folder exists and is not corrupted
 Problem: "Failed to start"
 Solution: Check if Python and dependencies are installed correctly
 
-Problem: "Port already in use"
-Solution: Streamlit automatically uses the next available port. You can run multiple instances simultaneously.
+Problem: "Port 8000 already in use"
+Solution: Stop the other Pixelle/API process, then run start.bat again.
 
 Problem: "Module not found"
 Solution: Re-extract the package completely, don't move files
@@ -100,4 +98,3 @@ Issues: https://github.com/AIDC-AI/Pixelle-Video/issues
 See LICENSE file in Pixelle-Video/ folder
 
 Copyright (c) 2025 Pixelle.AI
-

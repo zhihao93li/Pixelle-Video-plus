@@ -7,6 +7,7 @@ from pixelle_video.generation.templates import (
 
 STANDARD_SKELETON = "pipeline_standard_base_v1"
 ASSET_SKELETON = "pipeline_asset_based_base_v1"
+CODEX_IMAGE_STORY = "codex_image_story_v1"
 
 RETIRED_TEMPLATES = [
     "petwoods_xhs_daily_v1",
@@ -53,6 +54,40 @@ def test_standard_skeleton_compiles_to_existing_generation_request():
         "name": "图文口播视频",
         "quality_tier": "daily",
     }
+
+
+def test_codex_image_story_is_codex_only_and_preserves_confirmed_scenes():
+    registry = build_default_production_template_registry()
+    scenes = [
+        {
+            "scene_id": "scene-1",
+            "narration": "Cats like narrow boxes.",
+            "image_prompt": "A cat inside a cardboard box",
+            "image_path": "/tmp/scene-1.png",
+        }
+    ]
+
+    template = registry.get(CODEX_IMAGE_STORY)
+    assert template.access_scope == "codex"
+    assert template.pipeline_id == "codex_scene_video"
+    assert template.entry == "scenes"
+    assert "prompt_prefix" in template.allowed_user_params
+
+    with pytest.raises(ProductionTemplateError, match="only available through Codex"):
+        registry.compile_request(CODEX_IMAGE_STORY, input={"scenes": scenes})
+
+    request = registry.compile_request(
+        CODEX_IMAGE_STORY,
+        input={
+            "scenes": scenes,
+            "prompt_prefix": "warm editorial illustration",
+        },
+        surface="codex",
+    )
+    assert request.pipeline_id == "codex_scene_video"
+    assert request.input == {"scenes": scenes}
+    assert request.params["prompt_prefix"] == "warm editorial illustration"
+    assert "media_workflow" not in request.params
 
 
 def test_explicit_null_clears_an_inherited_per_run_setting():
@@ -167,7 +202,8 @@ def test_registry_lists_skeletons_before_retired_and_placeholders():
     ids = [template.id for template in registry.list()]
 
     assert ids[0] == STANDARD_SKELETON
-    assert ids[1] == ASSET_SKELETON
+    assert ids[1] == CODEX_IMAGE_STORY
+    assert ids[2] == ASSET_SKELETON
     for template_id in RETIRED_TEMPLATES:
         assert template_id in ids  # 退役但保留
         assert ids.index(template_id) < ids.index("pixelle_script_review_v1")

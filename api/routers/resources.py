@@ -23,7 +23,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from loguru import logger
 
-from api.dependencies import PixelleVideoDep
+from api.dependencies import ConfigManagerDep, PixelleVideoDep
 from api.schemas.resources import (
     BGMInfo,
     BGMListResponse,
@@ -33,21 +33,28 @@ from api.schemas.resources import (
     WorkflowInfo,
     WorkflowListResponse,
 )
+from pixelle_video.services.image_providers import public_image_provider_catalog
 from pixelle_video.utils.os_util import get_data_path, get_root_path
 from pixelle_video.utils.template_util import get_all_templates_with_info
 
 router = APIRouter(prefix="/resources", tags=["Resources"])
 
-BGM_AUDIO_EXTENSIONS = ('.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg')
+BGM_AUDIO_EXTENSIONS = (".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg")
+
+
+@router.get("/image-providers")
+async def list_image_provider_resources(config_manager: ConfigManagerDep):
+    """List image providers and models without exposing credentials."""
+    return public_image_provider_catalog(config_manager.config.image_generation)
 
 
 @router.get("/workflows/tts", response_model=WorkflowListResponse)
 async def list_tts_workflows(pixelle_video: PixelleVideoDep):
     """
     List available TTS workflows
-    
+
     Returns list of TTS workflows from both RunningHub and self-hosted sources.
-    
+
     Example response:
     ```json
     {
@@ -67,16 +74,14 @@ async def list_tts_workflows(pixelle_video: PixelleVideoDep):
     try:
         # Get all workflows from TTS service
         all_workflows = pixelle_video.tts.list_workflows()
-        
+
         # Filter to TTS workflows only (filename starts with "tts_")
         tts_workflows = [
-            WorkflowInfo(**wf) 
-            for wf in all_workflows 
-            if wf["name"].startswith("tts_")
+            WorkflowInfo(**wf) for wf in all_workflows if wf["name"].startswith("tts_")
         ]
-        
+
         return WorkflowListResponse(workflows=tts_workflows)
-        
+
     except Exception as e:
         logger.error(f"List TTS workflows error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -86,9 +91,9 @@ async def list_tts_workflows(pixelle_video: PixelleVideoDep):
 async def list_media_workflows(pixelle_video: PixelleVideoDep):
     """
     List available media workflows (both image and video)
-    
+
     Returns list of all media workflows from both RunningHub and self-hosted sources.
-    
+
     Example response:
     ```json
     {
@@ -116,11 +121,11 @@ async def list_media_workflows(pixelle_video: PixelleVideoDep):
     try:
         # Get all workflows from media service (includes both image and video)
         all_workflows = pixelle_video.media.list_workflows()
-        
+
         media_workflows = [WorkflowInfo(**wf) for wf in all_workflows]
-        
+
         return WorkflowListResponse(workflows=media_workflows)
-        
+
     except Exception as e:
         logger.error(f"List media workflows error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -131,21 +136,19 @@ async def list_media_workflows(pixelle_video: PixelleVideoDep):
 async def list_image_workflows(pixelle_video: PixelleVideoDep):
     """
     List available image workflows (deprecated, use /workflows/media instead)
-    
+
     This endpoint is kept for backward compatibility but will filter to image_ workflows only.
     """
     try:
         all_workflows = pixelle_video.media.list_workflows()
-        
+
         # Filter to image workflows only (filename starts with "image_")
         image_workflows = [
-            WorkflowInfo(**wf) 
-            for wf in all_workflows 
-            if wf["name"].startswith("image_")
+            WorkflowInfo(**wf) for wf in all_workflows if wf["name"].startswith("image_")
         ]
-        
+
         return WorkflowListResponse(workflows=image_workflows)
-        
+
     except Exception as e:
         logger.error(f"List image workflows error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -190,10 +193,10 @@ async def get_template_preview(size: str, stem: str):
 async def list_templates():
     """
     List available video templates
-    
+
     Returns list of HTML templates grouped by size (portrait, landscape, square).
     Templates are merged from both default (templates/) and custom (data/templates/) directories.
-    
+
     Example response:
     ```json
     {
@@ -215,24 +218,26 @@ async def list_templates():
     try:
         # Get all templates with info
         all_templates = get_all_templates_with_info()
-        
+
         # Convert to API response format
         templates = []
         for t in all_templates:
-            templates.append(TemplateInfo(
-                name=t.display_info.name,
-                display_name=t.display_info.name,
-                size=t.display_info.size,
-                width=t.display_info.width,
-                height=t.display_info.height,
-                orientation=t.display_info.orientation,
-                path=t.template_path,
-                key=t.template_path,
-                preview_url=_template_preview_url(t.template_path),
-            ))
-        
+            templates.append(
+                TemplateInfo(
+                    name=t.display_info.name,
+                    display_name=t.display_info.name,
+                    size=t.display_info.size,
+                    width=t.display_info.width,
+                    height=t.display_info.height,
+                    orientation=t.display_info.orientation,
+                    path=t.template_path,
+                    key=t.template_path,
+                    preview_url=_template_preview_url(t.template_path),
+                )
+            )
+
         return TemplateListResponse(templates=templates)
-        
+
     except Exception as e:
         logger.error(f"List templates error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -242,12 +247,12 @@ async def list_templates():
 async def list_bgm():
     """
     List available background music files
-    
+
     Returns list of BGM files merged from both default (bgm/) and custom (data/bgm/) directories.
     Custom files take precedence over default files with the same name.
-    
+
     Supported formats: mp3, wav, flac, m4a, aac, ogg
-    
+
     Example response:
     ```json
     {
@@ -268,7 +273,7 @@ async def list_bgm():
     """
     try:
         return BGMListResponse(bgm_files=_list_bgm_files())
-        
+
     except Exception as e:
         logger.error(f"List BGM error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

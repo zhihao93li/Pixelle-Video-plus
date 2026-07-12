@@ -20,10 +20,12 @@ Key Feature:
   to ensure perfect sync between audio and video (no padding, no trimming needed)
 """
 
+import io
 from typing import Callable, Optional
 
 import httpx
 from loguru import logger
+from PIL import Image, UnidentifiedImageError
 
 from pixelle_video.models.progress import ProgressEvent
 from pixelle_video.models.storyboard import Storyboard, StoryboardConfig, StoryboardFrame
@@ -73,9 +75,10 @@ class FrameProcessor:
         frame_num = frame.index + 1
 
         # Determine if this frame needs image generation
-        # If image_path or video_path is already set (e.g. asset-based pipeline), we consider it "has existing media" but skip generation
+        # Caller-provided media always wins. image_prompt may be retained as
+        # provenance and must not trigger a provider call when media is present.
         has_existing_media = frame.image_path is not None or frame.video_path is not None
-        needs_generation = frame.image_prompt is not None
+        needs_generation = not has_existing_media and frame.image_prompt is not None
 
         try:
             # Step 1: Generate audio (TTS)
@@ -237,6 +240,8 @@ class FrameProcessor:
             "width": config.media_width,
             "height": config.media_height,
             "index": frame.index + 1,  # 1-based index for workflow
+            "image_provider": config.image_provider,
+            "image_model": config.image_model,
         }
 
         # For video workflows: pass audio duration as target video duration
@@ -276,7 +281,11 @@ class FrameProcessor:
         if media_result.is_image:
             # Download image to local (pass task_id)
             local_path = await self._download_media(
-                media_result.url, frame.index, config.task_id, media_type="image"
+                media_result.url,
+                frame.index,
+                config.task_id,
+                media_type="image",
+                provider=getattr(media_result, "provider", None) or config.image_provider,
             )
             frame.image_path = local_path
             logger.debug(f"  ✓ Image generated: {local_path}")
@@ -284,7 +293,11 @@ class FrameProcessor:
         elif media_result.is_video:
             # Download video to local (pass task_id)
             local_path = await self._download_media(
-                media_result.url, frame.index, config.task_id, media_type="video"
+                media_result.url,
+                frame.index,
+                config.task_id,
+                media_type="video",
+                provider=getattr(media_result, "provider", None) or config.image_provider,
             )
             frame.video_path = local_path
 
@@ -303,13 +316,15 @@ class FrameProcessor:
     def _build_media_progress_detail(self, config: StoryboardConfig) -> dict:
         workflow = config.media_workflow or self._default_media_workflow()
         media_type = "video" if "video_" in (workflow or "").lower() else "image"
-        provider = self._provider_from_workflow(workflow)
+        provider = config.image_provider or self._provider_from_workflow(workflow)
 
         detail = {
             "provider": provider,
             "workflow": workflow or "default",
             "media_type": media_type,
         }
+        if config.image_model:
+            detail["model"] = config.image_model
         if provider == "runninghub":
             timeout = self._runninghub_timeout()
             if timeout:
@@ -488,7 +503,12 @@ class FrameProcessor:
             return max(1.0, estimated_duration)  # At least 1 second
 
     async def _download_media(
-        self, url: str, frame_index: int, task_id: str, media_type: str
+        self,
+        url: str,
+        frame_index: int,
+        task_id: str,
+        media_type: str,
+        provider: str | None = None,
     ) -> str:
         """Download media (image or video) from URL to local file"""
         from pixelle_video.utils.os_util import get_task_frame_path
@@ -499,6 +519,27 @@ class FrameProcessor:
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(url)
             response.raise_for_status()
+
+            if len(response.content) > 100 * 1024 * 1024:
+                from pixelle_video.services.image_providers import ImageProviderError
+
+                raise ImageProviderError(
+                    provider=provider or "media",
+                    layer="download",
+                    message="Provider 返回的媒体文件超过 100 MB 限制",
+                )
+            if media_type == "image":
+                try:
+                    with Image.open(io.BytesIO(response.content)) as image:
+                        image.verify()
+                except (UnidentifiedImageError, OSError) as exc:
+                    from pixelle_video.services.image_providers import ImageProviderError
+
+                    raise ImageProviderError(
+                        provider=provider or "media",
+                        layer="download",
+                        message="Provider 返回的文件不是有效图片",
+                    ) from exc
 
             with open(output_path, "wb") as f:
                 f.write(response.content)

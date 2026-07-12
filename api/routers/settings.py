@@ -17,9 +17,15 @@ from pydantic import BaseModel, Field, ValidationError
 from api.dependencies import ConfigManagerDep
 from pixelle_video.config.schema import PixelleVideoConfig
 from pixelle_video.services.buffer_publisher import BufferPublisher, BufferPublishError
+from pixelle_video.services.image_providers import (
+    ImageGenerationRequest,
+    ImageProviderError,
+    ImageProviderRegistry,
+    public_image_provider_catalog,
+)
 from pixelle_video.services.public_storage import PublishConfigurationError
 from pixelle_video.utils.llm_util import fetch_available_models, test_llm_connection
-from web.utils.runninghub_workflows import (
+from pixelle_video.utils.runninghub_workflows import (
     create_runninghub_workflow_file,
     list_custom_runninghub_workflows,
 )
@@ -92,6 +98,21 @@ class SettingsDiagnosticsResponse(BaseModel):
     checks: list[SettingsDiagnosticCheck]
 
 
+ImageProviderId = Literal["aliyun_bailian", "volcengine_ark"]
+
+
+class ImageProviderUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    api_key: str | None = None
+    clear_api_key: bool = False
+    base_url: str | None = None
+    default_model: str | None = None
+    timeout: int | None = Field(default=None, ge=30, le=1800)
+    concurrency_limit: int | None = Field(default=None, ge=1, le=10)
+    region: Literal["cn-beijing", "ap-southeast-1"] | None = None
+    workspace_id: str | None = None
+
+
 @router.get("/config")
 async def get_settings_config(config_manager: ConfigManagerDep):
     """Return the current app configuration."""
@@ -132,6 +153,68 @@ async def reset_settings_config(config_manager: ConfigManagerDep):
     config_manager.config = PixelleVideoConfig()
     config_manager.save()
     return _settings_payload(config_manager)
+
+
+@router.get("/image-providers")
+async def list_image_providers(config_manager: ConfigManagerDep):
+    return public_image_provider_catalog(config_manager.config.image_generation)
+
+
+@router.put("/image-providers/{provider_id}")
+async def update_image_provider(
+    provider_id: ImageProviderId,
+    request: ImageProviderUpdateRequest,
+    config_manager: ConfigManagerDep,
+):
+    current = getattr(config_manager.config.image_generation, provider_id).model_dump()
+    updates = request.model_dump(exclude_none=True, exclude={"clear_api_key"})
+    incoming_key = updates.pop("api_key", None)
+    if request.clear_api_key:
+        current["api_key"] = ""
+    elif incoming_key and incoming_key.strip():
+        current["api_key"] = incoming_key.strip()
+    current.update(updates)
+    config_manager.update({"image_generation": {provider_id: current}})
+    config_manager.save()
+    return await list_image_providers(config_manager)
+
+
+@router.post("/image-providers/{provider_id}/test")
+async def test_image_provider(
+    provider_id: ImageProviderId,
+    config_manager: ConfigManagerDep,
+):
+    image_config = config_manager.config.image_generation
+    provider_config = getattr(image_config, provider_id)
+    provider = ImageProviderRegistry(image_config).get(provider_id)
+    try:
+        result = await provider.generate(
+            ImageGenerationRequest(
+                prompt="一只橙色小猫，简洁白色背景，清晰插画",
+                model=provider_config.default_model,
+                target_width=1024,
+                target_height=1024,
+            )
+        )
+    except ImageProviderError as exc:
+        raise HTTPException(
+            status_code=422 if exc.layer in {"config", "credentials"} else 502,
+            detail={
+                "provider": exc.provider,
+                "layer": exc.layer,
+                "code": exc.code,
+                "message": str(exc),
+                "request_id": exc.request_id,
+                "retryable": exc.retryable,
+            },
+        ) from exc
+    return {
+        "ok": True,
+        "provider": provider_id,
+        "model": result.model,
+        "request_id": result.request_id,
+        "image_url": result.image_url,
+    }
 
 
 @router.post("/llm/models", response_model=LlmModelListResponse)
@@ -237,9 +320,15 @@ async def fetch_buffer_channels(request: BufferChannelsRequest):
 
 
 def _settings_payload(config_manager):
+    config = config_manager.config.to_dict()
+    image_generation = config.get("image_generation", {})
+    for provider_id in ("aliyun_bailian", "volcengine_ark"):
+        provider = image_generation.get(provider_id)
+        if isinstance(provider, dict):
+            provider["api_key"] = ""
     return {
         "configured": config_manager.validate(),
-        "config": config_manager.config.to_dict(),
+        "config": config,
     }
 
 
@@ -277,6 +366,28 @@ def _diagnostic_checks(config: PixelleVideoConfig) -> list[SettingsDiagnosticChe
             bool((config.comfyui.runninghub_api_key or "").strip()),
             "RunningHub API Key 已配置。",
             "缺少 RunningHub API Key，RunningHub image/video workflow 无法提交。",
+        ),
+        _diagnostic_check(
+            "aliyun_bailian_image",
+            "阿里百炼图片生成",
+            bool(
+                config.image_generation.aliyun_bailian.enabled
+                and config.image_generation.aliyun_bailian.api_key.strip()
+            ),
+            "阿里百炼图片 Provider 已启用并配置凭证。",
+            "阿里百炼图片 Provider 未启用或缺少 API Key。",
+            severity="info",
+        ),
+        _diagnostic_check(
+            "volcengine_ark_image",
+            "火山方舟图片生成",
+            bool(
+                config.image_generation.volcengine_ark.enabled
+                and config.image_generation.volcengine_ark.api_key.strip()
+            ),
+            "火山方舟图片 Provider 已启用并配置凭证。",
+            "火山方舟图片 Provider 未启用或缺少 API Key。",
+            severity="info",
         ),
         _diagnostic_check(
             "runninghub_timeout",

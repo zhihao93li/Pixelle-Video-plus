@@ -45,6 +45,13 @@ def main():
     init_session_state()
     init_i18n()
 
+    st.warning(
+        "Legacy interface: Streamlit is frozen and will be removed after compatibility "
+        "acceptance. Use the React console for normal work, and do not edit settings in "
+        "both interfaces at the same time.",
+        icon="⚠️",
+    )
+
     # Define pages using st.Page
     create_page = st.Page(
         "pages/1_🎬_Home.py",

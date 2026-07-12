@@ -53,10 +53,12 @@ export const PIPELINE_PARTS: Record<string, PartStep[]> = {
     },
     {
       label: "每镜画面",
-      controlKey: "media_workflow",
+      controlKey: "image_provider",
       link: "template",
       fallback: "AI 生图默认 workflow",
       subKeys: [
+        "image_model",
+        "media_workflow",
         "frame_template",
         "media_width",
         "media_height",
@@ -187,10 +189,12 @@ export const PIPELINE_PARTS: Record<string, PartStep[]> = {
     },
     {
       label: "每页配图",
-      controlKey: "media_workflow",
+      controlKey: "image_provider",
       link: "template",
       fallback: "AI 生图默认 workflow",
       subKeys: [
+        "image_model",
+        "media_workflow",
         "media_width",
         "media_height",
         "prompt_prefix",
@@ -308,6 +312,8 @@ export const PART_KEY_LABELS: Record<string, string> = {
   split_mode: "内容拆分方式",
   frame_template: "画面模板",
   media_workflow: "每镜画面 workflow",
+  image_provider: "图片 Provider",
+  image_model: "图片模型",
   media_width: "画面宽度",
   media_height: "画面高度",
   prompt_prefix: "生图提示词前缀",
@@ -333,6 +339,8 @@ export const PART_EDIT_HINTS: Record<string, string> = {
   tts_voice:
     "本机 TTS 填系统音色名（如 zh-CN-YunjianNeural）；Fish Audio 填你的 reference_id。",
   media_workflow: "填 workflow 文件相对路径；runninghub/ 开头表示走云端。",
+  image_provider: "选择 RunningHub / ComfyUI、阿里百炼或火山方舟。",
+  image_model: "由所选图片 Provider 提供的模型标识。",
   workflow_key: "填 workflows/ 目录下的相对路径；填错会提示可用文件列表。",
   compose_runtime:
     "动效合成（hyperframes）依赖本机 Node 环境（npx），渲染更慢但动效更丰富；本机没装 Node 时保存会被拦下。",
