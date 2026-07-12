@@ -63,14 +63,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
 import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
@@ -1288,6 +1280,48 @@ function TemplateSummaryBar({
   )
 }
 
+function EditorViewSwitch({
+  value,
+  settingsSummary,
+  onChange,
+}: {
+  value: "content" | "settings"
+  settingsSummary: string
+  onChange: (value: "content" | "settings") => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
+      <div
+        aria-label="编辑工作区"
+        className="inline-flex rounded-lg bg-muted p-1"
+        role="group"
+      >
+        <Button
+          aria-pressed={value === "content"}
+          onClick={() => onChange("content")}
+          size="sm"
+          type="button"
+          variant={value === "content" ? "default" : "ghost"}
+        >
+          内容
+        </Button>
+        <Button
+          aria-pressed={value === "settings"}
+          onClick={() => onChange("settings")}
+          size="sm"
+          type="button"
+          variant={value === "settings" ? "default" : "ghost"}
+        >
+          本次设置
+        </Button>
+      </div>
+      <p className="min-w-0 truncate text-xs text-muted-foreground">
+        {settingsSummary}
+      </p>
+    </div>
+  )
+}
+
 function StandardInput({
   inputKind,
   text,
@@ -1418,9 +1452,9 @@ function StandardInput({
     null
   )
   const [isLoadingTemplateParams, setIsLoadingTemplateParams] = useState(true)
-  const [quickStyleOpen, setQuickStyleOpen] = useState(false)
-  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false)
-  const [longFormSettingsOpen, setLongFormSettingsOpen] = useState(false)
+  const [editorView, setEditorView] = useState<"content" | "settings">(
+    "content"
+  )
   const previewText =
     previewCopy(inputKind, text, advancedSettings.title) ||
     "这是一段用于预览画面与声音的示例文案。"
@@ -1459,11 +1493,6 @@ function StandardInput({
     artifactKind === "image_set"
       ? `${frameOrientationLabel(selectedFrameResource)} · ${frameTemplateLabel(selectedFrameResource?.key || advancedSettings.frameTemplate)} · ${sourceSummary}`
       : `${frameOrientationLabel(selectedFrameResource)} · ${voiceLabel(advancedSettings.ttsVoice)} · ${frameTemplateLabel(selectedFrameResource?.key || advancedSettings.frameTemplate)} · ${selectedBgm?.name || "无背景音乐"} · ${sourceSummary}`
-  const advancedSummary =
-    artifactKind === "image_set"
-      ? `分页、画面预览与模板参数 · ${sourceSummary}`
-      : `分镜、画面预览、试听与技术参数 · ${sourceSummary}`
-
   useEffect(() => {
     let cancelled = false
 
@@ -1649,1194 +1678,958 @@ function StandardInput({
 
   return (
     <FieldGroup>
-      {batchMode ? (
-        <BatchScriptInput
-          artifactKind={artifactKind}
-          items={batchItems}
-          label={batchListLabel}
-          hint={batchListHint}
-          onRemoveItem={onRemoveBatchItem}
-          onTextChange={onBatchTextChange}
-          text={batchText}
-        />
-      ) : (
-        <Field data-invalid={!trimmedText && text.length > 0}>
-          <FieldLabel htmlFor={inputId}>{title}</FieldLabel>
-          <Textarea
-            aria-invalid={!trimmedText && text.length > 0}
-            className="min-h-64 resize-y text-base leading-7 lg:min-h-[22rem]"
-            id={inputId}
-            onChange={(event) => updateText(event.target.value)}
-            placeholder={
-              inputKind === "topic"
-                ? "例如：猫咪夏天饮水少，主人应该怎么判断和处理"
-                : artifactKind === "text"
-                  ? "粘贴或输入需要扩写的长文素材…"
-                  : artifactKind === "image_set"
-                    ? "粘贴或输入图文文案；换行可作为分页依据…"
-                    : "粘贴或输入完整视频文案…"
-            }
-            value={text}
-          />
-          <FieldDescription className="flex flex-wrap items-center justify-between gap-2">
-            <span>{description}</span>
-            {sampleText && !trimmedText && (
-              <Button
-                onClick={() => updateText(sampleText)}
-                size="xs"
-                type="button"
-                variant="ghost"
-              >
-                填入示例
-              </Button>
-            )}
-          </FieldDescription>
-        </Field>
-      )}
+      <EditorViewSwitch
+        onChange={setEditorView}
+        settingsSummary={
+          artifactKind === "text"
+            ? `${resolveGenerationDraft(longFormDraft).wordCount} 字 · ${longFormDraft.dirtyKeys.length > 0 ? `本次覆盖 ${longFormDraft.dirtyKeys.length} 项` : "全部沿用配方默认"}`
+            : styleSummary
+        }
+        value={editorView}
+      />
 
       {resourcesError && (
         <InlineError title="资源读取失败" message={resourcesError} />
       )}
 
-      {/* 批量态标题取每条首行；标题是主料，不进产线分组 */}
-      {!batchMode && (
-        <Field>
-          <FieldLabel htmlFor="advanced-title">标题</FieldLabel>
-          <Input
-            id="advanced-title"
-            onChange={(event) => patchAdvanced({ title: event.target.value })}
-            placeholder="可选，留空自动取首行"
-            value={advancedSettings.title}
-          />
-        </Field>
-      )}
-
-      {artifactKind === "text" ? (
+      {editorView === "content" ? (
         <>
+          {batchMode ? (
+            <BatchScriptInput
+              artifactKind={artifactKind}
+              items={batchItems}
+              label={batchListLabel}
+              hint={batchListHint}
+              onRemoveItem={onRemoveBatchItem}
+              onTextChange={onBatchTextChange}
+              text={batchText}
+            />
+          ) : (
+            <Field data-invalid={!trimmedText && text.length > 0}>
+              <FieldLabel htmlFor={inputId}>{title}</FieldLabel>
+              <Textarea
+                aria-invalid={!trimmedText && text.length > 0}
+                className="min-h-64 resize-y text-base leading-7 lg:min-h-[22rem]"
+                id={inputId}
+                onChange={(event) => updateText(event.target.value)}
+                placeholder={
+                  inputKind === "topic"
+                    ? "例如：猫咪夏天饮水少，主人应该怎么判断和处理"
+                    : artifactKind === "text"
+                      ? "粘贴或输入需要扩写的长文素材…"
+                      : artifactKind === "image_set"
+                        ? "粘贴或输入图文文案；换行可作为分页依据…"
+                        : "粘贴或输入完整视频文案…"
+                }
+                value={text}
+              />
+              <FieldDescription className="flex flex-wrap items-center justify-between gap-2">
+                <span>{description}</span>
+                {sampleText && !trimmedText && (
+                  <Button
+                    onClick={() => updateText(sampleText)}
+                    size="xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    填入示例
+                  </Button>
+                )}
+              </FieldDescription>
+            </Field>
+          )}
+
+          {/* 批量态标题取每条首行；标题是主料，不进产线分组 */}
+          {!batchMode && (
+            <Field>
+              <FieldLabel htmlFor="advanced-title">标题</FieldLabel>
+              <Input
+                id="advanced-title"
+                onChange={(event) =>
+                  patchAdvanced({ title: event.target.value })
+                }
+                placeholder="可选，留空自动取首行"
+                value={advancedSettings.title}
+              />
+            </Field>
+          )}
+
           <SettingsSummaryRow
-            actionLabel="调整本次长文设置"
-            onClick={() => setLongFormSettingsOpen(true)}
-            summary={`${resolveGenerationDraft(longFormDraft).wordCount} 字 · ${resolveGenerationDraft(longFormDraft).llmModel || "系统默认模型"} · ${longFormDraft.dirtyKeys.length > 0 ? `本次覆盖 ${longFormDraft.dirtyKeys.length} 项` : "全部沿用配方默认"}`}
-          />
-          <LongFormSettingsSheet
-            draft={longFormDraft}
-            onChange={onLongFormDraftChange}
-            onOpenChange={setLongFormSettingsOpen}
-            open={longFormSettingsOpen}
+            actionLabel="查看本次设置"
+            onClick={() => setEditorView("settings")}
+            summary={
+              artifactKind === "text"
+                ? `${resolveGenerationDraft(longFormDraft).wordCount} 字 · ${resolveGenerationDraft(longFormDraft).llmModel || "系统默认模型"} · ${longFormDraft.dirtyKeys.length > 0 ? `本次覆盖 ${longFormDraft.dirtyKeys.length} 项` : "全部沿用配方默认"}`
+                : styleSummary
+            }
           />
         </>
+      ) : artifactKind === "text" ? (
+        <LongFormSettingsPanel
+          draft={longFormDraft}
+          onChange={onLongFormDraftChange}
+        />
       ) : (
         <>
-          <SettingsSummaryRow
-            actionLabel="调整本次风格"
-            onClick={() => setQuickStyleOpen(true)}
-            summary={styleSummary}
-          />
-          <QuickStyleSheet
-            dirtyKeys={advancedDirtyKeys}
-            artifactKind={artifactKind}
-            onChange={patchAdvanced}
-            onOpenChange={setQuickStyleOpen}
-            onReset={onAdvancedReset}
-            open={quickStyleOpen}
-            resources={resources}
-            settings={advancedSettings}
-          />
-        </>
-      )}
+          <div className="flex flex-col gap-1 rounded-lg border bg-muted/30 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium">本次生成设置</div>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  修改立即作为本次覆盖生效；未修改项继续沿用当前配方。
+                </p>
+              </div>
+              <Badge
+                variant={advancedDirtyKeys.length > 0 ? "warning" : "secondary"}
+              >
+                {sourceSummary}
+              </Badge>
+            </div>
+          </div>
 
-      {artifactKind !== "text" ? (
-        <>
-          <SettingsSummaryRow
-            actionLabel="高级设置"
-            onClick={() => setAdvancedSettingsOpen(true)}
-            summary={advancedSummary}
-          />
-          <Sheet
-            onOpenChange={setAdvancedSettingsOpen}
-            open={advancedSettingsOpen}
-          >
-            <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
-              <SheetHeader>
-                <SheetTitle>高级设置</SheetTitle>
-                <SheetDescription>
-                  按生产步骤调整预览、试听与低频参数。修改只影响本次生成。
-                </SheetDescription>
-              </SheetHeader>
+          <div className="flex flex-col gap-3">
+            {/* 分组编号与配方详情页产线图一一对应。 */}
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+              <span className="text-sm font-medium">按产线步骤</span>
+              <button
+                className="text-xs text-primary hover:underline"
+                onClick={() => navigate(`/create/recipes/${recipeId}`)}
+                type="button"
+              >
+                要长期生效去配方改默认
+              </button>
+            </div>
 
-              <div className="flex flex-col gap-3 px-4 pb-4">
-                {/* 分组编号与配方详情页产线图一一对应。 */}
-                <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-                  <span className="text-sm font-medium">按产线步骤</span>
-                  <button
-                    className="text-xs text-primary hover:underline"
-                    onClick={() => navigate(`/create/recipes/${recipeId}`)}
-                    type="button"
-                  >
-                    要长期生效去配方改默认
-                  </button>
+            {showScriptStep && (
+              <div className="flex items-center gap-2 rounded-lg border bg-background px-4 py-3">
+                <span className="shrink-0 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
+                  1
+                </span>
+                <span className="text-sm font-medium">写稿</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {scriptStepNote}
+                </span>
+              </div>
+            )}
+
+            {(splitStep || inputKind === "topic") && (
+              <AdvancedGroup
+                defaultOpen
+                description={
+                  inputKind === "topic" ? "分镜数量" : "文案怎么切成分镜"
+                }
+                id={`${storageScope}:run-settings:storyboard`}
+                step={splitStep || "2"}
+                title={splitLabel}
+              >
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {inputKind === "topic" ? (
+                    <Field>
+                      <FieldLabel htmlFor="advanced-scenes">
+                        分镜数量
+                      </FieldLabel>
+                      <Input
+                        id="advanced-scenes"
+                        max={12}
+                        min={1}
+                        onChange={(event) =>
+                          patchAdvanced({
+                            nScenes: Number(event.target.value || 5),
+                          })
+                        }
+                        type="number"
+                        value={advancedSettings.nScenes}
+                      />
+                    </Field>
+                  ) : (
+                    <Field>
+                      <FieldLabel>
+                        文案拆分方式
+                        <SourceTag dirty={dirty("splitMode")} />
+                      </FieldLabel>
+                      <ToggleGroup
+                        onValueChange={(value) => {
+                          if (value) {
+                            patchAdvanced({
+                              splitMode:
+                                value as StandardAdvancedSettings["splitMode"],
+                            })
+                          }
+                        }}
+                        type="single"
+                        value={advancedSettings.splitMode}
+                        variant="outline"
+                      >
+                        <ToggleGroupItem value="paragraph">
+                          按段落
+                        </ToggleGroupItem>
+                        <ToggleGroupItem value="line">按行</ToggleGroupItem>
+                        <ToggleGroupItem value="sentence">
+                          按句子
+                        </ToggleGroupItem>
+                      </ToggleGroup>
+                    </Field>
+                  )}
+                </div>
+              </AdvancedGroup>
+            )}
+
+            {visualStep && (
+              <AdvancedGroup
+                defaultOpen
+                description="模板看图挑款、参数与帧图预览"
+                id={`${storageScope}:run-settings:visual`}
+                step={visualStep}
+                title={visualLabel}
+              >
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {/* 预览图直接作为选择器，点图即选。 */}
+                  <Field className="lg:col-span-2">
+                    <FieldLabel>
+                      画面模板
+                      <SourceTag dirty={dirty("frameTemplate")} />
+                    </FieldLabel>
+                    <FrameTemplatePicker
+                      onChange={(key) => patchAdvanced({ frameTemplate: key })}
+                      templates={resources.frameTemplates}
+                      value={advancedSettings.frameTemplate}
+                    />
+                  </Field>
+
+                  {expertMode && (
+                    <Field>
+                      <FieldLabel>画面 workflow</FieldLabel>
+                      <Select
+                        onValueChange={(value) =>
+                          patchAdvanced({
+                            mediaWorkflow: value === "__default__" ? "" : value,
+                          })
+                        }
+                        value={advancedSettings.mediaWorkflow || "__default__"}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__default__">
+                            使用模板默认
+                          </SelectItem>
+                          {resources.mediaWorkflows.map((item) => (
+                            <SelectItem key={item.key} value={item.key}>
+                              {item.display_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>专家模式覆盖项。</FieldDescription>
+                    </Field>
+                  )}
                 </div>
 
-                {showScriptStep && (
-                  <div className="flex items-center gap-2 rounded-lg border bg-background px-4 py-3">
-                    <span className="shrink-0 rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
-                      1
-                    </span>
-                    <span className="text-sm font-medium">写稿</span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {scriptStepNote}
-                    </span>
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-sm font-medium">模板自定义参数</div>
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      参数来自当前画面模板，会随生成任务一起提交。
+                    </p>
+                  </div>
+
+                  {isLoadingTemplateParams && (
+                    <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
+                      正在读取模板参数
+                    </div>
+                  )}
+
+                  {templateParamsError && (
+                    <InlineError
+                      title="模板参数读取失败"
+                      message={templateParamsError}
+                    />
+                  )}
+
+                  {!isLoadingTemplateParams &&
+                    !templateParamsError &&
+                    templateParamEntries.length === 0 && (
+                      <div className="mt-3 rounded-lg bg-background p-3 text-sm text-muted-foreground">
+                        当前模板没有额外参数。
+                      </div>
+                    )}
+
+                  {templateParamEntries.length > 0 && (
+                    <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                      {templateParamEntries.map(([name, config]) => {
+                        const value =
+                          advancedSettings.templateParams[name] ??
+                          normalizeTemplateParamValue(
+                            config.type,
+                            config.default
+                          )
+                        return (
+                          <Field key={name}>
+                            <FieldLabel htmlFor={`template-param-${name}`}>
+                              {config.label || name}
+                            </FieldLabel>
+                            {config.type === "bool" ? (
+                              <label className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm">
+                                <input
+                                  checked={Boolean(value)}
+                                  id={`template-param-${name}`}
+                                  onChange={(event) =>
+                                    updateTemplateParam(
+                                      name,
+                                      config,
+                                      event.target.checked
+                                    )
+                                  }
+                                  type="checkbox"
+                                />
+                                启用
+                              </label>
+                            ) : (
+                              <input
+                                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                                id={`template-param-${name}`}
+                                onChange={(event) =>
+                                  updateTemplateParam(
+                                    name,
+                                    config,
+                                    event.target.value
+                                  )
+                                }
+                                type={
+                                  config.type === "number"
+                                    ? "number"
+                                    : config.type === "color"
+                                      ? "color"
+                                      : "text"
+                                }
+                                value={String(value)}
+                              />
+                            )}
+                            <FieldDescription>
+                              默认值：
+                              {formatTemplateParamDefault(config.default)}
+                            </FieldDescription>
+                          </Field>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="text-sm font-medium">画面预览</div>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                        用当前画面模板渲染一张示例帧图；未填文案时使用示例文案。
+                      </p>
+                    </div>
+                    <Button
+                      disabled={isPreviewingFrame}
+                      onClick={() => void previewFrame()}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {isPreviewingFrame ? (
+                        <Loader2
+                          className="animate-spin"
+                          data-icon="inline-start"
+                        />
+                      ) : (
+                        <ImageIcon data-icon="inline-start" />
+                      )}
+                      预览画面
+                    </Button>
+                  </div>
+                  {framePreviewError && (
+                    <InlineError
+                      title="画面预览失败"
+                      message={framePreviewError}
+                    />
+                  )}
+                  {framePreview && (
+                    <div className="mt-4 flex flex-col gap-3">
+                      {framePreviewUrl ? (
+                        <img
+                          alt="画面模板预览"
+                          className="aspect-[9/16] max-h-[420px] rounded-lg border bg-background object-contain"
+                          src={framePreviewUrl}
+                        />
+                      ) : (
+                        <InlineError
+                          title="画面不可预览"
+                          message="帧图已渲染，但当前无法在浏览器中显示。"
+                        />
+                      )}
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Fact
+                          label="渲染尺寸"
+                          value={`${framePreview.width} x ${framePreview.height}`}
+                        />
+                        <Fact
+                          label="媒体区域"
+                          value={
+                            framePreviewParams
+                              ? `${framePreviewParams.media_width} x ${framePreviewParams.media_height}`
+                              : "未返回"
+                          }
+                        />
+                      </div>
+                      <TechDetails
+                        items={[
+                          {
+                            label: "帧图路径",
+                            value: framePreview.frame_path,
+                          },
+                        ]}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* 生图提示词三项：专家行，标签与配方页零件表一致 */}
+                {expertMode && (
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <Field>
+                      <FieldLabel htmlFor="advanced-prompt-prefix">
+                        生图提示词前缀
+                        <SourceTag dirty={dirty("promptPrefix")} />
+                      </FieldLabel>
+                      <Textarea
+                        className="min-h-20 resize-y"
+                        id="advanced-prompt-prefix"
+                        onChange={(event) =>
+                          patchAdvanced({
+                            promptPrefix: event.target.value,
+                          })
+                        }
+                        placeholder="可选，例如：温暖自然光、真实宠物生活方式、竖屏构图"
+                        value={advancedSettings.promptPrefix}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="advanced-visual-context">
+                        生图视觉风格说明
+                        <SourceTag dirty={dirty("imagePromptVisualContext")} />
+                      </FieldLabel>
+                      <Textarea
+                        className="min-h-20 resize-y"
+                        id="advanced-visual-context"
+                        onChange={(event) =>
+                          patchAdvanced({
+                            imagePromptVisualContext: event.target.value,
+                          })
+                        }
+                        placeholder="可选，例如品牌视觉、宠物品种、场景约束。"
+                        value={advancedSettings.imagePromptVisualContext}
+                      />
+                    </Field>
+                    <Field className="lg:col-span-2">
+                      <FieldLabel htmlFor="advanced-prompt-rules">
+                        生图规则说明
+                        <SourceTag
+                          dirty={dirty("imagePromptGenerationRules")}
+                        />
+                      </FieldLabel>
+                      <Textarea
+                        className="min-h-20 resize-y"
+                        id="advanced-prompt-rules"
+                        onChange={(event) =>
+                          patchAdvanced({
+                            imagePromptGenerationRules: event.target.value,
+                          })
+                        }
+                        placeholder="可选，用于约束每个分镜画面提示词的生成。"
+                        value={advancedSettings.imagePromptGenerationRules}
+                      />
+                    </Field>
                   </div>
                 )}
 
-                {(splitStep || inputKind === "topic") && (
-                  <AdvancedGroup
-                    description={
-                      inputKind === "topic" ? "分镜数量" : "文案怎么切成分镜"
-                    }
-                    id={`${storageScope}:storyboard`}
-                    step={splitStep || "2"}
-                    title={splitLabel}
-                  >
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      {inputKind === "topic" ? (
-                        <Field>
-                          <FieldLabel htmlFor="advanced-scenes">
-                            分镜数量
-                          </FieldLabel>
-                          <Input
-                            id="advanced-scenes"
-                            max={12}
-                            min={1}
-                            onChange={(event) =>
-                              patchAdvanced({
-                                nScenes: Number(event.target.value || 5),
-                              })
-                            }
-                            type="number"
-                            value={advancedSettings.nScenes}
-                          />
-                        </Field>
-                      ) : (
-                        <Field>
-                          <FieldLabel>
-                            文案拆分方式
-                            <SourceTag dirty={dirty("splitMode")} />
-                          </FieldLabel>
-                          <ToggleGroup
-                            onValueChange={(value) => {
-                              if (value) {
-                                patchAdvanced({
-                                  splitMode:
-                                    value as StandardAdvancedSettings["splitMode"],
-                                })
-                              }
-                            }}
-                            type="single"
-                            value={advancedSettings.splitMode}
-                            variant="outline"
-                          >
-                            <ToggleGroupItem value="paragraph">
-                              按段落
-                            </ToggleGroupItem>
-                            <ToggleGroupItem value="line">按行</ToggleGroupItem>
-                            <ToggleGroupItem value="sentence">
-                              按句子
-                            </ToggleGroupItem>
-                          </ToggleGroup>
-                        </Field>
-                      )}
-                    </div>
-                  </AdvancedGroup>
-                )}
-
-                {visualStep && (
-                  <AdvancedGroup
-                    description="模板看图挑款、参数与帧图预览"
-                    id={`${storageScope}:visual`}
-                    step={visualStep}
-                    title={visualLabel}
-                  >
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      {/* 预览图直接作为选择器，点图即选。 */}
-                      <Field className="lg:col-span-2">
-                        <FieldLabel>
-                          画面模板
-                          <SourceTag dirty={dirty("frameTemplate")} />
-                        </FieldLabel>
-                        <FrameTemplatePicker
-                          onChange={(key) =>
-                            patchAdvanced({ frameTemplate: key })
-                          }
-                          templates={resources.frameTemplates}
-                          value={advancedSettings.frameTemplate}
-                        />
-                      </Field>
-
-                      {expertMode && (
-                        <Field>
-                          <FieldLabel>画面 workflow</FieldLabel>
-                          <Select
-                            onValueChange={(value) =>
-                              patchAdvanced({
-                                mediaWorkflow:
-                                  value === "__default__" ? "" : value,
-                              })
-                            }
-                            value={
-                              advancedSettings.mediaWorkflow || "__default__"
-                            }
-                          >
-                            <SelectTrigger className="w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__default__">
-                                使用模板默认
-                              </SelectItem>
-                              {resources.mediaWorkflows.map((item) => (
-                                <SelectItem key={item.key} value={item.key}>
-                                  {item.display_name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FieldDescription>专家模式覆盖项。</FieldDescription>
-                        </Field>
-                      )}
-                    </div>
-
-                    <div className="rounded-lg border bg-muted/30 p-4">
-                      <div className="flex flex-col gap-1">
+                {expertMode && (
+                  <div className="rounded-lg border bg-muted/30 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
                         <div className="text-sm font-medium">
-                          模板自定义参数
+                          媒体工作流预览
                         </div>
-                        <p className="text-sm leading-6 text-muted-foreground">
-                          参数来自当前画面模板，会随生成任务一起提交。
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          生成一张示例图片或一段短视频；会调用生成服务并消耗额度。
                         </p>
                       </div>
-
-                      {isLoadingTemplateParams && (
-                        <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                      <Button
+                        disabled={
+                          mediaType === "static" ||
+                          !mediaPreviewPrompt ||
+                          isPreviewingMedia
+                        }
+                        onClick={() => void previewMedia()}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        {isPreviewingMedia ? (
                           <Loader2
                             className="animate-spin"
                             data-icon="inline-start"
                           />
-                          正在读取模板参数
-                        </div>
-                      )}
-
-                      {templateParamsError && (
-                        <InlineError
-                          title="模板参数读取失败"
-                          message={templateParamsError}
-                        />
-                      )}
-
-                      {!isLoadingTemplateParams &&
-                        !templateParamsError &&
-                        templateParamEntries.length === 0 && (
-                          <div className="mt-3 rounded-lg bg-background p-3 text-sm text-muted-foreground">
-                            当前模板没有额外参数。
-                          </div>
+                        ) : (
+                          <Video data-icon="inline-start" />
                         )}
-
-                      {templateParamEntries.length > 0 && (
-                        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                          {templateParamEntries.map(([name, config]) => {
-                            const value =
-                              advancedSettings.templateParams[name] ??
-                              normalizeTemplateParamValue(
-                                config.type,
-                                config.default
-                              )
-                            return (
-                              <Field key={name}>
-                                <FieldLabel htmlFor={`template-param-${name}`}>
-                                  {config.label || name}
-                                </FieldLabel>
-                                {config.type === "bool" ? (
-                                  <label className="flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm">
-                                    <input
-                                      checked={Boolean(value)}
-                                      id={`template-param-${name}`}
-                                      onChange={(event) =>
-                                        updateTemplateParam(
-                                          name,
-                                          config,
-                                          event.target.checked
-                                        )
-                                      }
-                                      type="checkbox"
-                                    />
-                                    启用
-                                  </label>
-                                ) : (
-                                  <input
-                                    className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
-                                    id={`template-param-${name}`}
-                                    onChange={(event) =>
-                                      updateTemplateParam(
-                                        name,
-                                        config,
-                                        event.target.value
-                                      )
-                                    }
-                                    type={
-                                      config.type === "number"
-                                        ? "number"
-                                        : config.type === "color"
-                                          ? "color"
-                                          : "text"
-                                    }
-                                    value={String(value)}
-                                  />
-                                )}
-                                <FieldDescription>
-                                  默认值：
-                                  {formatTemplateParamDefault(config.default)}
-                                </FieldDescription>
-                              </Field>
-                            )
-                          })}
-                        </div>
-                      )}
+                        预览媒体
+                      </Button>
                     </div>
 
-                    <div className="rounded-lg border bg-muted/30 p-4">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <div className="text-sm font-medium">画面预览</div>
-                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                            用当前画面模板渲染一张示例帧图；未填文案时使用示例文案。
-                          </p>
-                        </div>
-                        <Button
-                          disabled={isPreviewingFrame}
-                          onClick={() => void previewFrame()}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                        >
-                          {isPreviewingFrame ? (
-                            <Loader2
-                              className="animate-spin"
-                              data-icon="inline-start"
-                            />
-                          ) : (
-                            <ImageIcon data-icon="inline-start" />
-                          )}
-                          预览画面
-                        </Button>
-                      </div>
-                      {framePreviewError && (
-                        <InlineError
-                          title="画面预览失败"
-                          message={framePreviewError}
-                        />
-                      )}
-                      {framePreview && (
-                        <div className="mt-4 flex flex-col gap-3">
-                          {framePreviewUrl ? (
-                            <img
-                              alt="画面模板预览"
-                              className="aspect-[9/16] max-h-[420px] rounded-lg border bg-background object-contain"
-                              src={framePreviewUrl}
-                            />
-                          ) : (
-                            <InlineError
-                              title="画面不可预览"
-                              message="帧图已渲染，但当前无法在浏览器中显示。"
-                            />
-                          )}
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <Fact
-                              label="渲染尺寸"
-                              value={`${framePreview.width} x ${framePreview.height}`}
-                            />
-                            <Fact
-                              label="媒体区域"
-                              value={
-                                framePreviewParams
-                                  ? `${framePreviewParams.media_width} x ${framePreviewParams.media_height}`
-                                  : "未返回"
-                              }
-                            />
-                          </div>
-                          <TechDetails
-                            items={[
-                              {
-                                label: "帧图路径",
-                                value: framePreview.frame_path,
-                              },
-                            ]}
-                          />
-                        </div>
-                      )}
+                    <Field className="mt-4">
+                      <FieldLabel htmlFor="advanced-media-preview-prompt">
+                        预览提示词
+                      </FieldLabel>
+                      <Textarea
+                        className="min-h-20 resize-y bg-background"
+                        id="advanced-media-preview-prompt"
+                        onChange={(event) =>
+                          patchAdvanced({
+                            mediaPreviewPrompt: event.target.value,
+                          })
+                        }
+                        placeholder={defaultMediaPreviewPrompt(mediaType)}
+                        value={advancedSettings.mediaPreviewPrompt}
+                      />
+                    </Field>
+
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <Fact label="媒体类型" value={mediaType} />
+                      <Fact
+                        label="媒体尺寸"
+                        value={`${previewMediaWidth} x ${previewMediaHeight}`}
+                      />
                     </div>
 
-                    {/* 生图提示词三项：专家行，标签与配方页零件表一致 */}
-                    {expertMode && (
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        <Field>
-                          <FieldLabel htmlFor="advanced-prompt-prefix">
-                            生图提示词前缀
-                            <SourceTag dirty={dirty("promptPrefix")} />
-                          </FieldLabel>
-                          <Textarea
-                            className="min-h-20 resize-y"
-                            id="advanced-prompt-prefix"
-                            onChange={(event) =>
-                              patchAdvanced({
-                                promptPrefix: event.target.value,
-                              })
-                            }
-                            placeholder="可选，例如：温暖自然光、真实宠物生活方式、竖屏构图"
-                            value={advancedSettings.promptPrefix}
-                          />
-                        </Field>
-                        <Field>
-                          <FieldLabel htmlFor="advanced-visual-context">
-                            生图视觉风格说明
-                            <SourceTag
-                              dirty={dirty("imagePromptVisualContext")}
-                            />
-                          </FieldLabel>
-                          <Textarea
-                            className="min-h-20 resize-y"
-                            id="advanced-visual-context"
-                            onChange={(event) =>
-                              patchAdvanced({
-                                imagePromptVisualContext: event.target.value,
-                              })
-                            }
-                            placeholder="可选，例如品牌视觉、宠物品种、场景约束。"
-                            value={advancedSettings.imagePromptVisualContext}
-                          />
-                        </Field>
-                        <Field className="lg:col-span-2">
-                          <FieldLabel htmlFor="advanced-prompt-rules">
-                            生图规则说明
-                            <SourceTag
-                              dirty={dirty("imagePromptGenerationRules")}
-                            />
-                          </FieldLabel>
-                          <Textarea
-                            className="min-h-20 resize-y"
-                            id="advanced-prompt-rules"
-                            onChange={(event) =>
-                              patchAdvanced({
-                                imagePromptGenerationRules: event.target.value,
-                              })
-                            }
-                            placeholder="可选，用于约束每个分镜画面提示词的生成。"
-                            value={advancedSettings.imagePromptGenerationRules}
-                          />
-                        </Field>
-                      </div>
-                    )}
-
-                    {expertMode && (
-                      <div className="rounded-lg border bg-muted/30 p-4">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div>
-                            <div className="text-sm font-medium">
-                              媒体工作流预览
-                            </div>
-                            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                              生成一张示例图片或一段短视频；会调用生成服务并消耗额度。
-                            </p>
-                          </div>
-                          <Button
-                            disabled={
-                              mediaType === "static" ||
-                              !mediaPreviewPrompt ||
-                              isPreviewingMedia
-                            }
-                            onClick={() => void previewMedia()}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                          >
-                            {isPreviewingMedia ? (
-                              <Loader2
-                                className="animate-spin"
-                                data-icon="inline-start"
-                              />
-                            ) : (
-                              <Video data-icon="inline-start" />
-                            )}
-                            预览媒体
-                          </Button>
-                        </div>
-
-                        <Field className="mt-4">
-                          <FieldLabel htmlFor="advanced-media-preview-prompt">
-                            预览提示词
-                          </FieldLabel>
-                          <Textarea
-                            className="min-h-20 resize-y bg-background"
-                            id="advanced-media-preview-prompt"
-                            onChange={(event) =>
-                              patchAdvanced({
-                                mediaPreviewPrompt: event.target.value,
-                              })
-                            }
-                            placeholder={defaultMediaPreviewPrompt(mediaType)}
-                            value={advancedSettings.mediaPreviewPrompt}
-                          />
-                        </Field>
-
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          <Fact label="媒体类型" value={mediaType} />
-                          <Fact
-                            label="媒体尺寸"
-                            value={`${previewMediaWidth} x ${previewMediaHeight}`}
-                          />
-                        </div>
-
-                        {mediaType === "video" && (
-                          <Field className="mt-3">
-                            <FieldLabel htmlFor="advanced-media-duration">
-                              预览视频时长
-                            </FieldLabel>
-                            <Input
-                              id="advanced-media-duration"
-                              max={20}
-                              min={1}
-                              onChange={(event) =>
-                                patchAdvanced({
-                                  mediaDuration: Number(
-                                    event.target.value || 4
-                                  ),
-                                })
-                              }
-                              type="number"
-                              value={advancedSettings.mediaDuration}
-                            />
-                          </Field>
-                        )}
-
-                        {mediaPreviewError && (
-                          <InlineError
-                            title="媒体预览失败"
-                            message={mediaPreviewError}
-                          />
-                        )}
-                        {mediaPreview && (
-                          <div className="mt-4 flex flex-col gap-3">
-                            {mediaPreviewUrl ? (
-                              mediaPreview.media_type === "video" ? (
-                                <video
-                                  className="aspect-[9/16] max-h-[420px] rounded-lg border bg-background object-contain"
-                                  controls
-                                  src={mediaPreviewUrl}
-                                />
-                              ) : (
-                                <img
-                                  alt="媒体工作流预览"
-                                  className="aspect-[9/16] max-h-[420px] rounded-lg border bg-background object-contain"
-                                  src={mediaPreviewUrl}
-                                />
-                              )
-                            ) : (
-                              <InlineError
-                                title="媒体不可预览"
-                                message="媒体已生成，但当前无法在浏览器中显示。"
-                              />
-                            )}
-                            <TechDetails
-                              items={[
-                                {
-                                  label: "媒体路径",
-                                  value: mediaPreview.media_path,
-                                },
-                              ]}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </AdvancedGroup>
-                )}
-
-                {/* 图文/长文无配音 */}
-                {!isNonVideo && voiceStep && (
-                  <AdvancedGroup
-                    description="引擎、音色、语速与试听"
-                    id={`${storageScope}:audio`}
-                    step={voiceStep}
-                    title="配音"
-                  >
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      {/* 配音引擎决定音色 ID 的取值方式，常驻显示（2026-07-08 用户反馈，移出专家门控） */}
-                      <Field>
-                        <FieldLabel>
-                          配音引擎
-                          <SourceTag dirty={dirty("ttsInferenceMode")} />
-                        </FieldLabel>
-                        <Select
-                          onValueChange={(value) =>
-                            patchAdvanced({
-                              ttsInferenceMode:
-                                value as StandardAdvancedSettings["ttsInferenceMode"],
-                            })
-                          }
-                          value={advancedSettings.ttsInferenceMode}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="local">
-                              本地 / Edge Voice
-                            </SelectItem>
-                            <SelectItem value="comfyui">
-                              ComfyUI workflow
-                            </SelectItem>
-                            <SelectItem value="fish">Fish Audio</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-
-                      <Field>
-                        <FieldLabel htmlFor="advanced-tts-voice">
-                          音色
-                          <SourceTag dirty={dirty("ttsVoice")} />
+                    {mediaType === "video" && (
+                      <Field className="mt-3">
+                        <FieldLabel htmlFor="advanced-media-duration">
+                          预览视频时长
                         </FieldLabel>
                         <Input
-                          id="advanced-tts-voice"
+                          id="advanced-media-duration"
+                          max={20}
+                          min={1}
                           onChange={(event) =>
-                            patchAdvanced({ ttsVoice: event.target.value })
-                          }
-                          value={advancedSettings.ttsVoice}
-                        />
-                        <FieldDescription>
-                          本机 TTS 填系统音色名；Fish Audio 填你的
-                          reference_id。
-                        </FieldDescription>
-                      </Field>
-
-                      {expertMode && (
-                        <Field>
-                          <FieldLabel>TTS workflow</FieldLabel>
-                          <Select
-                            onValueChange={(value) =>
-                              patchAdvanced({
-                                ttsWorkflow:
-                                  value === "__default__" ? "" : value,
-                              })
-                            }
-                            value={
-                              advancedSettings.ttsWorkflow || "__default__"
-                            }
-                          >
-                            <SelectTrigger className="w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__default__">
-                                使用模板默认
-                              </SelectItem>
-                              {resources.ttsWorkflows.map((item) => (
-                                <SelectItem key={item.key} value={item.key}>
-                                  {item.display_name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FieldDescription>专家模式覆盖项。</FieldDescription>
-                        </Field>
-                      )}
-
-                      <Field>
-                        <FieldLabel htmlFor="advanced-tts-speed">
-                          语速 · {advancedSettings.ttsSpeed.toFixed(1)}x
-                          <SourceTag dirty={dirty("ttsSpeed")} />
-                        </FieldLabel>
-                        <Slider
-                          id="advanced-tts-speed"
-                          max={2}
-                          min={0.5}
-                          onValueChange={([value]) =>
-                            patchAdvanced({ ttsSpeed: value ?? 1 })
-                          }
-                          step={0.1}
-                          value={[advancedSettings.ttsSpeed]}
-                        />
-                      </Field>
-                    </div>
-
-                    {expertMode &&
-                      advancedSettings.ttsInferenceMode === "comfyui" && (
-                        <Field>
-                          <FieldLabel htmlFor="advanced-ref-audio">
-                            Reference audio
-                          </FieldLabel>
-                          <input
-                            accept="audio/mpeg,audio/wav,audio/flac,audio/mp4,audio/aac,audio/ogg,.mp3,.wav,.flac,.m4a,.aac,.ogg"
-                            className="block w-full rounded-lg border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm"
-                            disabled={isUploadingRefAudio}
-                            id="advanced-ref-audio"
-                            onChange={(event) =>
-                              void uploadRefAudio(
-                                event.currentTarget.files?.[0] ?? null
-                              )
-                            }
-                            type="file"
-                          />
-                          <FieldDescription>
-                            用于 ComfyUI voice cloning，试听和正式生成都会使用。
-                          </FieldDescription>
-                          {isUploadingRefAudio && (
-                            <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-                              <Loader2
-                                className="animate-spin"
-                                data-icon="inline-start"
-                              />
-                              正在上传参考音频
-                            </div>
-                          )}
-                          {advancedSettings.ttsRefAudioPath && (
-                            <TechDetails
-                              items={[
-                                {
-                                  label:
-                                    advancedSettings.ttsRefAudioName ||
-                                    "参考音频",
-                                  value: advancedSettings.ttsRefAudioPath,
-                                },
-                              ]}
-                            />
-                          )}
-                          {refAudioUploadError && (
-                            <InlineError
-                              title="参考音频上传失败"
-                              message={refAudioUploadError}
-                            />
-                          )}
-                        </Field>
-                      )}
-
-                    <div className="rounded-lg border bg-muted/30 p-4">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <div className="text-sm font-medium">试听</div>
-                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                            用当前声音设置合成一小段试听音频。
-                          </p>
-                        </div>
-                        <Button
-                          disabled={isPreviewingTts}
-                          onClick={() => void previewTts()}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                        >
-                          {isPreviewingTts ? (
-                            <Loader2
-                              className="animate-spin"
-                              data-icon="inline-start"
-                            />
-                          ) : (
-                            <Volume2 data-icon="inline-start" />
-                          )}
-                          试听声音
-                        </Button>
-                      </div>
-                      {ttsPreviewError && (
-                        <InlineError
-                          title="试听失败"
-                          message={ttsPreviewError}
-                        />
-                      )}
-                      {ttsPreview && (
-                        <div className="mt-4 flex flex-col gap-3">
-                          {ttsPreviewUrl ? (
-                            <audio
-                              className="w-full"
-                              controls
-                              src={ttsPreviewUrl}
-                            />
-                          ) : (
-                            <InlineError
-                              title="音频不可播放"
-                              message="音频已合成，但当前无法在浏览器中播放。"
-                            />
-                          )}
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <Fact
-                              label="音频时长"
-                              value={formatDuration(ttsPreview.duration)}
-                            />
-                            <Fact
-                              label="声音"
-                              value={advancedSettings.ttsVoice || "默认"}
-                            />
-                          </div>
-                          <TechDetails
-                            items={[
-                              {
-                                label: "音频路径",
-                                value: ttsPreview.audio_path,
-                              },
-                            ]}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </AdvancedGroup>
-                )}
-
-                {/* BGM 属于合成阶段；合成引擎是配方级参数。 */}
-                {!isNonVideo && composeStep && (
-                  <AdvancedGroup
-                    description="背景音乐与合成引擎"
-                    id={`${storageScope}:compose`}
-                    step={composeStep}
-                    title="合成"
-                  >
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      <Field>
-                        <FieldLabel>
-                          背景音乐
-                          <SourceTag dirty={dirty("bgmPath")} />
-                        </FieldLabel>
-                        <Select
-                          onValueChange={(value) =>
                             patchAdvanced({
-                              bgmPath: value === "__none__" ? "" : value,
+                              mediaDuration: Number(event.target.value || 4),
                             })
                           }
-                          value={advancedSettings.bgmPath || "__none__"}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">不指定 BGM</SelectItem>
-                            {resources.bgm.map((item) => (
-                              <SelectItem key={item.path} value={item.path}>
-                                {item.name} · {item.source}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-
-                      <BgmUploadControl
-                        onUploaded={(bgm) => {
-                          onBgmUploaded(bgm)
-                          patchAdvanced({ bgmPath: bgm.path })
-                        }}
-                      />
-
-                      <Field>
-                        <FieldLabel htmlFor="advanced-bgm-volume">
-                          背景音乐音量 ·{" "}
-                          {Math.round(advancedSettings.bgmVolume * 100)}%
-                          <SourceTag dirty={dirty("bgmVolume")} />
-                        </FieldLabel>
-                        <Slider
-                          id="advanced-bgm-volume"
-                          max={1}
-                          min={0}
-                          onValueChange={([value]) =>
-                            patchAdvanced({ bgmVolume: value ?? 0 })
-                          }
-                          step={0.05}
-                          value={[advancedSettings.bgmVolume]}
+                          type="number"
+                          value={advancedSettings.mediaDuration}
                         />
                       </Field>
+                    )}
 
-                      <Field>
-                        <FieldLabel>
-                          背景音乐播放方式
-                          <SourceTag dirty={dirty("bgmMode")} />
-                        </FieldLabel>
-                        <ToggleGroup
-                          onValueChange={(value) => {
-                            if (value) {
-                              patchAdvanced({
-                                bgmMode:
-                                  value as StandardAdvancedSettings["bgmMode"],
-                              })
-                            }
-                          }}
-                          type="single"
-                          value={advancedSettings.bgmMode}
-                          variant="outline"
-                        >
-                          <ToggleGroupItem value="loop">循环</ToggleGroupItem>
-                          <ToggleGroupItem value="once">
-                            播放一次
-                          </ToggleGroupItem>
-                        </ToggleGroup>
-                      </Field>
-                    </div>
-
-                    {bgmPreviewUrl && (
-                      <div className="rounded-lg border bg-muted/30 p-4">
-                        <div className="text-sm font-medium">BGM 预览</div>
-                        <audio
-                          className="mt-3 w-full"
-                          controls
-                          src={bgmPreviewUrl}
+                    {mediaPreviewError && (
+                      <InlineError
+                        title="媒体预览失败"
+                        message={mediaPreviewError}
+                      />
+                    )}
+                    {mediaPreview && (
+                      <div className="mt-4 flex flex-col gap-3">
+                        {mediaPreviewUrl ? (
+                          mediaPreview.media_type === "video" ? (
+                            <video
+                              className="aspect-[9/16] max-h-[420px] rounded-lg border bg-background object-contain"
+                              controls
+                              src={mediaPreviewUrl}
+                            />
+                          ) : (
+                            <img
+                              alt="媒体工作流预览"
+                              className="aspect-[9/16] max-h-[420px] rounded-lg border bg-background object-contain"
+                              src={mediaPreviewUrl}
+                            />
+                          )
+                        ) : (
+                          <InlineError
+                            title="媒体不可预览"
+                            message="媒体已生成，但当前无法在浏览器中显示。"
+                          />
+                        )}
+                        <TechDetails
+                          items={[
+                            {
+                              label: "媒体路径",
+                              value: mediaPreview.media_path,
+                            },
+                          ]}
                         />
                       </div>
                     )}
-
-                    <p className="text-xs text-muted-foreground">
-                      合成引擎由配方决定（标准合成 / 动效合成），
-                      <button
-                        className="text-primary hover:underline"
-                        onClick={() => navigate(`/create/recipes/${recipeId}`)}
-                        type="button"
-                      >
-                        在配方里查看或更换
-                      </button>
-                      。
-                    </p>
-                  </AdvancedGroup>
+                  </div>
                 )}
-              </div>
+              </AdvancedGroup>
+            )}
 
-              <SheetFooter className="sm:justify-between">
-                <Button
-                  disabled={advancedDirtyKeys.length === 0}
-                  onClick={onAdvancedReset}
-                  type="button"
-                  variant="outline"
-                >
-                  恢复配方默认
-                </Button>
-                <Button onClick={() => setAdvancedSettingsOpen(false)}>
-                  完成
-                </Button>
-              </SheetFooter>
-            </SheetContent>
-          </Sheet>
+            {/* 图文/长文无配音 */}
+            {!isNonVideo && voiceStep && (
+              <AdvancedGroup
+                defaultOpen
+                description="引擎、音色、语速与试听"
+                id={`${storageScope}:run-settings:audio`}
+                step={voiceStep}
+                title="配音"
+              >
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {/* 配音引擎决定音色 ID 的取值方式，常驻显示（2026-07-08 用户反馈，移出专家门控） */}
+                  <Field>
+                    <FieldLabel>
+                      配音引擎
+                      <SourceTag dirty={dirty("ttsInferenceMode")} />
+                    </FieldLabel>
+                    <Select
+                      onValueChange={(value) =>
+                        patchAdvanced({
+                          ttsInferenceMode:
+                            value as StandardAdvancedSettings["ttsInferenceMode"],
+                        })
+                      }
+                      value={advancedSettings.ttsInferenceMode}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="local">本地 / Edge Voice</SelectItem>
+                        <SelectItem value="comfyui">
+                          ComfyUI workflow
+                        </SelectItem>
+                        <SelectItem value="fish">Fish Audio</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <Field>
+                    <FieldLabel htmlFor="advanced-tts-voice">
+                      音色
+                      <SourceTag dirty={dirty("ttsVoice")} />
+                    </FieldLabel>
+                    <Input
+                      id="advanced-tts-voice"
+                      onChange={(event) =>
+                        patchAdvanced({ ttsVoice: event.target.value })
+                      }
+                      value={advancedSettings.ttsVoice}
+                    />
+                    <FieldDescription>
+                      本机 TTS 填系统音色名；Fish Audio 填你的 reference_id。
+                    </FieldDescription>
+                  </Field>
+
+                  {expertMode && (
+                    <Field>
+                      <FieldLabel>TTS workflow</FieldLabel>
+                      <Select
+                        onValueChange={(value) =>
+                          patchAdvanced({
+                            ttsWorkflow: value === "__default__" ? "" : value,
+                          })
+                        }
+                        value={advancedSettings.ttsWorkflow || "__default__"}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__default__">
+                            使用模板默认
+                          </SelectItem>
+                          {resources.ttsWorkflows.map((item) => (
+                            <SelectItem key={item.key} value={item.key}>
+                              {item.display_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FieldDescription>专家模式覆盖项。</FieldDescription>
+                    </Field>
+                  )}
+
+                  <Field>
+                    <FieldLabel htmlFor="advanced-tts-speed">
+                      语速 · {advancedSettings.ttsSpeed.toFixed(1)}x
+                      <SourceTag dirty={dirty("ttsSpeed")} />
+                    </FieldLabel>
+                    <Slider
+                      id="advanced-tts-speed"
+                      max={2}
+                      min={0.5}
+                      onValueChange={([value]) =>
+                        patchAdvanced({ ttsSpeed: value ?? 1 })
+                      }
+                      step={0.1}
+                      value={[advancedSettings.ttsSpeed]}
+                    />
+                  </Field>
+                </div>
+
+                {expertMode &&
+                  advancedSettings.ttsInferenceMode === "comfyui" && (
+                    <Field>
+                      <FieldLabel htmlFor="advanced-ref-audio">
+                        Reference audio
+                      </FieldLabel>
+                      <input
+                        accept="audio/mpeg,audio/wav,audio/flac,audio/mp4,audio/aac,audio/ogg,.mp3,.wav,.flac,.m4a,.aac,.ogg"
+                        className="block w-full rounded-lg border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm"
+                        disabled={isUploadingRefAudio}
+                        id="advanced-ref-audio"
+                        onChange={(event) =>
+                          void uploadRefAudio(
+                            event.currentTarget.files?.[0] ?? null
+                          )
+                        }
+                        type="file"
+                      />
+                      <FieldDescription>
+                        用于 ComfyUI voice cloning，试听和正式生成都会使用。
+                      </FieldDescription>
+                      {isUploadingRefAudio && (
+                        <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                          <Loader2
+                            className="animate-spin"
+                            data-icon="inline-start"
+                          />
+                          正在上传参考音频
+                        </div>
+                      )}
+                      {advancedSettings.ttsRefAudioPath && (
+                        <TechDetails
+                          items={[
+                            {
+                              label:
+                                advancedSettings.ttsRefAudioName || "参考音频",
+                              value: advancedSettings.ttsRefAudioPath,
+                            },
+                          ]}
+                        />
+                      )}
+                      {refAudioUploadError && (
+                        <InlineError
+                          title="参考音频上传失败"
+                          message={refAudioUploadError}
+                        />
+                      )}
+                    </Field>
+                  )}
+
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="text-sm font-medium">试听</div>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                        用当前声音设置合成一小段试听音频。
+                      </p>
+                    </div>
+                    <Button
+                      disabled={isPreviewingTts}
+                      onClick={() => void previewTts()}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {isPreviewingTts ? (
+                        <Loader2
+                          className="animate-spin"
+                          data-icon="inline-start"
+                        />
+                      ) : (
+                        <Volume2 data-icon="inline-start" />
+                      )}
+                      试听声音
+                    </Button>
+                  </div>
+                  {ttsPreviewError && (
+                    <InlineError title="试听失败" message={ttsPreviewError} />
+                  )}
+                  {ttsPreview && (
+                    <div className="mt-4 flex flex-col gap-3">
+                      {ttsPreviewUrl ? (
+                        <audio
+                          className="w-full"
+                          controls
+                          src={ttsPreviewUrl}
+                        />
+                      ) : (
+                        <InlineError
+                          title="音频不可播放"
+                          message="音频已合成，但当前无法在浏览器中播放。"
+                        />
+                      )}
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Fact
+                          label="音频时长"
+                          value={formatDuration(ttsPreview.duration)}
+                        />
+                        <Fact
+                          label="声音"
+                          value={advancedSettings.ttsVoice || "默认"}
+                        />
+                      </div>
+                      <TechDetails
+                        items={[
+                          {
+                            label: "音频路径",
+                            value: ttsPreview.audio_path,
+                          },
+                        ]}
+                      />
+                    </div>
+                  )}
+                </div>
+              </AdvancedGroup>
+            )}
+
+            {/* BGM 属于合成阶段；合成引擎是配方级参数。 */}
+            {!isNonVideo && composeStep && (
+              <AdvancedGroup
+                defaultOpen
+                description="背景音乐与合成引擎"
+                id={`${storageScope}:run-settings:compose`}
+                step={composeStep}
+                title="合成"
+              >
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <Field>
+                    <FieldLabel>
+                      背景音乐
+                      <SourceTag dirty={dirty("bgmPath")} />
+                    </FieldLabel>
+                    <Select
+                      onValueChange={(value) =>
+                        patchAdvanced({
+                          bgmPath: value === "__none__" ? "" : value,
+                        })
+                      }
+                      value={advancedSettings.bgmPath || "__none__"}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">不指定 BGM</SelectItem>
+                        {resources.bgm.map((item) => (
+                          <SelectItem key={item.path} value={item.path}>
+                            {item.name} · {item.source}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <BgmUploadControl
+                    onUploaded={(bgm) => {
+                      onBgmUploaded(bgm)
+                      patchAdvanced({ bgmPath: bgm.path })
+                    }}
+                  />
+
+                  <Field>
+                    <FieldLabel htmlFor="advanced-bgm-volume">
+                      背景音乐音量 ·{" "}
+                      {Math.round(advancedSettings.bgmVolume * 100)}%
+                      <SourceTag dirty={dirty("bgmVolume")} />
+                    </FieldLabel>
+                    <Slider
+                      id="advanced-bgm-volume"
+                      max={1}
+                      min={0}
+                      onValueChange={([value]) =>
+                        patchAdvanced({ bgmVolume: value ?? 0 })
+                      }
+                      step={0.05}
+                      value={[advancedSettings.bgmVolume]}
+                    />
+                  </Field>
+
+                  <Field>
+                    <FieldLabel>
+                      背景音乐播放方式
+                      <SourceTag dirty={dirty("bgmMode")} />
+                    </FieldLabel>
+                    <ToggleGroup
+                      onValueChange={(value) => {
+                        if (value) {
+                          patchAdvanced({
+                            bgmMode:
+                              value as StandardAdvancedSettings["bgmMode"],
+                          })
+                        }
+                      }}
+                      type="single"
+                      value={advancedSettings.bgmMode}
+                      variant="outline"
+                    >
+                      <ToggleGroupItem value="loop">循环</ToggleGroupItem>
+                      <ToggleGroupItem value="once">播放一次</ToggleGroupItem>
+                    </ToggleGroup>
+                  </Field>
+                </div>
+
+                {bgmPreviewUrl && (
+                  <div className="rounded-lg border bg-muted/30 p-4">
+                    <div className="text-sm font-medium">BGM 预览</div>
+                    <audio
+                      className="mt-3 w-full"
+                      controls
+                      src={bgmPreviewUrl}
+                    />
+                  </div>
+                )}
+
+                <p className="text-xs text-muted-foreground">
+                  合成引擎由配方决定（标准合成 / 动效合成），
+                  <button
+                    className="text-primary hover:underline"
+                    onClick={() => navigate(`/create/recipes/${recipeId}`)}
+                    type="button"
+                  >
+                    在配方里查看或更换
+                  </button>
+                  。
+                </p>
+              </AdvancedGroup>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+            <Button
+              disabled={advancedDirtyKeys.length === 0}
+              onClick={onAdvancedReset}
+              type="button"
+              variant="outline"
+            >
+              恢复配方默认
+            </Button>
+            <Button onClick={() => setEditorView("content")} type="button">
+              返回内容
+            </Button>
+          </div>
         </>
-      ) : null}
+      )}
     </FieldGroup>
   )
 }
 
-function QuickStyleSheet({
-  open,
-  artifactKind,
-  dirtyKeys,
-  settings,
-  resources,
-  onOpenChange,
-  onChange,
-  onReset,
-}: {
-  open: boolean
-  artifactKind: ArtifactKind
-  dirtyKeys: Array<keyof StandardAdvancedSettings>
-  settings: StandardAdvancedSettings
-  resources: GenerationResources
-  onOpenChange: (open: boolean) => void
-  onChange: (patch: Partial<StandardAdvancedSettings>) => void
-  onReset: () => void
-}) {
-  const isImageSet = artifactKind === "image_set"
-  const dirty = (key: keyof StandardAdvancedSettings) => dirtyKeys.includes(key)
-
-  return (
-    <Sheet onOpenChange={onOpenChange} open={open}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
-        <SheetHeader>
-          <SheetTitle>调整本次风格</SheetTitle>
-          <SheetDescription>
-            只影响这一次生成；需要长期生效时，请在配方详情中修改默认值。
-          </SheetDescription>
-        </SheetHeader>
-
-        <FieldGroup className="px-4">
-          <Field>
-            <FieldLabel>
-              画面模板
-              <SourceTag dirty={dirty("frameTemplate")} />
-            </FieldLabel>
-            <Select
-              onValueChange={(value) => onChange({ frameTemplate: value })}
-              value={settings.frameTemplate}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="选择画面模板" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {resources.frameTemplates.map((item) => (
-                    <SelectItem key={item.key} value={item.key}>
-                      {frameTemplateLabel(item.key)}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </Field>
-
-          {!isImageSet && (
-            <>
-              <Field>
-                <FieldLabel>
-                  配音引擎
-                  <SourceTag dirty={dirty("ttsInferenceMode")} />
-                </FieldLabel>
-                <Select
-                  onValueChange={(value) =>
-                    onChange({
-                      ttsInferenceMode:
-                        value as StandardAdvancedSettings["ttsInferenceMode"],
-                    })
-                  }
-                  value={settings.ttsInferenceMode}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="local">本地 / Edge Voice</SelectItem>
-                      <SelectItem value="fish">Fish Audio</SelectItem>
-                      <SelectItem value="comfyui">ComfyUI</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              <Field>
-                <FieldLabel htmlFor="quick-style-voice">
-                  音色
-                  <SourceTag dirty={dirty("ttsVoice")} />
-                </FieldLabel>
-                <Input
-                  id="quick-style-voice"
-                  onChange={(event) =>
-                    onChange({ ttsVoice: event.target.value })
-                  }
-                  value={settings.ttsVoice}
-                />
-                <FieldDescription>
-                  本地引擎填写系统音色；Fish Audio 填写 reference ID。
-                </FieldDescription>
-              </Field>
-
-              <Field>
-                <FieldLabel htmlFor="quick-style-speed">
-                  语速 · {settings.ttsSpeed.toFixed(1)}x
-                  <SourceTag dirty={dirty("ttsSpeed")} />
-                </FieldLabel>
-                <Slider
-                  id="quick-style-speed"
-                  max={1.5}
-                  min={0.7}
-                  onValueChange={([value]) =>
-                    onChange({ ttsSpeed: value ?? 1 })
-                  }
-                  step={0.1}
-                  value={[settings.ttsSpeed]}
-                />
-              </Field>
-
-              <Field>
-                <FieldLabel>
-                  背景音乐
-                  <SourceTag dirty={dirty("bgmPath")} />
-                </FieldLabel>
-                <Select
-                  onValueChange={(value) =>
-                    onChange({ bgmPath: value === "__none__" ? "" : value })
-                  }
-                  value={settings.bgmPath || "__none__"}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      <SelectItem value="__none__">不使用背景音乐</SelectItem>
-                      {resources.bgm.map((item) => (
-                        <SelectItem key={item.path} value={item.path}>
-                          {item.name}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              <Field>
-                <FieldLabel htmlFor="quick-style-volume">
-                  背景音乐音量 · {Math.round(settings.bgmVolume * 100)}%
-                  <SourceTag dirty={dirty("bgmVolume")} />
-                </FieldLabel>
-                <Slider
-                  id="quick-style-volume"
-                  max={1}
-                  min={0}
-                  onValueChange={([value]) =>
-                    onChange({ bgmVolume: value ?? 0 })
-                  }
-                  step={0.05}
-                  value={[settings.bgmVolume]}
-                />
-              </Field>
-
-              <Field>
-                <FieldLabel>
-                  播放方式
-                  <SourceTag dirty={dirty("bgmMode")} />
-                </FieldLabel>
-                <ToggleGroup
-                  onValueChange={(value) => {
-                    if (value) {
-                      onChange({
-                        bgmMode: value as StandardAdvancedSettings["bgmMode"],
-                      })
-                    }
-                  }}
-                  type="single"
-                  value={settings.bgmMode}
-                  variant="outline"
-                >
-                  <ToggleGroupItem value="loop">循环播放</ToggleGroupItem>
-                  <ToggleGroupItem value="once">播放一次</ToggleGroupItem>
-                </ToggleGroup>
-              </Field>
-            </>
-          )}
-        </FieldGroup>
-
-        <SheetFooter className="sm:justify-between">
-          <Button
-            disabled={dirtyKeys.length === 0}
-            onClick={onReset}
-            type="button"
-            variant="outline"
-          >
-            恢复配方默认
-          </Button>
-          <Button onClick={() => onOpenChange(false)}>应用本次设置</Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  )
-}
-
-function LongFormSettingsSheet({
+function LongFormSettingsPanel({
   draft,
-  open,
   onChange,
-  onOpenChange,
 }: {
   draft: GenerationDraft<LongFormAdvancedSettings>
-  open: boolean
   onChange: (draft: GenerationDraft<LongFormAdvancedSettings>) => void
-  onOpenChange: (open: boolean) => void
 }) {
   const settings = resolveGenerationDraft(draft)
 
@@ -2845,71 +2638,66 @@ function LongFormSettingsSheet({
   }
 
   return (
-    <Sheet onOpenChange={onOpenChange} open={open}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
-        <SheetHeader>
-          <SheetTitle>调整本次长文设置</SheetTitle>
-          <SheetDescription>
-            目标字数、写作模型与提示词只覆盖本次生成；未修改项继续沿用当前配方。
-          </SheetDescription>
-        </SheetHeader>
+    <div className="flex flex-col gap-5">
+      <div className="rounded-lg border bg-muted/30 p-4">
+        <div className="text-sm font-medium">本次长文设置</div>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          目标字数、写作模型与提示词只覆盖本次生成；未修改项继续沿用当前配方。
+        </p>
+      </div>
 
-        <FieldGroup className="px-4">
-          <Field>
-            <FieldLabel htmlFor="long-form-word-count">目标字数</FieldLabel>
-            <Input
-              id="long-form-word-count"
-              max={10000}
-              min={300}
-              onChange={(event) =>
-                patch({ wordCount: Number(event.target.value || 300) })
-              }
-              step={100}
-              type="number"
-              value={settings.wordCount}
-            />
-          </Field>
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="long-form-word-count">目标字数</FieldLabel>
+          <Input
+            id="long-form-word-count"
+            max={10000}
+            min={300}
+            onChange={(event) =>
+              patch({ wordCount: Number(event.target.value || 300) })
+            }
+            step={100}
+            type="number"
+            value={settings.wordCount}
+          />
+        </Field>
 
-          <Field>
-            <FieldLabel htmlFor="long-form-model">写作模型</FieldLabel>
-            <Input
-              id="long-form-model"
-              onChange={(event) => patch({ llmModel: event.target.value })}
-              placeholder="留空使用系统默认模型"
-              value={settings.llmModel}
-            />
-          </Field>
+        <Field>
+          <FieldLabel htmlFor="long-form-model">写作模型</FieldLabel>
+          <Input
+            id="long-form-model"
+            onChange={(event) => patch({ llmModel: event.target.value })}
+            placeholder="留空使用系统默认模型"
+            value={settings.llmModel}
+          />
+        </Field>
 
-          <Field>
-            <FieldLabel htmlFor="long-form-prompt">长文提示词</FieldLabel>
-            <Textarea
-              className="min-h-64 resize-y font-mono text-xs leading-5"
-              id="long-form-prompt"
-              onChange={(event) =>
-                patch({ longFormPrompt: event.target.value })
-              }
-              placeholder="留空使用配方提示词"
-              value={settings.longFormPrompt}
-            />
-            <FieldDescription>
-              保留 {"{script}"} 占位符；可使用 {"{title}"}、{"{language}"} 和
-              {" {word_count}"}。
-            </FieldDescription>
-          </Field>
-        </FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="long-form-prompt">长文提示词</FieldLabel>
+          <Textarea
+            className="min-h-64 resize-y font-mono text-xs leading-5"
+            id="long-form-prompt"
+            onChange={(event) => patch({ longFormPrompt: event.target.value })}
+            placeholder="留空使用配方提示词"
+            value={settings.longFormPrompt}
+          />
+          <FieldDescription>
+            保留 {"{script}"} 占位符；可使用 {"{title}"}、{"{language}"} 和
+            {" {word_count}"}。
+          </FieldDescription>
+        </Field>
+      </FieldGroup>
 
-        <SheetFooter className="sm:justify-between">
-          <Button
-            disabled={draft.dirtyKeys.length === 0}
-            onClick={() => onChange(createGenerationDraft(draft.defaults))}
-            variant="outline"
-          >
-            恢复配方默认
-          </Button>
-          <Button onClick={() => onOpenChange(false)}>应用本次设置</Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+      <div className="flex items-center justify-between border-t pt-4">
+        <Button
+          disabled={draft.dirtyKeys.length === 0}
+          onClick={() => onChange(createGenerationDraft(draft.defaults))}
+          variant="outline"
+        >
+          恢复配方默认
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -2950,7 +2738,9 @@ function AssetInput({
 }) {
   const bgmPreviewUrl = resourceFileUrl(assetAdvancedSettings.bgmPath)
   const dirty = (key: keyof AssetAdvancedSettings) => dirtyKeys.includes(key)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [editorView, setEditorView] = useState<"content" | "settings">(
+    "content"
+  )
   const selectedBgm = resources.bgm.find(
     (item) => item.path === assetAdvancedSettings.bgmPath
   )
@@ -2968,86 +2758,98 @@ function AssetInput({
 
   return (
     <FieldGroup>
-      <Field>
-        <FieldLabel htmlFor="assets">图片或视频素材</FieldLabel>
-        <FileDropzone
-          accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm"
-          files={assetFiles}
-          hint="支持图片和视频，可多选"
-          id="assets"
-          onFilesChange={onAssetFilesChange}
-        />
-        <FieldDescription>提交时会先上传素材，再开始生成。</FieldDescription>
-      </Field>
+      <EditorViewSwitch
+        onChange={setEditorView}
+        settingsSummary={settingsSummary}
+        value={editorView}
+      />
 
-      {uploadedAssets.length > 0 && (
-        <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-primary">
-          已上传 {uploadedAssets.length} 个素材，并提交给当前生成任务。
-        </div>
+      {resourcesError && (
+        <InlineError title="资源读取失败" message={resourcesError} />
       )}
 
-      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
-        <Field>
-          <FieldLabel htmlFor="asset-title">视频标题</FieldLabel>
-          <Input
-            id="asset-title"
-            onChange={(event) => onAssetTitleChange(event.target.value)}
-            placeholder="可选，例如：猫咪玩具日常"
-            value={assetTitle}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="asset-duration">目标时长</FieldLabel>
-          <Input
-            id="asset-duration"
-            max={120}
-            min={15}
-            onChange={(event) =>
-              onAssetDurationChange(Number(event.target.value || 30))
-            }
-            step={5}
-            type="number"
-            value={assetDuration}
-          />
-        </Field>
-      </div>
+      {editorView === "content" ? (
+        <>
+          <Field>
+            <FieldLabel htmlFor="assets">图片或视频素材</FieldLabel>
+            <FileDropzone
+              accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm"
+              files={assetFiles}
+              hint="支持图片和视频，可多选"
+              id="assets"
+              onFilesChange={onAssetFilesChange}
+            />
+            <FieldDescription>
+              提交时会先上传素材，再开始生成。
+            </FieldDescription>
+          </Field>
 
-      <Field>
-        <FieldLabel htmlFor="asset-intent">制作目标</FieldLabel>
-        <Textarea
-          className="min-h-28 resize-y leading-6"
-          id="asset-intent"
-          onChange={(event) => onAssetIntentChange(event.target.value)}
-          value={assetIntent}
-        />
-        <FieldDescription>
-          这段说明会帮助系统组织素材、生成旁白并安排镜头顺序。
-        </FieldDescription>
-      </Field>
+          {uploadedAssets.length > 0 && (
+            <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-primary">
+              已上传 {uploadedAssets.length} 个素材，并提交给当前生成任务。
+            </div>
+          )}
 
-      <SettingsSummaryRow
-        actionLabel="调整素材合成设置"
-        onClick={() => setSettingsOpen(true)}
-        summary={settingsSummary}
-      />
-      <Sheet onOpenChange={setSettingsOpen} open={settingsOpen}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle>素材合成设置</SheetTitle>
-            <SheetDescription>
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+            <Field>
+              <FieldLabel htmlFor="asset-title">视频标题</FieldLabel>
+              <Input
+                id="asset-title"
+                onChange={(event) => onAssetTitleChange(event.target.value)}
+                placeholder="可选，例如：猫咪玩具日常"
+                value={assetTitle}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="asset-duration">目标时长</FieldLabel>
+              <Input
+                id="asset-duration"
+                max={120}
+                min={15}
+                onChange={(event) =>
+                  onAssetDurationChange(Number(event.target.value || 30))
+                }
+                step={5}
+                type="number"
+                value={assetDuration}
+              />
+            </Field>
+          </div>
+
+          <Field>
+            <FieldLabel htmlFor="asset-intent">制作目标</FieldLabel>
+            <Textarea
+              className="min-h-28 resize-y leading-6"
+              id="asset-intent"
+              onChange={(event) => onAssetIntentChange(event.target.value)}
+              value={assetIntent}
+            />
+            <FieldDescription>
+              这段说明会帮助系统组织素材、生成旁白并安排镜头顺序。
+            </FieldDescription>
+          </Field>
+
+          <SettingsSummaryRow
+            actionLabel="查看本次设置"
+            onClick={() => setEditorView("settings")}
+            summary={settingsSummary}
+          />
+        </>
+      ) : (
+        <>
+          <div className="rounded-lg border bg-muted/30 p-4">
+            <div className="text-sm font-medium">素材合成设置</div>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
               调整本次任务的声音、背景音乐与合成参数，未修改项继续沿用配方默认。
-            </SheetDescription>
-          </SheetHeader>
+            </p>
+          </div>
 
-          <div className="px-4">
+          <div>
             <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
               {dirtyKeys.length > 0
                 ? `本次覆盖 ${dirtyKeys.length} 项配方默认`
                 : "全部沿用配方默认"}
             </div>
-            {resourcesError && (
-              <InlineError title="资源读取失败" message={resourcesError} />
-            )}
             <div className="grid gap-4 lg:grid-cols-2">
               <Field>
                 <FieldLabel htmlFor="asset-bgm">
@@ -3120,21 +2922,21 @@ function AssetInput({
 
               <Field>
                 <FieldLabel htmlFor="asset-bgm-volume">
-                  BGM 音量
+                  BGM 音量 · {Math.round(assetAdvancedSettings.bgmVolume * 100)}
+                  %
                   <SourceTag dirty={dirty("bgmVolume")} />
                 </FieldLabel>
-                <Input
+                <Slider
                   id="asset-bgm-volume"
                   max={1}
                   min={0}
-                  onChange={(event) =>
+                  onValueChange={([value]) =>
                     patchAssetAdvanced({
-                      bgmVolume: Number(event.target.value || 0),
+                      bgmVolume: value ?? 0,
                     })
                   }
                   step={0.05}
-                  type="number"
-                  value={assetAdvancedSettings.bgmVolume}
+                  value={[assetAdvancedSettings.bgmVolume]}
                 />
               </Field>
 
@@ -3158,21 +2960,20 @@ function AssetInput({
 
               <Field>
                 <FieldLabel htmlFor="asset-tts-speed">
-                  语速
+                  语速 · {assetAdvancedSettings.ttsSpeed.toFixed(1)}x
                   <SourceTag dirty={dirty("ttsSpeed")} />
                 </FieldLabel>
-                <Input
+                <Slider
                   id="asset-tts-speed"
                   max={2}
                   min={0.5}
-                  onChange={(event) =>
+                  onValueChange={([value]) =>
                     patchAssetAdvanced({
-                      ttsSpeed: Number(event.target.value || 1),
+                      ttsSpeed: value ?? 1,
                     })
                   }
                   step={0.1}
-                  type="number"
-                  value={assetAdvancedSettings.ttsSpeed}
+                  value={[assetAdvancedSettings.ttsSpeed]}
                 />
               </Field>
             </div>
@@ -3184,7 +2985,7 @@ function AssetInput({
             )}
           </div>
 
-          <SheetFooter className="sm:justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
             <Button
               disabled={dirtyKeys.length === 0}
               onClick={onResetAdvancedSettings}
@@ -3193,10 +2994,12 @@ function AssetInput({
             >
               恢复配方默认
             </Button>
-            <Button onClick={() => setSettingsOpen(false)}>完成</Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+            <Button onClick={() => setEditorView("content")} type="button">
+              返回内容
+            </Button>
+          </div>
+        </>
+      )}
     </FieldGroup>
   )
 }

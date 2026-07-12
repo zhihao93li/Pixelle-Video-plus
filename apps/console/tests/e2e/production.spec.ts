@@ -66,7 +66,7 @@ test.describe("生产模式与产物", () => {
     })
 
     await expect(page.getByText(/全部沿用配方默认/).first()).toBeVisible()
-    await page.getByRole("button", { name: /调整本次风格/ }).click()
+    await page.getByRole("button", { name: "本次设置", exact: true }).click()
     const voice = page.getByLabel(/^音色/).last()
     await expect(voice).toHaveValue("recipe-voice")
 
@@ -74,8 +74,9 @@ test.describe("生产模式与产物", () => {
     await page.getByRole("button", { name: "恢复配方默认" }).click()
     await expect(voice).toHaveValue("recipe-voice")
     await voice.fill("run-voice")
-    await page.getByRole("button", { name: "应用本次设置" }).click()
     await expect(page.getByText(/本次覆盖 1 项/).first()).toBeVisible()
+
+    await page.getByRole("button", { name: "内容", exact: true }).click()
 
     await page
       .getByLabel("视频文案", { exact: true })
@@ -122,25 +123,25 @@ test.describe("生产模式与产物", () => {
     expect(unhandledApi).toEqual([])
   })
 
-  test("低频参数离开主画布，并从高级设置面板按需打开", async ({ page }) => {
+  test("本次设置使用左侧工作区，不再打开右侧抽屉", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page)
     await preparePage(page)
     await page.goto(`/#/create/generate/${fixtureIds.videoTemplate}`, {
       waitUntil: "networkidle",
     })
 
-    await expect(page.getByRole("button", { name: /高级设置/ })).toBeVisible()
     await expect(page.getByText("文案拆分方式", { exact: true })).toHaveCount(0)
     await expect(page.getByText("当前配方", { exact: true })).toBeVisible()
-    await expect(page.getByText("本次设置", { exact: true })).toBeVisible()
+    const settingsTab = page.getByRole("button", {
+      name: "本次设置",
+      exact: true,
+    })
+    await expect(settingsTab).toBeVisible()
 
-    await page.getByRole("button", { name: /高级设置/ }).click()
-    const sheet = page.getByRole("dialog", { name: "高级设置" })
-    await expect(sheet).toBeVisible()
-    await sheet.getByRole("button", { name: /分镜/ }).click()
-    await expect(sheet.getByText(/文案拆分方式/)).toBeVisible()
-    await sheet.getByRole("button", { name: "完成", exact: true }).click()
-    await expect(sheet).toBeHidden()
+    await settingsTab.click()
+    await expect(page.getByText(/文案拆分方式/)).toBeVisible()
+    await expect(page.getByRole("dialog", { name: "高级设置" })).toHaveCount(0)
+    await expect(page.getByText("本次生成设置", { exact: true })).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 
@@ -269,17 +270,17 @@ test.describe("生产模式与产物", () => {
       page.getByRole("button", { name: "批量", exact: true })
     ).toHaveCount(0)
     await expect(page.getByLabel("素材背景音乐")).toHaveCount(0)
-    await page.getByRole("button", { name: /调整素材合成设置/ }).click()
-    const settingsSheet = page.getByRole("dialog", { name: "素材合成设置" })
+    await page.getByRole("button", { name: "本次设置", exact: true }).click()
     await expect(
-      settingsSheet.getByRole("combobox", {
+      page.getByRole("combobox", {
         name: "素材背景音乐",
         exact: true,
       })
     ).toBeVisible()
-    await settingsSheet
-      .getByRole("button", { name: "完成", exact: true })
-      .click()
+    await expect(
+      page.getByRole("dialog", { name: "素材合成设置" })
+    ).toHaveCount(0)
+    await page.getByRole("button", { name: "内容", exact: true }).click()
     await page.locator("#assets").setInputFiles([
       {
         name: "front.png",

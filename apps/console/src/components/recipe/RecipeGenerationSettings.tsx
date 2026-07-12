@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/toast"
 import { readableError } from "@/lib/format"
@@ -254,6 +255,7 @@ export function RecipeGenerationSettings({
     const value = currentValue(key)
     const isLongText = PART_LONG_TEXT_KEYS.has(key)
     const isFramePicker = key === "frame_template" && frameTemplates.length > 0
+    const isSlider = key === "tts_speed" || key === "bgm_volume"
     const inputValue = value == null ? "" : String(value)
     const step =
       key === "tts_speed" ? "0.1" : key === "bgm_volume" ? "0.05" : "1"
@@ -269,6 +271,11 @@ export function RecipeGenerationSettings({
             htmlFor={`recipe-setting-${key}`}
           >
             {fieldLabel(key)}
+            {key === "tts_speed"
+              ? ` · ${Number(value ?? 1).toFixed(1)}x`
+              : key === "bgm_volume"
+                ? ` · ${Math.round(Number(value ?? 0.2) * 100)}%`
+                : ""}
           </label>
           <div className="flex items-center gap-1.5">
             {statusForKey(key)}
@@ -313,6 +320,17 @@ export function RecipeGenerationSettings({
             id={`recipe-setting-${key}`}
             onChange={(event) => updateValue(key, event.target.value)}
             value={inputValue}
+          />
+        ) : isSlider ? (
+          <Slider
+            id={`recipe-setting-${key}`}
+            max={key === "tts_speed" ? 2 : 1}
+            min={key === "tts_speed" ? 0.5 : 0}
+            onValueChange={([next]) =>
+              updateValue(key, String(next ?? (key === "tts_speed" ? 1 : 0)))
+            }
+            step={key === "tts_speed" ? 0.1 : 0.05}
+            value={[Number(value ?? (key === "tts_speed" ? 1 : 0.2))]}
           />
         ) : (
           <Input

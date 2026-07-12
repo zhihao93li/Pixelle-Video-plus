@@ -330,8 +330,12 @@ export function TaskCenterWorkspace() {
       ) : null}
 
       {runs.length > 0 ? (
-        <div className="grid min-w-0 gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
-          <section aria-labelledby="run-list-heading" className="min-w-0">
+        <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.2fr)] xl:grid-cols-[clamp(380px,30%,520px)_minmax(0,1fr)]">
+          <section
+            aria-labelledby="run-list-heading"
+            className="min-w-0"
+            data-slot="run-list"
+          >
             <div className="flex items-baseline justify-between gap-3 border-b pb-2">
               <h3 className="text-sm font-medium" id="run-list-heading">
                 最近运行
@@ -431,7 +435,11 @@ function RunDetail({
   const terminal = statusIn(run.state, TERMINAL_RUN_STATES)
 
   return (
-    <section aria-labelledby="selected-run-heading" className="min-w-0">
+    <section
+      aria-labelledby="selected-run-heading"
+      className="min-w-0"
+      data-slot="run-detail"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
