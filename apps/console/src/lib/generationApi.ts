@@ -52,17 +52,22 @@ export type ProductionTemplate = {
   allowed_user_params: string[]
   passthrough_input_fields: string[]
   is_custom?: boolean
-  access_scope?: "public" | "codex"
+  access_scope?: "public" | "agent" | "codex"
 }
 
 export type TemplateListResponse = {
   default_template: string | null
   templates: ProductionTemplate[]
+  agent_templates?: ProductionTemplate[]
+  /** @deprecated Transitional server alias. */
   codex_templates?: ProductionTemplate[]
 }
 
 export function templatesForManagement(response: TemplateListResponse) {
-  return [...response.templates, ...(response.codex_templates ?? [])]
+  return [
+    ...response.templates,
+    ...(response.agent_templates ?? response.codex_templates ?? []),
+  ]
 }
 
 export type GenerationProgress = {
@@ -435,13 +440,19 @@ export type AppSettingsConfig = {
   project_name?: string
   llm: {
     api_key: string
+    api_key_configured?: boolean
+    clear_api_key?: boolean
     base_url: string
     model: string
   }
   comfyui: {
     comfyui_url: string
     comfyui_api_key?: string | null
+    comfyui_api_key_configured?: boolean
+    clear_comfyui_api_key?: boolean
     runninghub_api_key?: string | null
+    runninghub_api_key_configured?: boolean
+    clear_runninghub_api_key?: boolean
     runninghub_concurrent_limit: number
     runninghub_instance_type?: string | null
     runninghub_timeout?: number | null
@@ -449,6 +460,8 @@ export type AppSettingsConfig = {
       inference_mode?: string
       fish_audio: {
         api_key: string
+        api_key_configured?: boolean
+        clear_api_key?: boolean
         base_url: string
         model: "s1" | "s2-pro"
         reference_id?: string | null
@@ -460,13 +473,19 @@ export type AppSettingsConfig = {
   publish: {
     buffer: {
       api_key: string
+      api_key_configured?: boolean
+      clear_api_key?: boolean
       channels: Record<string, string>
     }
     cos: {
       region: string
       bucket: string
       secret_id: string
+      secret_id_configured?: boolean
+      clear_secret_id?: boolean
       secret_key: string
+      secret_key_configured?: boolean
+      clear_secret_key?: boolean
       public_base_url: string
       endpoint_url?: string | null
     }
@@ -932,6 +951,41 @@ export type ContentItemMetrics = {
   [key: string]: unknown
 }
 
+export type SceneDraft = {
+  scene_id: string
+  order: number
+  narration: string
+  image_prompt: string
+  duration?: number | null
+  asset_id?: string | null
+}
+
+export type SceneManifest = {
+  scenes: SceneDraft[]
+  confirmed: boolean
+  updated_at: string
+}
+
+export type ContentPublication = {
+  publication_id: string
+  platform: string
+  published_at: string
+  evidence_type: "url" | "platform_post_id" | "buffer_id" | "manual"
+  evidence_value: string
+  actor: "user" | "agent" | "system"
+  request_id: string
+}
+
+export type ContentFlowOperation = {
+  operation_id: string
+  request_id?: string
+  operation?: string
+  item_id?: string
+  status: "running" | "completed" | "failed"
+  result?: Record<string, unknown> | null
+  error?: { layer?: string; message?: string } | null
+}
+
 export type ContentItem = {
   item_id: string
   project: string
@@ -946,6 +1000,8 @@ export type ContentItem = {
   links: ContentItemLinks
   metrics: ContentItemMetrics
   automation: Record<string, unknown>
+  scene_manifest?: SceneManifest | null
+  publications: ContentPublication[]
   events: ContentEvent[]
   created_at: string
   updated_at: string
@@ -1013,6 +1069,154 @@ export async function createContentItems(input: CreateContentItemsInput) {
       project_id: input.projectId ?? null,
     }),
   })
+}
+
+export function newContentRequestId(prefix = "react") {
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  return `${prefix}:${id}`
+}
+
+export async function createContentTopics(input: {
+  titles: string[]
+  languages?: string[]
+  projectId?: string
+  source?: "manual" | "derived"
+  requestId?: string
+}) {
+  return fetchJson<ContentItem[]>("/content-items/topics", {
+    method: "POST",
+    body: JSON.stringify({
+      titles: input.titles,
+      languages: input.languages ?? null,
+      project_id: input.projectId ?? null,
+      content_source: input.source ?? "manual",
+      request_id: input.requestId ?? newContentRequestId("topics"),
+      client_name: "react-console",
+      source: "react",
+    }),
+  })
+}
+
+export async function startContentDraft(
+  itemId: string,
+  input: { templateId?: string; requestId?: string } = {}
+) {
+  return fetchJson<ContentFlowOperation>(`/content-items/${itemId}/draft`, {
+    method: "POST",
+    body: JSON.stringify({
+      template_id: input.templateId ?? null,
+      request_id: input.requestId ?? newContentRequestId("draft"),
+      client_name: "react-console",
+      source: "react",
+    }),
+  })
+}
+
+export async function getContentOperation(operationId: string) {
+  return fetchJson<ContentFlowOperation>(`/agent/operations/${operationId}`)
+}
+
+export async function confirmContentItem(
+  itemId: string,
+  variants?: Record<string, ContentVariant>,
+  requestId?: string
+) {
+  return fetchJson<ContentItem>(`/content-items/${itemId}/confirm`, {
+    method: "POST",
+    body: JSON.stringify({
+      request_id: requestId ?? newContentRequestId("confirm"),
+      client_name: "react-console",
+      source: "react",
+      variants: variants ?? null,
+    }),
+  })
+}
+
+export type ContentProduceResponse = {
+  operation_id: string
+  item_id: string
+  batch_id: string
+  task_ids: string[]
+}
+
+export async function produceContentItem(input: {
+  itemId: string
+  recipeId?: string
+  language?: string
+  overrides?: Record<string, unknown>
+  requestId?: string
+}) {
+  return fetchJson<ContentProduceResponse>(
+    `/content-items/${input.itemId}/produce`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        recipe_id: input.recipeId ?? null,
+        language: input.language ?? null,
+        overrides: input.overrides ?? {},
+        request_id: input.requestId ?? newContentRequestId("produce"),
+        client_name: "react-console",
+        source: "react",
+      }),
+    }
+  )
+}
+
+export async function markContentPublished(input: {
+  itemId: string
+  platform: string
+  publishedAt: string
+  publishUrl?: string
+  manualEvidence?: string
+  requestId?: string
+}) {
+  return fetchJson<ContentItem>(
+    `/content-items/${input.itemId}/mark-published`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        platform: input.platform,
+        published_at: input.publishedAt,
+        publish_url: input.publishUrl || null,
+        manual_evidence: input.manualEvidence || null,
+        request_id: input.requestId ?? newContentRequestId("published"),
+        client_name: "react-console",
+        source: "react",
+      }),
+    }
+  )
+}
+
+export async function recordContentMetrics(input: {
+  itemId: string
+  likes?: number
+  favorites?: number
+  comments?: number
+  note?: string
+  publicationId?: string
+  requestId?: string
+}) {
+  return fetchJson<ContentItem>(`/content-items/${input.itemId}/metrics`, {
+    method: "POST",
+    body: JSON.stringify({
+      likes: input.likes ?? null,
+      favorites: input.favorites ?? null,
+      comments: input.comments ?? null,
+      note: input.note || null,
+      publication_id: input.publicationId ?? null,
+      mock: false,
+      request_id: input.requestId ?? newContentRequestId("metrics"),
+      client_name: "react-console",
+      source: "react",
+    }),
+  })
+}
+
+export function contentSceneImageUrl(itemId: string, sceneId: string) {
+  return `/api/content-items/${encodeURIComponent(itemId)}/scene-images/${encodeURIComponent(sceneId)}`
 }
 
 export async function patchContentItem(

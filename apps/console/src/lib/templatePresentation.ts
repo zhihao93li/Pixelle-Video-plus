@@ -8,7 +8,7 @@ import type { ProductionTemplate } from "@/lib/generationApi"
 /** 管线归属 chip 文案：标准线 / 素材线 / Workflow 直跑。 */
 const PIPELINE_CHIP_LABELS: Record<string, string> = {
   standard: "标准线",
-  codex_scene_video: "Codex 配图合成",
+  codex_scene_video: "Agent 配图合成",
   asset_based: "素材线",
   image_post: "图文线",
   long_form: "长文线",
@@ -27,7 +27,7 @@ export function isProductTemplate(template: ProductionTemplate): boolean {
 }
 
 export function isCodexOnlyTemplate(template: ProductionTemplate): boolean {
-  return template.access_scope === "codex"
+  return template.access_scope === "agent" || template.access_scope === "codex"
 }
 
 /** 专用流程入口（多语言审核出片；批量已改为生成页提交模式，不再是入口）。 */

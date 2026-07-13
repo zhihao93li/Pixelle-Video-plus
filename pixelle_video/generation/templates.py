@@ -1,7 +1,7 @@
 import shutil
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pixelle_video.generation.schemas import EntryId, GenerationRequest
 
@@ -76,7 +76,12 @@ class ProductionTemplate(BaseModel):
     allowed_user_params: list[str] = Field(default_factory=list)
     passthrough_input_fields: list[str] = Field(default_factory=list)
     is_custom: bool = False
-    access_scope: Literal["public", "codex"] = "public"
+    access_scope: Literal["public", "agent"] = "public"
+
+    @field_validator("access_scope", mode="before")
+    @classmethod
+    def normalize_legacy_access_scope(cls, value):
+        return "agent" if value == "codex" else value
 
     def identity_metadata(self) -> dict[str, Any]:
         return {
@@ -135,7 +140,7 @@ class ProductionTemplateRegistry:
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
         available_capabilities: set[str] | None = None,
-        surface: Literal["public", "codex"] = "public",
+        surface: Literal["public", "agent", "codex"] = "public",
     ) -> GenerationRequest:
         template = self.get(template_id)
         self.require_access(template, surface=surface)
@@ -149,11 +154,7 @@ class ProductionTemplateRegistry:
         self._require_input(template, input)
 
         params = dict(template.fixed_params)
-        pipeline_input = {
-            key: input[key]
-            for key in template.input_requirements
-            if key in input
-        }
+        pipeline_input = {key: input[key] for key in template.input_requirements if key in input}
         for key in template.passthrough_input_fields:
             if key in input and input[key] not in (None, ""):
                 pipeline_input[key] = input[key]
@@ -193,11 +194,12 @@ class ProductionTemplateRegistry:
     def require_access(
         template: ProductionTemplate,
         *,
-        surface: Literal["public", "codex"],
+        surface: Literal["public", "agent", "codex"],
     ) -> None:
-        if template.access_scope == "codex" and surface != "codex":
+        normalized_surface = "agent" if surface == "codex" else surface
+        if template.access_scope == "agent" and normalized_surface != "agent":
             raise ProductionTemplateError(
-                f"Production template {template.id!r} is only available through Codex."
+                f"Production template {template.id!r} is only available through an Agent."
             )
 
     def _require_capabilities(
@@ -219,11 +221,7 @@ class ProductionTemplateRegistry:
             )
 
     def _require_input(self, template: ProductionTemplate, input: dict[str, Any]) -> None:
-        missing = [
-            key
-            for key in template.input_requirements
-            if not input.get(key)
-        ]
+        missing = [key for key in template.input_requirements if not input.get(key)]
         if missing:
             missing_text = ", ".join(missing)
             raise ProductionTemplateError(
@@ -378,24 +376,24 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
             ProductionTemplate(
                 id="codex_image_story_v1",
                 version="v1",
-                display_name="Codex \u914d\u56fe\u53e3\u64ad\u89c6\u9891",
+                display_name="Agent \u914d\u56fe\u53e3\u64ad\u89c6\u9891",
                 description=(
-                    "Codex \u6839\u636e\u7528\u6237\u786e\u8ba4\u7684\u5206\u955c\u751f\u6210\u56fe\u7247\uff0cPixelle \u8d1f\u8d23\u914d\u97f3\u3001\u5b57\u5e55\u548c\u89c6\u9891\u5408\u6210\u3002"
+                    "Agent \u6839\u636e\u7528\u6237\u786e\u8ba4\u7684\u5206\u955c\u751f\u6210\u56fe\u7247\uff0cPixelle \u8d1f\u8d23\u914d\u97f3\u3001\u5b57\u5e55\u548c\u89c6\u9891\u5408\u6210\u3002"
                 ),
                 use_case="codex_image_story",
-                runtime_label="Codex \u56fe\u7247\u4ea4\u63a5\u5408\u6210",
+                runtime_label="Agent \u56fe\u7247\u4ea4\u63a5\u5408\u6210",
                 estimated_turnaround="\u53d6\u51b3\u4e8e\u5206\u955c\u6570\u91cf\u548c\u914d\u97f3\u65f6\u957f",
                 failure_guidance="\u68c0\u67e5\u5206\u955c\u56fe\u7247\u3001TTS \u548c FFmpeg \u914d\u7f6e\u540e\u91cd\u8bd5\u3002",
                 requires_user_assets=True,
-                template_tags=["Codex", "\u5206\u955c", "\u914d\u56fe\u53e3\u64ad"],
+                template_tags=["Agent", "\u5206\u955c", "\u914d\u56fe\u53e3\u64ad"],
                 input_requirements=["scenes"],
                 quality_tier="daily",
                 pipeline_id="codex_scene_video",
                 entry="scenes",
-                access_scope="codex",
+                access_scope="agent",
                 required_capabilities=["tts", "ffmpeg", "persistence"],
                 migration_status="ready",
-                migration_notes="Codex \u4e13\u7528\uff1b\u4e0d\u4f7f\u7528 Pixelle \u56fe\u7247 Provider \u6216 OpenAI API\u3002",
+                migration_notes="Agent \u4e13\u7528\uff1b\u4e0d\u4f7f\u7528 Pixelle \u56fe\u7247 Provider \u6216 OpenAI API\u3002",
                 allowed_user_params=[
                     "title",
                     "frame_template",
@@ -431,8 +429,7 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                 version="v1",
                 display_name="素材增强视频",
                 description=(
-                    "上传图片/视频素材，AI 组织成带字幕配音的完整短片。"
-                    "克隆后可调默认合成参数。"
+                    "上传图片/视频素材，AI 组织成带字幕配音的完整短片。克隆后可调默认合成参数。"
                 ),
                 use_case="asset_based_base",
                 runtime_label="素材包装合成",
@@ -909,8 +906,7 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                 product_entry="image_to_video",
                 streamlit_source="web/pipelines/i2v.py",
                 migration_notes="React 已可通过统一 generation task 提交；workflow 固定在模板配置里。",
-                allowed_user_params=[
-                    "source", "title", "duration", "workflow_key"],
+                allowed_user_params=["source", "title", "duration", "workflow_key"],
                 fixed_params={
                     "workflow_key": "runninghub/i2v_LTX2.json",
                     "quality_profile": "basic",
@@ -1046,8 +1042,7 @@ def annotate_retired(templates: list[ProductionTemplate]) -> None:
     builtin_enabled = code_level_enabled_map()
     for template in templates:
         template.retired = (
-            builtin_enabled.get(template.id) is False
-            and template.product_entry == "generate"
+            builtin_enabled.get(template.id) is False and template.product_entry == "generate"
         )
 
 

@@ -25,6 +25,7 @@ import { useCurrentProject } from "@/lib/currentProject"
 import { generateDraftsForItems } from "@/lib/contentDrafting"
 import {
   createContentItems,
+  createContentTopics,
   listTemplates,
   uploadGenerationAssets,
   type ProductionTemplate,
@@ -150,9 +151,8 @@ export function AddContentDialog({
     if (titles.length === 0) {
       throw new Error("请至少输入一个选题。")
     }
-    await createContentItems({
+    await createContentTopics({
       titles,
-      initialStatus: "idea",
       languages,
       projectId: projectId ?? undefined,
     })
@@ -165,9 +165,8 @@ export function AddContentDialog({
       throw new Error("请至少输入一个选题。")
     }
     const chosenLanguages = languages.length > 0 ? languages : ["Chinese"]
-    const items = await createContentItems({
+    const items = await createContentTopics({
       titles,
-      initialStatus: "idea",
       languages: chosenLanguages,
       projectId: projectId ?? undefined,
     })

@@ -250,7 +250,7 @@ export function RecipeGenerationSettings({
       toast({
         title: "生产设置已保存",
         description: codexOnly
-          ? "Codex 下次使用这份配方时自动读取。"
+          ? "Agent 下次使用这份配方时自动读取。"
           : "下次使用这份配方时自动生效。",
         variant: "success",
       })
@@ -636,9 +636,9 @@ export function RecipeGenerationSettings({
       )}
 
       {section(
-        codexOnly ? "Codex 生图风格" : "画面生成",
+        codexOnly ? "Agent 生图风格" : "画面生成",
         codexOnly
-          ? "设置 Codex 为每个分镜生成图片时使用的整体风格、视觉背景和提示词规则。"
+          ? "设置 Agent 为每个分镜生成图片时使用的整体风格、视觉背景和提示词规则。"
           : "选择图片 Provider 与模型；使用工作流时再选择 RunningHub 或本机 ComfyUI Workflow。",
         <>
           {renderImageProviderFields()}

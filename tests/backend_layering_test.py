@@ -8,7 +8,7 @@ def test_production_backend_does_not_import_legacy_web_ui():
     project_root = Path(__file__).resolve().parents[1]
     violations: list[str] = []
 
-    for package in ("api", "pixelle_video", "ops", "codex_plugin"):
+    for package in ("api", "pixelle_video", "agent_plugin"):
         source_root = project_root / package
         for path in source_root.rglob("*.py"):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

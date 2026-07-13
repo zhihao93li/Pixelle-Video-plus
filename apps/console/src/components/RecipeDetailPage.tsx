@@ -215,7 +215,7 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
         description={
           <span>
             {codexOnly
-              ? "调整长期默认值；保存后，Codex 下次制作时自动读取。"
+              ? "调整长期默认值；保存后，Agent 下次制作时自动读取。"
               : "调整长期默认值。开始制作后，仍可以对当次内容单独调整。"}
           </span>
         }
@@ -223,7 +223,7 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
           <span className="flex flex-wrap items-center gap-2">
             {template.display_name}
             <Badge variant="secondary">{productionLineSummary(template)}</Badge>
-            {codexOnly ? <Badge variant="info">仅 Codex 发起</Badge> : null}
+            {codexOnly ? <Badge variant="info">仅 Agent 发起</Badge> : null}
             {template.is_custom ? (
               <Badge variant="outline">我的配方</Badge>
             ) : null}
@@ -294,9 +294,9 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
           {codexOnly ? (
             <WorkspacePanel title="如何使用">
               <ol className="space-y-2 text-sm leading-6 text-muted-foreground">
-                <li>1. 在 Codex 对话中提供主题或文案。</li>
-                <li>2. 确认 Codex 给出的分镜和图片提示词。</li>
-                <li>3. Codex 生成配图后，Pixelle 自动配音并合成视频。</li>
+                <li>1. 在 Agent 对话中提供主题或文案。</li>
+                <li>2. 在控制台确认 Agent 给出的分镜和图片提示词。</li>
+                <li>3. Agent 生成配图后，Pixelle 自动配音并合成视频。</li>
               </ol>
             </WorkspacePanel>
           ) : null}

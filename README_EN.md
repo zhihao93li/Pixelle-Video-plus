@@ -19,8 +19,8 @@ Pixelle is an AI content production workspace for solo content operators. It kee
 | `apps/console` | Production React + Vite console |
 | `api` | FastAPI routes, request contracts, and task entry points |
 | `pixelle_video` | Content generation, recipes, pipelines, and media services |
-| `ops` | Operating-project state and persistence |
-| `codex_plugin` | Codex operations interface |
+| `pixelle_video/content` | Projects, content items, and recoverable operations |
+| `agent_plugin` | Agent MCP interface for Codex, Claude Code, and Cursor |
 | `web` | Frozen legacy Streamlit interface pending compatibility removal |
 | `tests` | Python unit and integration tests |
 

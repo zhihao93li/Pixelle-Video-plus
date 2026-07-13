@@ -47,7 +47,7 @@ def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(
         content_items_router, "SCRIPT_REVIEW_DIR", tmp_path / "script-review-drafts"
     )
-    # 隔离项目存储（list/create 会触发迁移）；ops.db 探测走 tmp → 缺失 → 回退分支
+    # 隔离项目存储；首次读取会创建本地原生默认项目。
     monkeypatch.setattr(projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts)))
     monkeypatch.setattr(task_store, "GENERATION_TASK_DIR", tmp_path / "generation-tasks")
     yield

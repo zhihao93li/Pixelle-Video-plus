@@ -208,7 +208,8 @@ def test_generation_templates_endpoint_lists_builtin_production_templates():
     assert [template["id"] for template in payload["codex_templates"]] == [
         "codex_image_story_v1"
     ]
-    assert payload["codex_templates"][0]["access_scope"] == "codex"
+    assert payload["codex_templates"][0]["access_scope"] == "agent"
+    assert payload["agent_templates"] == payload["codex_templates"]
     # 新的中性骨架排在最前，退役的 PetWoods 预设仍在（退役≠删除）
     assert ids[0] == "pipeline_standard_base_v1"
     assert ids[1] == "pipeline_asset_based_base_v1"

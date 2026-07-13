@@ -11,7 +11,6 @@
 
 import json
 import os
-import sqlite3
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -223,35 +222,6 @@ def set_default_project(project_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _read_ops_seed() -> dict:
-    """Best-effort：从 data/ops.db 的 operating_projects 第一行取品牌信息。任何失败回退 {}。"""
-    db_path = get_data_path("ops.db")
-    if not os.path.exists(db_path):
-        return {}
-    try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT name, description, generation_settings_json "
-            "FROM operating_projects ORDER BY created_at LIMIT 1"
-        ).fetchone()
-        conn.close()
-    except (sqlite3.Error, OSError):
-        return {}
-    if row is None:
-        return {}
-    settings: dict = {}
-    try:
-        settings = json.loads(row["generation_settings_json"] or "{}")
-    except (json.JSONDecodeError, TypeError):
-        settings = {}
-    return {
-        "name": row["name"],
-        "description": row["description"] or "",
-        "default_production_template_id": settings.get("default_production_template_id"),
-    }
-
-
 def _migrate_content_items(default_project_id_value: str, valid_ids: set[str]) -> None:
     """把 project 字段不是任何合法 project_id 的存量条目改写为默认项目。幂等。"""
     from pixelle_video.content.store import list_items, save_item
@@ -263,24 +233,17 @@ def _migrate_content_items(default_project_id_value: str, valid_ids: set[str]) -
 
 
 def _bootstrap_default_project() -> None:
-    """无项目时从 ops.db 种子建默认项目并归拢存量条目。"""
-    seed = _read_ops_seed()
-    name = (seed.get("name") or "PetWoods").strip() or "PetWoods"
-    description = seed.get("description") or ""
-    template_id = seed.get("default_production_template_id")
-    if not template_id:
-        from pixelle_video.generation.templates import (
-            build_default_production_template_registry,
-        )
+    """Create the first native project and attach legacy unscoped items."""
+    from pixelle_video.generation.templates import (
+        build_default_production_template_registry,
+    )
 
-        registry = build_default_production_template_registry()
-        template_id = registry.default_template_id(
-            project="PetWoods", channel="xiaohongshu"
-        )
+    registry = build_default_production_template_registry()
+    template_id = registry.default_template_id(project="PetWoods", channel="xiaohongshu")
 
     project = create_project(
-        name=name,
-        description=description,
+        name="PetWoods",
+        description="",
         default_production_template_id=template_id,
     )
 
@@ -349,9 +312,7 @@ def _repoint_project_default_templates() -> None:
         if target is None and current not in valid_ids:
             target = _STANDARD_SKELETON  # 指向不存在的模板 → 重指标准骨架
         if target and target != current:
-            update_project(
-                project.project_id, {"default_production_template_id": target}
-            )
+            update_project(project.project_id, {"default_production_template_id": target})
 
 
 def ensure_migrated() -> None:

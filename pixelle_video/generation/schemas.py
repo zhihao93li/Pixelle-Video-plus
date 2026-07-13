@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 EntryId = Literal["topic", "script", "scenes", "assets", "audio", "video"]
 GenerationStatus = Literal[
@@ -75,7 +75,12 @@ class PipelineManifest(BaseModel):
     outputs: list[PipelineOutputSpec]
     required_capabilities: list[str] = Field(default_factory=list)
     default_entry: EntryId | None = None
-    access_scope: Literal["public", "codex"] = "public"
+    access_scope: Literal["public", "agent"] = "public"
+
+    @field_validator("access_scope", mode="before")
+    @classmethod
+    def normalize_legacy_access_scope(cls, value):
+        return "agent" if value == "codex" else value
 
     @model_validator(mode="after")
     def validate_entries(self):

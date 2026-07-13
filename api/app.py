@@ -22,7 +22,9 @@ Or with custom settings:
     uv run python api/app.py --host 0.0.0.0 --port 8080 --reload
 """
 
+import argparse
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Add project root to sys.path for module imports
@@ -31,9 +33,6 @@ _script_dir = Path(__file__).resolve().parent
 _project_root = _script_dir.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
-
-import argparse
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,16 +43,15 @@ from loguru import logger
 from api.config import api_config
 from api.console import resolve_console_dist
 from api.dependencies import shutdown_pixelle_video
-
-# Import routers
 from api.routers import (
+    agent_router,
+    content_flows_router,
     content_items_router,
     content_router,
     drafting_router,
     files_router,
     frame_router,
     generation_router,
-    generation_settings_router,
     health_router,
     help_router,
     history_router,
@@ -68,7 +66,9 @@ from api.routers import (
     tts_router,
     video_router,
 )
+from api.security import ensure_agent_token
 from api.tasks import task_manager
+from pixelle_video.content.operations import recover_running_operations
 
 
 @asynccontextmanager
@@ -80,6 +80,12 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger.info("🚀 Starting Pixelle-Video API...")
+    ensure_agent_token()
+    recover_running_operations()
+    if api_config.host not in {"127.0.0.1", "localhost", "::1"}:
+        logger.warning(
+            "Pixelle API 正监听非本机地址；普通用户接口无登录认证，局域网内任何设备都可能操作。"
+        )
     await task_manager.start()
     logger.info("✅ Pixelle-Video API started successfully\n")
     
@@ -129,6 +135,7 @@ if api_config.cors_enabled:
 # Include routers
 # Health check (no prefix)
 app.include_router(health_router)
+app.include_router(agent_router, prefix=api_config.api_prefix)
 
 # API routers (with /api prefix)
 app.include_router(llm_router, prefix=api_config.api_prefix)
@@ -137,6 +144,7 @@ app.include_router(image_router, prefix=api_config.api_prefix)
 app.include_router(media_router, prefix=api_config.api_prefix)
 app.include_router(content_router, prefix=api_config.api_prefix)
 app.include_router(content_items_router, prefix=api_config.api_prefix)
+app.include_router(content_flows_router, prefix=api_config.api_prefix)
 app.include_router(drafting_router, prefix=api_config.api_prefix)
 app.include_router(projects_router, prefix=api_config.api_prefix)
 app.include_router(video_router, prefix=api_config.api_prefix)
@@ -145,7 +153,6 @@ app.include_router(files_router, prefix=api_config.api_prefix)
 app.include_router(resources_router, prefix=api_config.api_prefix)
 app.include_router(frame_router, prefix=api_config.api_prefix)
 app.include_router(generation_router, prefix=api_config.api_prefix)
-app.include_router(generation_settings_router, prefix=api_config.api_prefix)
 app.include_router(help_router, prefix=api_config.api_prefix)
 app.include_router(history_router, prefix=api_config.api_prefix)
 app.include_router(publish_router, prefix=api_config.api_prefix)
@@ -207,11 +214,15 @@ if __name__ == "__main__":
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Start Pixelle-Video API Server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--host", default=api_config.host, help="Host to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
     
     args = parser.parse_args()
+    if args.host not in {"127.0.0.1", "localhost", "::1"}:
+        logger.warning(
+            "Pixelle API 将监听非本机地址；普通用户接口无登录认证，局域网内任何设备都可能操作。"
+        )
     
     # Print startup banner
     print(f"""

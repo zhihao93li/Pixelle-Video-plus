@@ -21,7 +21,6 @@ from typing import Annotated
 from fastapi import Depends
 from loguru import logger
 
-from ops.service import OpsService
 from pixelle_video.config import ConfigManager, config_manager
 from pixelle_video.generation import GenerationService
 from pixelle_video.generation.task_store import task_directory
@@ -30,7 +29,6 @@ from pixelle_video.service import PixelleVideoCore
 # Global Pixelle-Video instance
 _pixelle_video_instance: PixelleVideoCore = None
 _generation_service_instance: GenerationService = None
-_ops_service_instance: OpsService = None
 
 
 async def get_pixelle_video() -> PixelleVideoCore:
@@ -85,17 +83,6 @@ async def get_generation_service(
     return _generation_service_instance
 
 
-async def get_ops_service() -> OpsService:
-    """Get OpsService instance for project-scoped generation settings."""
-    global _ops_service_instance
-
-    if _ops_service_instance is None:
-        _ops_service_instance = OpsService()
-        logger.info("✅ Ops Service initialized for API")
-
-    return _ops_service_instance
-
-
 async def get_config_manager() -> ConfigManager:
     """Get shared Pixelle config manager."""
     return config_manager
@@ -104,5 +91,4 @@ async def get_config_manager() -> ConfigManager:
 # Type alias for dependency injection
 PixelleVideoDep = Annotated[PixelleVideoCore, Depends(get_pixelle_video)]
 GenerationServiceDep = Annotated[GenerationService, Depends(get_generation_service)]
-OpsServiceDep = Annotated[OpsService, Depends(get_ops_service)]
 ConfigManagerDep = Annotated[ConfigManager, Depends(get_config_manager)]

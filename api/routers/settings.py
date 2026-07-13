@@ -137,7 +137,7 @@ async def update_settings_config(
 ):
     """Update and persist the app configuration."""
     current = config_manager.config.to_dict()
-    merged = _deep_merge(current, updates)
+    merged = _merge_settings_updates(current, updates)
     try:
         config_manager.config = PixelleVideoConfig(**merged)
     except ValidationError as exc:
@@ -218,16 +218,18 @@ async def test_image_provider(
 
 
 @router.post("/llm/models", response_model=LlmModelListResponse)
-async def list_llm_models(request: LlmConnectionRequest):
+async def list_llm_models(request: LlmConnectionRequest, config_manager: ConfigManagerDep):
     """Load models from the configured OpenAI-compatible LLM endpoint."""
-    if not request.api_key.strip() or not request.base_url.strip():
+    api_key = request.api_key.strip() or config_manager.config.llm.api_key.strip()
+    base_url = request.base_url.strip() or config_manager.config.llm.base_url.strip()
+    if not api_key or not base_url:
         raise HTTPException(status_code=400, detail="LLM API key and base URL are required")
 
     try:
         models = await run_in_threadpool(
             fetch_available_models,
-            request.api_key,
-            request.base_url,
+            api_key,
+            base_url,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -236,15 +238,19 @@ async def list_llm_models(request: LlmConnectionRequest):
 
 
 @router.post("/llm/test", response_model=LlmConnectionResponse)
-async def test_llm_settings_connection(request: LlmConnectionRequest):
+async def test_llm_settings_connection(
+    request: LlmConnectionRequest, config_manager: ConfigManagerDep
+):
     """Test the configured OpenAI-compatible LLM endpoint."""
-    if not request.api_key.strip() or not request.base_url.strip():
+    api_key = request.api_key.strip() or config_manager.config.llm.api_key.strip()
+    base_url = request.base_url.strip() or config_manager.config.llm.base_url.strip()
+    if not api_key or not base_url:
         raise HTTPException(status_code=400, detail="LLM API key and base URL are required")
 
     ok, message, model_count = await run_in_threadpool(
         test_llm_connection,
-        request.api_key,
-        request.base_url,
+        api_key,
+        base_url,
     )
     return LlmConnectionResponse(ok=ok, message=message, model_count=model_count)
 
@@ -300,9 +306,9 @@ async def create_runninghub_workflow(request: RunninghubWorkflowRequest):
 
 
 @router.post("/buffer/channels", response_model=BufferChannelsResponse)
-async def fetch_buffer_channels(request: BufferChannelsRequest):
+async def fetch_buffer_channels(request: BufferChannelsRequest, config_manager: ConfigManagerDep):
     """Fetch Buffer channels and map supported platforms to channel IDs."""
-    api_key = request.api_key.strip()
+    api_key = request.api_key.strip() or config_manager.config.publish.buffer.api_key.strip()
     if not api_key:
         raise HTTPException(status_code=400, detail="Buffer API key is required")
 
@@ -320,12 +326,7 @@ async def fetch_buffer_channels(request: BufferChannelsRequest):
 
 
 def _settings_payload(config_manager):
-    config = config_manager.config.to_dict()
-    image_generation = config.get("image_generation", {})
-    for provider_id in ("aliyun_bailian", "volcengine_ark"):
-        provider = image_generation.get(provider_id)
-        if isinstance(provider, dict):
-            provider["api_key"] = ""
+    config = _redact_settings_secrets(config_manager.config.to_dict())
     return {
         "configured": config_manager.validate(),
         "config": config,
@@ -487,6 +488,56 @@ def _deep_merge(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]
         else:
             base[key] = value
     return base
+
+
+_SECRET_FIELD_NAMES = {
+    "api_key",
+    "comfyui_api_key",
+    "runninghub_api_key",
+    "secret_id",
+    "secret_key",
+}
+
+
+def _redact_settings_secrets(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_redact_settings_secrets(entry) for entry in value]
+    if not isinstance(value, dict):
+        return value
+
+    redacted: dict[str, Any] = {}
+    for key, entry in value.items():
+        if key in _SECRET_FIELD_NAMES:
+            redacted[key] = ""
+            redacted[f"{key}_configured"] = bool(str(entry or "").strip())
+        else:
+            redacted[key] = _redact_settings_secrets(entry)
+    return redacted
+
+
+def _merge_settings_updates(current: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    """Merge a redacted settings payload without erasing stored credentials.
+
+    Empty or omitted secret fields mean "preserve". A secret is removed only
+    through its explicit sibling flag, e.g. ``clear_api_key: true``.
+    Response-only ``*_configured`` fields are ignored.
+    """
+
+    merged = dict(current)
+    for key, value in updates.items():
+        if key.endswith("_configured") or key.startswith("clear_"):
+            continue
+        if key in _SECRET_FIELD_NAMES:
+            if updates.get(f"clear_{key}") is True:
+                merged[key] = ""
+            elif value not in (None, ""):
+                merged[key] = value
+            continue
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_settings_updates(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 async def _test_comfyui_connection(comfyui_url: str) -> ComfyuiConnectionResponse:

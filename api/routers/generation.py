@@ -66,6 +66,8 @@ class PipelineListResponse(BaseModel):
 class ProductionTemplateListResponse(BaseModel):
     default_template: str | None
     templates: list[ProductionTemplate]
+    agent_templates: list[ProductionTemplate] = Field(default_factory=list)
+    # Deprecated compatibility alias. New clients must read agent_templates.
     codex_templates: list[ProductionTemplate] = Field(default_factory=list)
 
 
@@ -245,13 +247,14 @@ async def list_generation_templates(project: str | None = None):
     all_templates = registry.list()
     annotate_retired(all_templates)  # 展示用退役标记（代码层停用的 generate 预设）
     templates = [template for template in all_templates if template.access_scope == "public"]
-    codex_templates = [
-        template for template in all_templates if template.access_scope == "codex"
+    agent_templates = [
+        template for template in all_templates if template.access_scope == "agent"
     ]
     return ProductionTemplateListResponse(
         default_template=_default_template_for_project(project),
         templates=templates,
-        codex_templates=codex_templates,
+        agent_templates=agent_templates,
+        codex_templates=agent_templates,
     )
 
 

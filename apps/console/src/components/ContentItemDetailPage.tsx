@@ -30,6 +30,13 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -65,11 +72,15 @@ import { useCurrentProject } from "@/lib/currentProject"
 import { useTaskCenter } from "@/lib/taskCenter"
 import {
   artifactFileUrl,
-  createContentItems,
+  confirmContentItem,
+  contentSceneImageUrl,
+  createContentTopics,
   getContentItem,
   getScriptReviewDraftSet,
   getTaskResult,
+  markContentPublished,
   patchContentItem,
+  recordContentMetrics,
   transitionContentItem,
   updateScriptReviewDraftSet,
   type ContentItem,
@@ -120,6 +131,13 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
     likes: "",
     favorites: "",
     comments: "",
+    note: "",
+    publicationId: "",
+  })
+  const [publicationDraft, setPublicationDraft] = useState({
+    platform: "xiaohongshu",
+    publishedAt: new Date().toISOString().slice(0, 16),
+    url: "",
     note: "",
   })
   const [derivedText, setDerivedText] = useState("")
@@ -199,6 +217,10 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
       comments:
         item.metrics.comments != null ? String(item.metrics.comments) : "",
       note: item.metrics.note ?? "",
+      publicationId:
+        typeof item.metrics.publication_id === "string"
+          ? item.metrics.publication_id
+          : (item.publications[0]?.publication_id ?? ""),
     })
   }
 
@@ -307,7 +329,9 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
   const languages = Array.from(
     new Set([...item.languages, ...Object.keys(item.variants)])
   )
-  const isReviewing = item.status === "pending_review"
+  const manifestPending =
+    item.status === "pending_review" && Boolean(item.scene_manifest)
+  const isReviewing = item.status === "pending_review" && !item.scene_manifest
   const productionFailure = contentProductionFailure(item)
   const allConfirmed =
     item.languages.length > 0 &&
@@ -324,7 +348,8 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
     "video"
   const isNonVideoPublish = publishArtifactType !== "video"
   const nonVideoPublishNoun = publishArtifactType === "text" ? "长文" : "图集"
-  const canProduce = isProducibleItem(item) && item.status !== "idea"
+  const canProduce =
+    isProducibleItem(item) && item.status !== "idea" && !item.scene_manifest
   const produceSubmissions = buildProduceSubmissions([item])
   const currentLanguage = activeLanguage ?? languages[0] ?? null
   const currentDraft: VariantDraft = (currentLanguage &&
@@ -410,24 +435,32 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
   }
 
   async function confirmItem() {
-    for (const language of item!.languages) {
-      const draft = variantDrafts[language]
-      if (!draft) {
-        continue
-      }
-      await patchContentItem(item!.item_id, {
-        variants: {
-          [language]: {
-            status: "confirmed",
-            title: draft.title,
-            script: draft.script,
-            narrations: cleanNarrations(draft.narrations),
-          },
-        },
-      })
+    if (item!.scene_manifest) {
+      await confirmContentItem(item!.item_id)
+      return
     }
-    await syncDraftSet()
-    await transitionContentItem(item!.item_id, "confirmed")
+    await confirmContentItem(
+      item!.item_id,
+      Object.fromEntries(
+        item!.languages.flatMap((language) => {
+          const draft = variantDrafts[language]
+          return draft
+            ? [
+                [
+                  language,
+                  {
+                    language,
+                    status: "confirmed" as const,
+                    title: draft.title,
+                    script: draft.script,
+                    narrations: cleanNarrations(draft.narrations),
+                  },
+                ],
+              ]
+            : []
+        })
+      )
+    )
   }
 
   async function submitProduce() {
@@ -459,19 +492,28 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
   }
 
   async function saveMetrics() {
-    const metrics: Record<string, unknown> = {
-      recorded_at: new Date().toISOString(),
-    }
-    if (metricsDraft.likes.trim()) metrics.likes = Number(metricsDraft.likes)
-    if (metricsDraft.favorites.trim())
-      metrics.favorites = Number(metricsDraft.favorites)
-    if (metricsDraft.comments.trim())
-      metrics.comments = Number(metricsDraft.comments)
-    if (metricsDraft.note.trim()) metrics.note = metricsDraft.note.trim()
-    await patchContentItem(item!.item_id, { metrics })
-    if (item!.status === "published") {
-      await transitionContentItem(item!.item_id, "measured")
-    }
+    await recordContentMetrics({
+      itemId: item!.item_id,
+      likes: metricsDraft.likes.trim() ? Number(metricsDraft.likes) : undefined,
+      favorites: metricsDraft.favorites.trim()
+        ? Number(metricsDraft.favorites)
+        : undefined,
+      comments: metricsDraft.comments.trim()
+        ? Number(metricsDraft.comments)
+        : undefined,
+      note: metricsDraft.note.trim() || undefined,
+      publicationId: metricsDraft.publicationId || undefined,
+    })
+  }
+
+  async function markPublished() {
+    await markContentPublished({
+      itemId: item!.item_id,
+      platform: publicationDraft.platform,
+      publishedAt: new Date(publicationDraft.publishedAt).toISOString(),
+      publishUrl: publicationDraft.url.trim() || undefined,
+      manualEvidence: publicationDraft.note.trim() || undefined,
+    })
   }
 
   const events = [...item.events].reverse()
@@ -554,7 +596,14 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
       lifecycleAction = { label: "刷新状态", onClick: refresh }
       break
     case "pending_review":
-      if (allConfirmed) {
+      if (manifestPending) {
+        lifecycleGuidance = "确认完整分镜文案和图片提示词后，Agent 才会开始生成图片。"
+        lifecycleAction = {
+          label: "确认完整分镜",
+          loading: busy,
+          onClick: () => void run(confirmItem),
+        }
+      } else if (allConfirmed) {
         lifecycleGuidance = "所有语言版本都已确认，可以完成本轮审核。"
         lifecycleAction = {
           label: "确认全部语言",
@@ -579,7 +628,16 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
       }
       break
     case "confirmed":
-      if (canProduce) {
+      if (item.scene_manifest) {
+        const missingImages = item.scene_manifest.scenes.filter(
+          (scene) => !scene.asset_id
+        ).length
+        lifecycleGuidance =
+          missingImages > 0
+            ? `分镜已确认，等待 Agent 上传 ${missingImages} 张配图并发起制作。`
+            : "配图已齐，等待 Agent 发起制作。"
+        lifecycleAction = { label: "刷新状态", onClick: refresh }
+      } else if (canProduce) {
         lifecycleGuidance = "审核已完成，选择生产模板并提交出片。"
         lifecycleAction = {
           disabled: produceSubmissions.length === 0,
@@ -723,6 +781,54 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
               icon={Image}
               title="素材内容"
             />
+          ) : null}
+
+          {item.scene_manifest ? (
+            <div className="flex flex-col gap-3 rounded-lg border bg-muted/10 p-3">
+              <div>
+                <div className="text-sm font-medium">
+                  Agent 分镜 · {item.scene_manifest.scenes.length} 镜
+                </div>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {item.scene_manifest.confirmed
+                    ? "分镜文案和图片提示词已锁定。"
+                    : "请确认每镜口播和画面提示词；确认后 Agent 才会生成图片。"}
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {item.scene_manifest.scenes.map((scene) => (
+                  <article
+                    className="overflow-hidden rounded-lg border bg-background"
+                    key={scene.scene_id}
+                  >
+                    {scene.asset_id ? (
+                      <img
+                        alt={`第 ${scene.order} 镜`}
+                        className="aspect-video w-full object-cover"
+                        loading="lazy"
+                        src={contentSceneImageUrl(item.item_id, scene.scene_id)}
+                      />
+                    ) : (
+                      <div className="flex aspect-video items-center justify-center bg-muted text-xs text-muted-foreground">
+                        确认后等待 Agent 配图
+                      </div>
+                    )}
+                    <div className="space-y-2 p-3">
+                      <div className="text-xs font-medium">第 {scene.order} 镜</div>
+                      <p className="text-sm leading-6">{scene.narration}</p>
+                      <p className="border-t pt-2 text-xs leading-5 text-muted-foreground">
+                        画面：{scene.image_prompt}
+                      </p>
+                      {scene.duration ? (
+                        <p className="text-xs text-muted-foreground">
+                          预计 {scene.duration} 秒
+                        </p>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
           ) : null}
 
           {languages.length > 0 ? (
@@ -1048,8 +1154,22 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
             </WorkspacePanel>
           )}
 
-          {(item.status === "produced" || item.status === "scheduled") && (
+          {(["produced", "scheduled", "published", "measured"].includes(
+            item.status
+          )) && (
             <WorkspacePanel padding="compact" title="发布记录">
+              {item.publications.length > 0 ? (
+                <div className="mb-3 divide-y border-y text-xs">
+                  {item.publications.map((publication) => (
+                    <div className="py-2" key={publication.publication_id}>
+                      <span className="font-medium">{publication.platform}</span>
+                      <span className="ml-2 text-muted-foreground">
+                        {formatDate(publication.published_at)} · {publication.evidence_value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               {isNonVideoPublish && (
                 <p className="mb-2 text-xs leading-5 text-muted-foreground">
                   {nonVideoPublishNoun}暂不支持自动发布，请先
@@ -1057,7 +1177,68 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
                   ，再手动发到平台。
                 </p>
               )}
-              <div className="flex flex-wrap gap-2">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel>平台</FieldLabel>
+                  <Select
+                    onValueChange={(platform) =>
+                      setPublicationDraft((current) => ({ ...current, platform }))
+                    }
+                    value={publicationDraft.platform}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="xiaohongshu">小红书</SelectItem>
+                      <SelectItem value="youtube">YouTube</SelectItem>
+                      <SelectItem value="tiktok">TikTok</SelectItem>
+                      <SelectItem value="instagram">Instagram</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="published-at">发布时间</FieldLabel>
+                  <Input
+                    id="published-at"
+                    onChange={(event) =>
+                      setPublicationDraft((current) => ({
+                        ...current,
+                        publishedAt: event.target.value,
+                      }))
+                    }
+                    type="datetime-local"
+                    value={publicationDraft.publishedAt}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="publish-url">发布链接</FieldLabel>
+                  <Input
+                    id="publish-url"
+                    onChange={(event) =>
+                      setPublicationDraft((current) => ({
+                        ...current,
+                        url: event.target.value,
+                      }))
+                    }
+                    placeholder="https://…"
+                    value={publicationDraft.url}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="publish-evidence">人工证据备注</FieldLabel>
+                  <Input
+                    id="publish-evidence"
+                    onChange={(event) =>
+                      setPublicationDraft((current) => ({
+                        ...current,
+                        note: event.target.value,
+                      }))
+                    }
+                    placeholder="没有链接时填写发布记录"
+                    value={publicationDraft.note}
+                  />
+                </Field>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
                 {item.status === "produced" && (
                   <Button
                     className="h-11 sm:h-7"
@@ -1075,15 +1256,11 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
                 )}
                 <Button
                   className="h-11 sm:h-7"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(async () => {
-                      if (item!.status === "produced") {
-                        await transitionContentItem(item!.item_id, "scheduled")
-                      }
-                      await transitionContentItem(item!.item_id, "published")
-                    })
+                  disabled={
+                    busy ||
+                    (!publicationDraft.url.trim() && !publicationDraft.note.trim())
                   }
+                  onClick={() => void run(markPublished)}
                   size="sm"
                   variant="outline"
                 >
@@ -1095,6 +1272,32 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
 
           {(item.status === "published" || item.status === "measured") && (
             <WorkspacePanel padding="compact" title="数据与复盘">
+              {item.publications.length > 1 ? (
+                <Field className="mb-3">
+                  <FieldLabel>对应发布记录</FieldLabel>
+                  <Select
+                    onValueChange={(publicationId) =>
+                      setMetricsDraft((current) => ({
+                        ...current,
+                        publicationId,
+                      }))
+                    }
+                    value={metricsDraft.publicationId}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {item.publications.map((publication) => (
+                        <SelectItem
+                          key={publication.publication_id}
+                          value={publication.publication_id}
+                        >
+                          {publication.platform} · {formatDate(publication.published_at)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              ) : null}
               <FieldGroup className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {(
                   [
@@ -1177,7 +1380,7 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
                             .map((line) => line.trim())
                             .filter(Boolean)
                           if (titles.length > 0) {
-                            await createContentItems({
+                            await createContentTopics({
                               titles,
                               source: "derived",
                               projectId: item!.project,

@@ -97,8 +97,8 @@ test("Codex-only recipes are described as configuration-only in React", () => {
   })
 
   assert.equal(isCodexOnlyTemplate(codex), true)
-  assert.equal(productionSubmissionSummary(codex), "仅 Codex 发起")
-  assert.equal(productionInputSummary(codex), "Codex 分镜与图片")
+  assert.equal(productionSubmissionSummary(codex), "仅 Agent 发起")
+  assert.equal(productionInputSummary(codex), "Agent 分镜与图片")
 })
 
 test("frame template labels do not expose storage-like keys", () => {

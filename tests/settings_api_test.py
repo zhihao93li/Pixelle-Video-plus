@@ -68,8 +68,15 @@ def test_settings_config_endpoint_returns_current_configuration():
     assert response.status_code == 200
     payload = response.json()
     assert payload["configured"] is True
-    assert payload["config"]["llm"]["api_key"] == "llm-key"
+    assert payload["config"]["llm"]["api_key"] == ""
+    assert payload["config"]["llm"]["api_key_configured"] is True
     assert payload["config"]["publish"]["buffer"]["channels"]["youtube"] == "yt-channel"
+    assert payload["config"]["publish"]["buffer"]["api_key"] == ""
+    assert payload["config"]["publish"]["buffer"]["api_key_configured"] is True
+    assert payload["config"]["publish"]["cos"]["secret_id"] == ""
+    assert payload["config"]["publish"]["cos"]["secret_id_configured"] is True
+    assert payload["config"]["publish"]["cos"]["secret_key"] == ""
+    assert payload["config"]["publish"]["cos"]["secret_key_configured"] is True
     assert payload["config"]["image_generation"]["aliyun_bailian"]["api_key"] == ""
 
 
@@ -212,6 +219,44 @@ def test_settings_config_endpoint_saves_schema_valid_updates():
         "https://new-bucket.example.com/"
     )
     assert fake_config_manager.saved == 1
+
+
+def test_settings_redacted_roundtrip_preserves_and_explicit_clear_removes_secret():
+    fake_config_manager.config = PixelleVideoConfig(
+        llm={
+            "api_key": "keep-me",
+            "base_url": "https://aihubmix.com/v1",
+            "model": "model-before",
+        }
+    )
+    app.dependency_overrides[get_config_manager] = get_fake_config_manager
+    try:
+        client = TestClient(app)
+        preserved = client.put(
+            "/api/settings/config",
+            json={
+                "llm": {
+                    "api_key": "",
+                    "api_key_configured": True,
+                    "base_url": "https://aihubmix.com/v1",
+                    "model": "model-after",
+                }
+            },
+        )
+        assert preserved.status_code == 200
+        assert fake_config_manager.config.llm.api_key == "keep-me"
+        assert fake_config_manager.config.llm.model == "model-after"
+
+        cleared = client.put(
+            "/api/settings/config",
+            json={"llm": {"api_key": "", "clear_api_key": True}},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert cleared.status_code == 200
+    assert fake_config_manager.config.llm.api_key == ""
+    assert cleared.json()["config"]["llm"]["api_key_configured"] is False
 
 
 def test_settings_config_reset_endpoint_restores_schema_defaults():

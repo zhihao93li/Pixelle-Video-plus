@@ -5,7 +5,11 @@ import json
 import pytest
 from PIL import Image
 
-from pixelle_video.generation.agent_images import AgentImageError, save_agent_image
+from pixelle_video.generation.agent_images import (
+    AgentImageError,
+    resolve_agent_image_path,
+    save_agent_image,
+)
 
 
 def _image_bytes(color: str, image_format: str = "PNG") -> bytes:
@@ -71,6 +75,24 @@ def test_save_agent_image_is_validated_idempotent_and_replaceable(tmp_path):
     )
     assert sidecar["prompt"] == "A blue paper box"
     assert sidecar["sha256"] == replaced["sha256"]
+
+    (tmp_path / "assets" / "exp-1" / "scene-1.json").unlink()
+    repaired = save_agent_image(
+        experiment_id="exp-1",
+        scene_id="scene-1",
+        prompt="A blue paper box",
+        source={"kind": "agent", "confirmed_by_user": True},
+        file_path=str(second_source),
+        storage_root=tmp_path / "assets",
+    )
+    assert repaired["idempotent"] is True
+    resolved = resolve_agent_image_path(
+        experiment_id="exp-1",
+        scene_id="scene-1",
+        asset_id=repaired["asset_id"],
+        storage_root=tmp_path / "assets",
+    )
+    assert resolved.endswith("scene-1.webp")
 
 
 def test_save_agent_image_accepts_codex_data_url(tmp_path):

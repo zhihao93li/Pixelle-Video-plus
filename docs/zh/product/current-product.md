@@ -29,7 +29,7 @@ React 控制台位于 `apps/console`，包含五项主导航：
 ```mermaid
 flowchart LR
     UI[React Console] --> API[FastAPI]
-    Agent[Codex Plugin] --> API
+    Agent[Agent MCP Plugin] --> API
     API --> Content[Content and Projects]
     API --> Generation[Generation Registry and Service]
     API --> Tasks[生成任务存储]
@@ -48,8 +48,8 @@ flowchart LR
 | 生产注册与编译 | `pixelle_video/generation` | 配方解析、覆盖合并、运行与质量 |
 | 生产管线 | `pixelle_video/pipelines` | 视频、素材、图集、长文和工作流管线 |
 | 媒体服务 | `pixelle_video/services` | LLM、TTS、图片、视频、存储和发布 |
-| 运营状态 | `ops` | 运营项目、周期和写入状态 |
-| Agent 接口 | `codex_plugin` | 对外暴露受控操作能力 |
+| 内容运营状态 | `pixelle_video/content` | 项目、内容条目、发布证据与可恢复用例操作 |
+| Agent 接口 | `agent_plugin` + `/api/agent/capabilities` | MCP 薄客户端与后端用例 API 共用业务规则；确认只能由人在控制台完成 |
 
 ## Legacy Streamlit 边界
 

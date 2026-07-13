@@ -1,4 +1,4 @@
-"""Codex-owned storyboard images to Pixelle video composition pipeline."""
+"""Agent-owned storyboard images to Pixelle video composition pipeline."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from pixelle_video.pipelines.standard import StandardPipeline
 
 
 class CodexSceneSpec(BaseModel):
-    """A user-confirmed scene produced by Codex before image generation."""
+    """A user-confirmed scene produced by an Agent before image generation."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -42,31 +42,31 @@ class CodexSceneSpec(BaseModel):
 
 def validate_codex_scenes(scenes: Any) -> list[CodexSceneSpec]:
     if not isinstance(scenes, list):
-        raise ValueError("Codex scene video requires scenes to be a list")
+        raise ValueError("Agent scene video requires scenes to be a list")
     if not 1 <= len(scenes) <= 20:
-        raise ValueError("Codex scene video requires between 1 and 20 confirmed scenes")
+        raise ValueError("Agent scene video requires between 1 and 20 confirmed scenes")
 
     normalized = [CodexSceneSpec.model_validate(scene) for scene in scenes]
     scene_ids = [scene.scene_id for scene in normalized]
     if len(scene_ids) != len(set(scene_ids)):
-        raise ValueError("Codex scene video scene_id values must be unique")
+        raise ValueError("Agent scene video scene_id values must be unique")
 
     for scene in normalized:
         image_path = Path(scene.image_path).expanduser()
         if not image_path.is_file():
             raise ValueError(
-                f"Codex scene {scene.scene_id!r} image does not exist: {scene.image_path}"
+                f"Agent scene {scene.scene_id!r} image does not exist: {scene.image_path}"
             )
         if image_path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
             raise ValueError(
-                f"Codex scene {scene.scene_id!r} image must be PNG, JPEG, or WebP"
+                f"Agent scene {scene.scene_id!r} image must be PNG, JPEG, or WebP"
             )
         scene.image_path = str(image_path.resolve())
     return normalized
 
 
 class CodexSceneVideoPipeline(StandardPipeline):
-    """Reuse Pixelle's TTS/subtitle/FFmpeg stages with exact Codex scene media."""
+    """Reuse Pixelle's TTS/subtitle/FFmpeg stages with exact Agent scene media."""
 
     async def __call__(
         self,
@@ -92,7 +92,7 @@ class CodexSceneVideoPipeline(StandardPipeline):
         title = (ctx.params.get("title") or "").strip()
         if not title:
             first_narration = ctx.narrations[0].strip()
-            title = first_narration[:40].rstrip("\uff0c,\u3002.!\uff01\uff1f? ") or "Codex \u914d\u56fe\u89c6\u9891"
+            title = first_narration[:40].rstrip("\uff0c,\u3002.!\uff01\uff1f? ") or "Agent \u914d\u56fe\u89c6\u9891"
         ctx.title = title
 
     async def plan_visuals(self, ctx: PipelineContext):

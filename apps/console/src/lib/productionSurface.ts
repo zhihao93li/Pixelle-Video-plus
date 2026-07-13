@@ -10,12 +10,12 @@ const INPUT_LABELS: Record<string, string> = {
   prompt: "提示词",
   reference_video: "参考动作视频",
   character_assets: "角色图",
-  scenes: "Codex 分镜与图片",
+  scenes: "Agent 分镜与图片",
 }
 
 const LINE_LABELS: Record<string, string> = {
   standard: "图文口播",
-  codex_scene_video: "Codex 配图合成",
+  codex_scene_video: "Agent 配图合成",
   asset_based: "素材成片",
   image_post: "图文帖",
   long_form: "长文",
@@ -26,7 +26,7 @@ const LINE_LABELS: Record<string, string> = {
 
 const PIPELINE_DESCRIPTIONS: Record<string, string> = {
   codex_scene_video:
-    "Codex 规划分镜并生成图片，Pixelle 完成配音、字幕和视频合成。",
+    "Agent 规划分镜并生成图片，Pixelle 完成配音、字幕和视频合成。",
   asset_based: "上传图片或视频素材，整理成带字幕与配音的完整短片。",
   image_post: "把文案排成封面和多页配图，生成可直接发布的图集。",
   long_form: "把确认稿扩写成结构化长文，适合公众号、知乎和长图文。",
@@ -83,8 +83,8 @@ export function productionLineSummary(template: ProductionTemplate) {
 }
 
 export function productionSubmissionSummary(template: ProductionTemplate) {
-  if (template.access_scope === "codex") {
-    return "仅 Codex 发起"
+  if (template.access_scope === "agent" || template.access_scope === "codex") {
+    return "仅 Agent 发起"
   }
   if (template.product_entry === "script_review") {
     return "审核后批量"

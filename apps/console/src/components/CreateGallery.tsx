@@ -269,17 +269,17 @@ function CodexRecipeCard({ template }: { template: ProductionTemplate }) {
     <article className="rounded-lg border bg-muted/15 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="secondary">视频</Badge>
-        <Badge variant="info">仅 Codex 发起</Badge>
+        <Badge variant="info">仅 Agent 发起</Badge>
         {!template.enabled ? <Badge variant="outline">已停用</Badge> : null}
       </div>
       <h3 className="mt-3 text-base font-medium">{template.display_name}</h3>
       <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-        {productionDescription(template)}请在 Codex
+        {productionDescription(template)}请在 Agent
         对话中提出主题或文案，确认分镜后自动进入合成。
       </p>
 
       <ol className="mt-4 grid gap-2 sm:grid-cols-3">
-        {["规划分镜并确认", "Codex 生成配图", "Pixelle 配音与合成"].map(
+        {["规划分镜并确认", "Agent 生成配图", "Pixelle 配音与合成"].map(
           (step, index) => (
             <li
               className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"
@@ -318,7 +318,7 @@ function CodexRecipeCard({ template }: { template: ProductionTemplate }) {
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-3">
         <p className="text-xs leading-5 text-muted-foreground">
           {template.enabled
-            ? "这里仅展示和配置；制作必须从 Codex 发起。"
+            ? "这里仅展示和配置；制作必须从 Agent 发起。"
             : "这份配方已停用；调整配方后可在设置中重新启用。"}
         </p>
         <Button asChild size="sm" variant="outline">
@@ -492,7 +492,7 @@ export function CreateGallery() {
         setConfigFailures({})
         setConfigSummaryState("loading")
         setTemplates(response.templates)
-        setCodexTemplates(response.codex_templates ?? [])
+        setCodexTemplates(response.agent_templates ?? response.codex_templates ?? [])
         setLoadState("ready")
       } catch (loadError) {
         if (!cancelled) {
@@ -746,10 +746,10 @@ export function CreateGallery() {
                   <Bot className="size-4 shrink-0" />
                   <span className="min-w-0 flex-1">
                     <span className="block font-medium text-foreground">
-                      Codex 专用制作
+                      Agent 专用制作
                     </span>
                     <span className="mt-0.5 hidden truncate text-xs text-muted-foreground lg:block">
-                      Codex 配图，Pixelle 合成
+                      Agent 配图，Pixelle 合成
                     </span>
                   </span>
                   <Badge variant={codexSelected ? "info" : "outline"}>
@@ -763,8 +763,8 @@ export function CreateGallery() {
           <div className="flex min-w-0 flex-col gap-5">
             {codexSelected ? (
               <WorkspacePanel
-                description="了解 Codex 与 Pixelle 协作生成配图视频的方式，并调整长期默认设置"
-                title="Codex 专用制作"
+                description="了解 Agent 与 Pixelle 协作生成配图视频的方式，并调整长期默认设置"
+                title="Agent 专用制作"
               >
                 <div className="grid gap-3">
                   {visibleCodexTemplates.map((template) => (

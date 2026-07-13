@@ -5,6 +5,7 @@ from pixelle_video.generation import (
     build_default_pipeline_manifests,
     build_default_pipeline_registry,
 )
+from pixelle_video.generation.schemas import PipelineManifest
 
 
 def _field_names(fields):
@@ -43,7 +44,7 @@ def test_default_pipeline_manifests_describe_current_pipeline_entries():
         manifest for manifest in manifests if manifest.id == "codex_scene_video"
     )
     assert codex_scene_video.default_entry == "scenes"
-    assert codex_scene_video.access_scope == "codex"
+    assert codex_scene_video.access_scope == "agent"
     assert _field_names(codex_scene_video.entry("scenes").required_fields) == ["scenes"]
     assert _field_names(codex_scene_video.entry("scenes").optional_fields) == ["title"]
     assert all(
@@ -109,6 +110,15 @@ def test_default_pipeline_registry_can_be_built_without_running_generation():
     ]
     assert registry.get_manifest("custom").default_entry == "script"
     assert registry.get_pipeline("custom") is None
+
+
+def test_legacy_pipeline_access_scope_is_normalized_to_agent():
+    manifest = next(
+        entry for entry in build_default_pipeline_manifests() if entry.id == "codex_scene_video"
+    )
+    payload = manifest.model_dump(mode="json")
+    payload["access_scope"] = "codex"
+    assert PipelineManifest.model_validate(payload).access_scope == "agent"
 
 
 @pytest.mark.asyncio

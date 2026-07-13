@@ -31,7 +31,7 @@ def test_docker_has_one_application_service_on_port_8000():
     dockerfile = (PROJECT_ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "FROM node:22-alpine AS console-builder" in dockerfile
     assert "COPY --from=console-builder /console/dist ./apps/console/dist" in dockerfile
-    assert "COPY ops ./ops" in dockerfile
+    assert "COPY agent_plugin ./agent_plugin" in dockerfile
     assert "COPY docs/en/faq.md ./docs/en/faq.md" in dockerfile
     assert "COPY docs/zh/faq.md ./docs/zh/faq.md" in dockerfile
     assert "COPY web ./web" not in dockerfile

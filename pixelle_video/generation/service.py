@@ -38,7 +38,7 @@ class GenerationService:
         self._idempotency_index: dict[str, str] = {}
         self._progress_callbacks: dict[str, Callable[[GenerationTask], None]] = {}
         self._storage_dir = storage_dir
-        self._surface = surface
+        self._surface = "agent" if surface == "codex" else surface
         self._shutting_down = False
         self._restore_tasks()
 
@@ -46,11 +46,13 @@ class GenerationService:
         self,
         request: GenerationRequest,
         progress_callback: Callable[[GenerationTask], None] | None = None,
+        *,
+        surface: str | None = None,
     ) -> GenerationTask:
         if request.idempotency_key and request.idempotency_key in self._idempotency_index:
             return self.get_task(self._idempotency_index[request.idempotency_key])
 
-        self._validate_request(request)
+        self._validate_request(request, surface=surface)
 
         task_id = self._task_id_factory()
         entry_spec = self.pipeline_registry.get_manifest(request.pipeline_id).entry(request.entry)
@@ -119,14 +121,15 @@ class GenerationService:
         if self._futures:
             await asyncio.gather(*self._futures.values(), return_exceptions=True)
 
-    def _validate_request(self, request: GenerationRequest) -> None:
+    def _validate_request(self, request: GenerationRequest, *, surface: str | None = None) -> None:
         try:
             manifest = self.pipeline_registry.get_manifest(request.pipeline_id)
         except KeyError:
             raise ValueError(f"Unknown pipeline: {request.pipeline_id}") from None
 
-        if manifest.access_scope == "codex" and self._surface != "codex":
-            raise ValueError(f"Pipeline {request.pipeline_id!r} is only available through Codex")
+        effective_surface = "agent" if surface == "codex" else (surface or self._surface)
+        if manifest.access_scope == "agent" and effective_surface != "agent":
+            raise ValueError(f"Pipeline {request.pipeline_id!r} is only available through an Agent")
 
         try:
             entry = manifest.entry(request.entry)
@@ -389,6 +392,11 @@ class GenerationService:
         )
         duration = self._get_result_value(pipeline_result, "duration")
         storyboard = self._get_result_value(pipeline_result, "storyboard")
+        storyboard_path = self._get_result_value(pipeline_result, "storyboard_path")
+        if not storyboard_path:
+            persisted_storyboard = Path(video_path).parent / "storyboard.json"
+            if persisted_storyboard.is_file():
+                storyboard_path = str(persisted_storyboard)
         compose_runtime = task.request.params.get("compose_runtime", "html_ffmpeg")
         quality_profile = task.request.params.get("quality_profile", "basic")
         asset_manifest = build_asset_manifest(
@@ -411,6 +419,7 @@ class GenerationService:
             primary_video=primary_video,
             duration=duration,
             file_size=file_size,
+            storyboard_path=storyboard_path,
             metadata={
                 "source_result_type": type(pipeline_result).__name__,
                 "asset_manifest": asset_manifest,

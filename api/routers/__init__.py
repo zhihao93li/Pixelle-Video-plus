@@ -14,13 +14,14 @@
 API Routers
 """
 
+from api.routers.agent import router as agent_router
 from api.routers.content import router as content_router
+from api.routers.content_flows import router as content_flows_router
 from api.routers.content_items import router as content_items_router
 from api.routers.drafting import router as drafting_router
 from api.routers.files import router as files_router
 from api.routers.frame import router as frame_router
 from api.routers.generation import router as generation_router
-from api.routers.generation_settings import router as generation_settings_router
 from api.routers.health import router as health_router
 from api.routers.help import router as help_router
 from api.routers.history import router as history_router
@@ -37,12 +38,14 @@ from api.routers.video import router as video_router
 
 __all__ = [
     "health_router",
+    "agent_router",
     "llm_router",
     "tts_router",
     "image_router",
     "media_router",
     "content_router",
     "content_items_router",
+    "content_flows_router",
     "drafting_router",
     "projects_router",
     "video_router",
@@ -51,7 +54,6 @@ __all__ = [
     "resources_router",
     "frame_router",
     "generation_router",
-    "generation_settings_router",
     "help_router",
     "history_router",
     "publish_router",

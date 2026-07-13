@@ -29,7 +29,7 @@ Artifacts are represented by one discriminated union: `video`, `image_set`, or `
 ```mermaid
 flowchart LR
     UI[React Console] --> API[FastAPI]
-    Agent[Codex Plugin] --> API
+    Agent[Agent MCP Plugin] --> API
     API --> Content[Content and Projects]
     API --> Generation[Generation Registry and Service]
     API --> Tasks[Generation Task Store]
@@ -48,8 +48,8 @@ flowchart LR
 | Generation | `pixelle_video/generation` | Recipe resolution, overrides, execution, and quality |
 | Pipelines | `pixelle_video/pipelines` | Video, asset, image-set, text, and workflow pipelines |
 | Services | `pixelle_video/services` | LLM, TTS, media, storage, and publishing |
-| Operations | `ops` | Operating-project state and persistence |
-| Agent Interface | `codex_plugin` | Controlled automation capabilities |
+| Content operations | `pixelle_video/content` | Projects, items, publication evidence, and recoverable use cases |
+| Agent Interface | `agent_plugin` + `/api/agent/capabilities` | MCP thin client over shared use-case APIs; confirmation is human-only |
 
 ## Ownership and Contracts
 

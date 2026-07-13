@@ -139,6 +139,34 @@ async def test_generation_service_runs_pipeline_and_returns_structured_result():
 
 
 @pytest.mark.asyncio
+async def test_generation_result_exposes_persisted_storyboard_path(tmp_path):
+    output_dir = tmp_path / "run"
+    output_dir.mkdir()
+    video_path = output_dir / "final.mp4"
+    video_path.write_bytes(b"not-a-real-video")
+    storyboard_path = output_dir / "storyboard.json"
+    storyboard_path.write_text("{}", encoding="utf-8")
+
+    class PersistedStoryboardPipeline:
+        async def __call__(self, **kwargs):
+            return _video_result(str(video_path))
+
+    service = _service_for_pipeline(PersistedStoryboardPipeline())
+    task = service.submit(
+        GenerationRequest(
+            pipeline_id="standard",
+            entry="topic",
+            input={"topic": "storyboard contract"},
+        )
+    )
+    completed = await service.wait_for_task(task.task_id)
+
+    assert completed.status == "completed"
+    assert completed.result is not None
+    assert completed.result.storyboard_path == str(storyboard_path)
+
+
+@pytest.mark.asyncio
 async def test_generation_service_restores_completed_tasks_and_idempotency(tmp_path):
     request = GenerationRequest(
         pipeline_id="standard",

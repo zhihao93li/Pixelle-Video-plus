@@ -22,8 +22,8 @@ flowchart LR
 | 生产 | `pixelle_video/generation` | 配方、参数合并、运行和质量 |
 | 管线 | `pixelle_video/pipelines` | 各产物生产实现 |
 | 服务 | `pixelle_video/services` | LLM、TTS、媒体、存储和发布 |
-| 运营 | `ops` | 运营项目与状态持久化 |
-| Agent | `codex_plugin` | 受控自动化操作接口 |
+| 内容运营 | `pixelle_video/content` | 项目、内容条目与可恢复操作状态 |
+| Agent | `agent_plugin` + 用例级 API | 认证后的受控自动化操作接口；确认仍由人在控制台完成 |
 
 ## 关键边界
 

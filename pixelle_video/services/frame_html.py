@@ -344,13 +344,21 @@ class HTMLFrameGenerator:
     @classmethod
     async def close_browser(cls):
         """Shutdown the shared browser instance (call on app teardown)"""
-        if cls._browser:
-            await cls._browser.close()
-            cls._browser = None
-            cls._browser_loop = None
-        if cls._playwright:
-            await cls._playwright.stop()
-            cls._playwright = None
+        browser, playwright = cls._browser, cls._playwright
+        cls._browser = None
+        cls._browser_loop = None
+        cls._playwright = None
+        if browser:
+            try:
+                await browser.close()
+            except Exception as exc:  # noqa: BLE001 - teardown must remain idempotent
+                logger.warning(f"Playwright browser was already unavailable during shutdown: {exc}")
+        if playwright:
+            try:
+                await playwright.stop()
+            except Exception as exc:  # noqa: BLE001 - transport may already be closed by SIGINT
+                logger.warning(f"Playwright driver was already unavailable during shutdown: {exc}")
+        if browser or playwright:
             logger.debug("Playwright browser closed")
 
     async def generate_frame(

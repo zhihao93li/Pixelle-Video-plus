@@ -18,7 +18,8 @@ def test_release_allowlist_excludes_runtime_state_and_legacy_ui():
     release_paths = set(BUILD_MODULE.WINDOWS_RELEASE_PATHS)
 
     assert "api" in release_paths
-    assert "ops" in release_paths
+    assert "agent_plugin" in release_paths
+    assert "ops" not in release_paths
     assert "apps/console/dist" in release_paths
     assert "web" not in release_paths
     assert "tests" not in release_paths

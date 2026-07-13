@@ -19,8 +19,8 @@ Pixelle 是面向单人内容运营的 AI 内容生产工作台。它把选题�
 | `apps/console` | React + Vite 正式控制台 |
 | `api` | FastAPI 路由、请求合同和任务入口 |
 | `pixelle_video` | 内容生成、生产模板、管线和媒体服务 |
-| `ops` | 运营项目与状态持久化 |
-| `codex_plugin` | Codex 操作接口 |
+| `pixelle_video/content` | 项目、内容条目与可恢复操作状态 |
+| `agent_plugin` | Codex、Claude Code、Cursor 共用的 Agent MCP 操作接口 |
 | `web` | 冻结中的 legacy Streamlit 界面，等待兼容验收后删除 |
 | `tests` | Python 单元与集成测试 |
 

@@ -1,6 +1,7 @@
 import pytest
 
 from pixelle_video.generation.templates import (
+    ProductionTemplate,
     ProductionTemplateError,
     build_default_production_template_registry,
 )
@@ -68,12 +69,12 @@ def test_codex_image_story_is_codex_only_and_preserves_confirmed_scenes():
     ]
 
     template = registry.get(CODEX_IMAGE_STORY)
-    assert template.access_scope == "codex"
+    assert template.access_scope == "agent"
     assert template.pipeline_id == "codex_scene_video"
     assert template.entry == "scenes"
     assert "prompt_prefix" in template.allowed_user_params
 
-    with pytest.raises(ProductionTemplateError, match="only available through Codex"):
+    with pytest.raises(ProductionTemplateError, match="only available through an Agent"):
         registry.compile_request(CODEX_IMAGE_STORY, input={"scenes": scenes})
 
     request = registry.compile_request(
@@ -82,12 +83,19 @@ def test_codex_image_story_is_codex_only_and_preserves_confirmed_scenes():
             "scenes": scenes,
             "prompt_prefix": "warm editorial illustration",
         },
-        surface="codex",
+        surface="agent",
     )
     assert request.pipeline_id == "codex_scene_video"
     assert request.input == {"scenes": scenes}
     assert request.params["prompt_prefix"] == "warm editorial illustration"
     assert "media_workflow" not in request.params
+
+
+def test_legacy_codex_access_scope_is_normalized_to_agent():
+    template = build_default_production_template_registry().get(CODEX_IMAGE_STORY)
+    payload = template.model_dump(mode="json")
+    payload["access_scope"] = "codex"
+    assert ProductionTemplate.model_validate(payload).access_scope == "agent"
 
 
 def test_explicit_null_clears_an_inherited_per_run_setting():
@@ -112,8 +120,7 @@ def test_registry_default_is_standard_skeleton():
     registry = build_default_production_template_registry()
 
     assert (
-        registry.default_template_id(project="PetWoods", channel="xiaohongshu")
-        == STANDARD_SKELETON
+        registry.default_template_id(project="PetWoods", channel="xiaohongshu") == STANDARD_SKELETON
     )
     template = registry.get(STANDARD_SKELETON)
     assert template.pipeline_id == "standard"

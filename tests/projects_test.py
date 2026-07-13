@@ -9,7 +9,7 @@ from pixelle_video.content.models import new_content_item
 
 @pytest.fixture(autouse=True)
 def isolated_storage(tmp_path, monkeypatch):
-    # projects 模块内所有落盘都走 tmp（含 ops.db 探测 → 不存在 → 走回退分支）
+    # projects 模块内所有落盘都走 tmp。
     monkeypatch.setattr(
         projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts))
     )
@@ -81,15 +81,15 @@ def test_cannot_set_archived_project_as_default():
 
 
 # ---------------------------------------------------------------------------
-# 迁移（幂等 + ops.db 缺失分支 + content-items 改写）
+# 迁移（幂等 + content-items 改写）
 # ---------------------------------------------------------------------------
 
 
-def test_migration_creates_default_project_without_ops_db():
+def test_migration_creates_native_default_project():
     projects.ensure_migrated()
     default_id, all_projects = projects.list_projects()
     assert len(all_projects) == 1
-    assert all_projects[0].name == "PetWoods"  # ops.db 缺失 → 回退名
+    assert all_projects[0].name == "PetWoods"
     assert default_id == all_projects[0].project_id
 
 

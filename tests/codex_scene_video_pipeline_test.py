@@ -109,7 +109,7 @@ async def test_generation_service_blocks_codex_pipeline_on_public_surface(tmp_pa
     )
     service = GenerationService(registry, surface="public")
 
-    with pytest.raises(ValueError, match="only available through Codex"):
+    with pytest.raises(ValueError, match="only available through an Agent"):
         service.submit(
             GenerationRequest(
                 pipeline_id="codex_scene_video",

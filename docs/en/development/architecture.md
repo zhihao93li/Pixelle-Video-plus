@@ -22,8 +22,8 @@ flowchart LR
 | Generation | `pixelle_video/generation` | Recipes, parameter merging, execution, and quality |
 | Pipelines | `pixelle_video/pipelines` | Artifact-specific production implementations |
 | Services | `pixelle_video/services` | LLM, TTS, media, storage, and publishing |
-| Operations | `ops` | Operating-project state and persistence |
-| Agent | `codex_plugin` | Controlled automation operations |
+| Content operations | `pixelle_video/content` | Projects, content items, and recoverable operations |
+| Agent | `agent_plugin` + use-case API | Authenticated automation; confirmation remains human-only |
 
 ## Boundaries
 

@@ -293,7 +293,7 @@ function TemplateEnabledControl({
             </AlertDialogTitle>
             <AlertDialogDescription>
               {codexOnly
-                ? "停用后 Codex 将不再使用这份配方；已生成的作品与历史不受影响，随时可重新启用。"
+                ? "停用后 Agent 将不再使用这份配方；已生成的作品与历史不受影响，随时可重新启用。"
                 : "停用后它不再出现在快速生产和各处配方选择里；已用它生成的作品与历史不受影响，随时可重新启用。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -539,7 +539,7 @@ export function TemplateStatusPanel() {
                         <Badge variant="outline">自定义</Badge>
                       )}
                       {codexOnly ? (
-                        <Badge variant="info">仅 Codex 发起</Badge>
+                        <Badge variant="info">仅 Agent 发起</Badge>
                       ) : null}
                       <Badge
                         variant={

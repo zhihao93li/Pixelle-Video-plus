@@ -769,17 +769,30 @@ export function SettingsWorkspace() {
                 title="AI 与语音"
               />
               <Section id="llm" title="内容起草模型">
-                <Field label="AiHubMix API Key">
-                  <Input
-                    onChange={(event) =>
-                      patchSettings({
-                        llm: { ...settings.llm, api_key: event.target.value },
-                      })
-                    }
-                    type="password"
-                    value={settings.llm.api_key}
-                  />
-                </Field>
+                <SecretSettingField
+                  configured={Boolean(settings.llm.api_key_configured)}
+                  label="AiHubMix API Key"
+                  onChange={(value) =>
+                    patchSettings({
+                      llm: {
+                        ...settings.llm,
+                        api_key: value,
+                        clear_api_key: false,
+                      },
+                    })
+                  }
+                  onClear={() =>
+                    patchSettings({
+                      llm: {
+                        ...settings.llm,
+                        api_key: "",
+                        api_key_configured: false,
+                        clear_api_key: true,
+                      },
+                    })
+                  }
+                  value={settings.llm.api_key}
+                />
                 <Field label="服务地址">
                   <Input
                     onChange={(event) =>
@@ -865,26 +878,44 @@ export function SettingsWorkspace() {
               </Section>
 
               <Section id="tts" title="Fish Audio">
-                <Field label="API Key">
-                  <Input
-                    onChange={(event) =>
-                      patchSettings({
-                        comfyui: {
-                          ...settings.comfyui,
-                          tts: {
-                            ...settings.comfyui.tts,
-                            fish_audio: {
-                              ...settings.comfyui.tts.fish_audio,
-                              api_key: event.target.value,
-                            },
+                <SecretSettingField
+                  configured={Boolean(
+                    settings.comfyui.tts.fish_audio.api_key_configured
+                  )}
+                  label="API Key"
+                  onChange={(value) =>
+                    patchSettings({
+                      comfyui: {
+                        ...settings.comfyui,
+                        tts: {
+                          ...settings.comfyui.tts,
+                          fish_audio: {
+                            ...settings.comfyui.tts.fish_audio,
+                            api_key: value,
+                            clear_api_key: false,
                           },
                         },
-                      })
-                    }
-                    type="password"
-                    value={settings.comfyui.tts.fish_audio.api_key}
-                  />
-                </Field>
+                      },
+                    })
+                  }
+                  onClear={() =>
+                    patchSettings({
+                      comfyui: {
+                        ...settings.comfyui,
+                        tts: {
+                          ...settings.comfyui.tts,
+                          fish_audio: {
+                            ...settings.comfyui.tts.fish_audio,
+                            api_key: "",
+                            api_key_configured: false,
+                            clear_api_key: true,
+                          },
+                        },
+                      },
+                    })
+                  }
+                  value={settings.comfyui.tts.fish_audio.api_key}
+                />
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="模型">
                     <Select
@@ -982,20 +1013,32 @@ export function SettingsWorkspace() {
                       value={settings.comfyui.comfyui_url}
                     />
                   </Field>
-                  <Field label="ComfyUI API Key">
-                    <Input
-                      onChange={(event) =>
-                        patchSettings({
-                          comfyui: {
-                            ...settings.comfyui,
-                            comfyui_api_key: event.target.value,
-                          },
-                        })
-                      }
-                      type="password"
-                      value={settings.comfyui.comfyui_api_key ?? ""}
-                    />
-                  </Field>
+                  <SecretSettingField
+                    configured={Boolean(
+                      settings.comfyui.comfyui_api_key_configured
+                    )}
+                    label="ComfyUI API Key"
+                    onChange={(value) =>
+                      patchSettings({
+                        comfyui: {
+                          ...settings.comfyui,
+                          comfyui_api_key: value,
+                          clear_comfyui_api_key: false,
+                        },
+                      })
+                    }
+                    onClear={() =>
+                      patchSettings({
+                        comfyui: {
+                          ...settings.comfyui,
+                          comfyui_api_key: "",
+                          comfyui_api_key_configured: false,
+                          clear_comfyui_api_key: true,
+                        },
+                      })
+                    }
+                    value={settings.comfyui.comfyui_api_key ?? ""}
+                  />
                 </div>
                 <Button
                   disabled={comfyActionState !== "idle"}
@@ -1020,20 +1063,32 @@ export function SettingsWorkspace() {
                 ) : null}
                 <Separator />
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="RunningHub API Key">
-                    <Input
-                      onChange={(event) =>
-                        patchSettings({
-                          comfyui: {
-                            ...settings.comfyui,
-                            runninghub_api_key: event.target.value,
-                          },
-                        })
-                      }
-                      type="password"
-                      value={settings.comfyui.runninghub_api_key ?? ""}
-                    />
-                  </Field>
+                  <SecretSettingField
+                    configured={Boolean(
+                      settings.comfyui.runninghub_api_key_configured
+                    )}
+                    label="RunningHub API Key"
+                    onChange={(value) =>
+                      patchSettings({
+                        comfyui: {
+                          ...settings.comfyui,
+                          runninghub_api_key: value,
+                          clear_runninghub_api_key: false,
+                        },
+                      })
+                    }
+                    onClear={() =>
+                      patchSettings({
+                        comfyui: {
+                          ...settings.comfyui,
+                          runninghub_api_key: "",
+                          runninghub_api_key_configured: false,
+                          clear_runninghub_api_key: true,
+                        },
+                      })
+                    }
+                    value={settings.comfyui.runninghub_api_key ?? ""}
+                  />
                   <Field label="实例规格">
                     <Select
                       onValueChange={(value) =>
@@ -1238,23 +1293,38 @@ export function SettingsWorkspace() {
                 title="发布与存储"
               />
               <Section id="buffer" title="社媒发布">
-                <Field label="Buffer API Key">
-                  <Input
-                    onChange={(event) =>
-                      patchSettings({
-                        publish: {
-                          ...settings.publish,
-                          buffer: {
-                            ...settings.publish.buffer,
-                            api_key: event.target.value,
-                          },
+                <SecretSettingField
+                  configured={Boolean(
+                    settings.publish.buffer.api_key_configured
+                  )}
+                  label="Buffer API Key"
+                  onChange={(value) =>
+                    patchSettings({
+                      publish: {
+                        ...settings.publish,
+                        buffer: {
+                          ...settings.publish.buffer,
+                          api_key: value,
+                          clear_api_key: false,
                         },
-                      })
-                    }
-                    type="password"
-                    value={settings.publish.buffer.api_key}
-                  />
-                </Field>
+                      },
+                    })
+                  }
+                  onClear={() =>
+                    patchSettings({
+                      publish: {
+                        ...settings.publish,
+                        buffer: {
+                          ...settings.publish.buffer,
+                          api_key: "",
+                          api_key_configured: false,
+                          clear_api_key: true,
+                        },
+                      },
+                    })
+                  }
+                  value={settings.publish.buffer.api_key}
+                />
                 <Button
                   disabled={bufferActionState !== "idle"}
                   onClick={() => void fetchChannels()}
@@ -1347,40 +1417,70 @@ export function SettingsWorkspace() {
                       value={settings.publish.cos.bucket}
                     />
                   </Field>
-                  <Field label="Secret ID">
-                    <Input
-                      onChange={(event) =>
-                        patchSettings({
-                          publish: {
-                            ...settings.publish,
-                            cos: {
-                              ...settings.publish.cos,
-                              secret_id: event.target.value,
-                            },
+                  <SecretSettingField
+                    configured={Boolean(
+                      settings.publish.cos.secret_id_configured
+                    )}
+                    label="Secret ID"
+                    onChange={(value) =>
+                      patchSettings({
+                        publish: {
+                          ...settings.publish,
+                          cos: {
+                            ...settings.publish.cos,
+                            secret_id: value,
+                            clear_secret_id: false,
                           },
-                        })
-                      }
-                      type="password"
-                      value={settings.publish.cos.secret_id}
-                    />
-                  </Field>
-                  <Field label="Secret Key">
-                    <Input
-                      onChange={(event) =>
-                        patchSettings({
-                          publish: {
-                            ...settings.publish,
-                            cos: {
-                              ...settings.publish.cos,
-                              secret_key: event.target.value,
-                            },
+                        },
+                      })
+                    }
+                    onClear={() =>
+                      patchSettings({
+                        publish: {
+                          ...settings.publish,
+                          cos: {
+                            ...settings.publish.cos,
+                            secret_id: "",
+                            secret_id_configured: false,
+                            clear_secret_id: true,
                           },
-                        })
-                      }
-                      type="password"
-                      value={settings.publish.cos.secret_key}
-                    />
-                  </Field>
+                        },
+                      })
+                    }
+                    value={settings.publish.cos.secret_id}
+                  />
+                  <SecretSettingField
+                    configured={Boolean(
+                      settings.publish.cos.secret_key_configured
+                    )}
+                    label="Secret Key"
+                    onChange={(value) =>
+                      patchSettings({
+                        publish: {
+                          ...settings.publish,
+                          cos: {
+                            ...settings.publish.cos,
+                            secret_key: value,
+                            clear_secret_key: false,
+                          },
+                        },
+                      })
+                    }
+                    onClear={() =>
+                      patchSettings({
+                        publish: {
+                          ...settings.publish,
+                          cos: {
+                            ...settings.publish.cos,
+                            secret_key: "",
+                            secret_key_configured: false,
+                            clear_secret_key: true,
+                          },
+                        },
+                      })
+                    }
+                    value={settings.publish.cos.secret_key}
+                  />
                 </div>
                 <Field label="公开访问地址">
                   <Input
@@ -1597,6 +1697,43 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <span className="text-sm font-medium">{label}</span>
       {children}
     </label>
+  )
+}
+
+function SecretSettingField({
+  configured,
+  label,
+  onChange,
+  onClear,
+  value,
+}: {
+  configured: boolean
+  label: string
+  onChange: (value: string) => void
+  onClear: () => void
+  value: string
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium">{label}</span>
+        {configured ? <Badge variant="secondary">已配置</Badge> : null}
+      </div>
+      <div className="flex gap-2">
+        <Input
+          aria-label={label}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={configured ? "已安全保存；输入新值可替换" : "请输入密钥"}
+          type="password"
+          value={value}
+        />
+        {configured ? (
+          <Button onClick={onClear} type="button" variant="outline">
+            清除
+          </Button>
+        ) : null}
+      </div>
+    </div>
   )
 }
 

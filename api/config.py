@@ -14,6 +14,7 @@
 API Configuration
 """
 
+import os
 from typing import Optional
 
 from pydantic import BaseModel
@@ -23,13 +24,18 @@ class APIConfig(BaseModel):
     """API configuration"""
     
     # Server settings
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8000
     reload: bool = False
     
     # CORS settings
     cors_enabled: bool = True
-    cors_origins: list[str] = ["*"]
+    cors_origins: list[str] = [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:4173",
+        "http://localhost:4173",
+    ]
     
     # Task settings
     max_concurrent_tasks: int = 5
@@ -47,5 +53,12 @@ class APIConfig(BaseModel):
 
 
 # Global config instance
-api_config = APIConfig()
+def _env_list(name: str, default: list[str]) -> list[str]:
+    raw = os.environ.get(name, "").strip()
+    return [part.strip() for part in raw.split(",") if part.strip()] if raw else default
 
+
+api_config = APIConfig(
+    host=os.environ.get("PIXELLE_API_HOST", "127.0.0.1"),
+    cors_origins=_env_list("PIXELLE_CORS_ORIGINS", APIConfig().cors_origins),
+)

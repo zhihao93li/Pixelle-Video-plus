@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 STATUSES = [
     "idea",
@@ -64,6 +64,54 @@ class ContentEvent(BaseModel):
     detail: dict = Field(default_factory=dict)
 
 
+class SceneDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scene_id: str = Field(min_length=1, max_length=120)
+    order: int = Field(ge=1)
+    narration: str = Field(min_length=1)
+    image_prompt: str = Field(min_length=1)
+    duration: float | None = Field(default=None, gt=0)
+    asset_id: str | None = None
+
+    @field_validator("scene_id", "narration", "image_prompt")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
+class SceneManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenes: list[SceneDraft] = Field(min_length=1, max_length=20)
+    confirmed: bool = False
+    updated_at: str = Field(default_factory=now_iso)
+
+    @model_validator(mode="after")
+    def validate_scenes(self):
+        ids = [scene.scene_id for scene in self.scenes]
+        orders = [scene.order for scene in self.scenes]
+        if len(ids) != len(set(ids)):
+            raise ValueError("scene_id values must be unique")
+        if len(orders) != len(set(orders)):
+            raise ValueError("scene order values must be unique")
+        self.scenes.sort(key=lambda scene: scene.order)
+        return self
+
+
+class Publication(BaseModel):
+    publication_id: str
+    platform: str
+    published_at: str
+    evidence_type: Literal["url", "platform_post_id", "buffer_id", "manual"]
+    evidence_value: str
+    actor: Literal["user", "agent", "system"]
+    request_id: str
+
+
 class ContentItem(BaseModel):
     item_id: str  # uuid4().hex
     project: str = "PetWoods"
@@ -80,14 +128,14 @@ class ContentItem(BaseModel):
     metrics: dict = Field(default_factory=dict)
     # metrics: {"likes": int, "favorites": int, "comments": int, "note": str, "recorded_at": str}
     automation: dict = Field(default_factory=dict)  # 预留，本期不用
+    scene_manifest: SceneManifest | None = None
+    publications: list[Publication] = Field(default_factory=list)
     events: list[ContentEvent] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
     def add_event(self, type: str, actor: str, detail: dict | None = None) -> None:
-        self.events.append(
-            ContentEvent(type=type, actor=actor, at=now_iso(), detail=detail or {})
-        )
+        self.events.append(ContentEvent(type=type, actor=actor, at=now_iso(), detail=detail or {}))
 
 
 def new_content_item(

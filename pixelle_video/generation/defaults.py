@@ -39,13 +39,13 @@ def build_default_pipeline_manifests() -> list[PipelineManifest]:
 def _codex_scene_video_manifest() -> PipelineManifest:
     return PipelineManifest(
         id="codex_scene_video",
-        name="Codex Scene Video",
+        name="Agent Scene Video",
         description=(
-            "Compose a user-confirmed Codex storyboard and Codex-generated images into a video."
+            "Compose a user-confirmed Agent storyboard and Agent-generated images into a video."
         ),
         category="agent",
         default_entry="scenes",
-        access_scope="codex",
+        access_scope="agent",
         required_capabilities=["tts", "ffmpeg", "persistence"],
         entries=[
             PipelineEntrySpec(

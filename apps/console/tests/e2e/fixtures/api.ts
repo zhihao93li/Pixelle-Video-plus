@@ -206,6 +206,8 @@ const contentItem = {
   },
   metrics: { likes: 128, favorites: 46, comments: 12 },
   automation: {},
+  scene_manifest: null,
+  publications: [],
   events: [
     {
       type: "created",
@@ -221,14 +223,17 @@ const contentItem = {
 const settings = {
   project_name: "Pixelle",
   llm: {
-    api_key: "test-api-key",
+    api_key: "",
+    api_key_configured: true,
     base_url: "https://api.example.invalid/v1",
     model: "pixelle-test-model",
   },
   comfyui: {
     comfyui_url: "http://127.0.0.1:8188",
-    comfyui_api_key: "test-comfyui-key",
-    runninghub_api_key: "test-runninghub-key",
+    comfyui_api_key: "",
+    comfyui_api_key_configured: true,
+    runninghub_api_key: "",
+    runninghub_api_key_configured: true,
     runninghub_concurrent_limit: 2,
     runninghub_instance_type: "standard",
     runninghub_timeout: 300,
@@ -236,6 +241,7 @@ const settings = {
       inference_mode: "local",
       fish_audio: {
         api_key: "",
+        api_key_configured: false,
         base_url: "https://example.invalid",
         model: "s1",
         reference_id: "",
@@ -244,14 +250,17 @@ const settings = {
   },
   publish: {
     buffer: {
-      api_key: "test-buffer-key",
+      api_key: "",
+      api_key_configured: true,
       channels: { youtube: "youtube-test-channel" },
     },
     cos: {
       region: "ap-shanghai",
       bucket: "pixelle-test",
-      secret_id: "test-secret-id",
-      secret_key: "test-secret-key",
+      secret_id: "",
+      secret_id_configured: true,
+      secret_key: "",
+      secret_key_configured: true,
       public_base_url: "https://cdn.example.invalid",
       endpoint_url: "https://cos.example.invalid",
     },

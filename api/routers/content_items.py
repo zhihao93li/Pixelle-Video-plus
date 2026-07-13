@@ -249,6 +249,21 @@ def _reconcile_production_state(item: ContentItem) -> ContentItem:
 
     statuses = {task.status for task in current_tasks}
     if statuses == {"completed"}:
+        incomplete = item.automation.pop("production_submission_incomplete", None)
+        if incomplete:
+            item.automation["production_failure"] = incomplete
+            prior_status = item.automation.pop("production_prior_status", "confirmed")
+            failure_status = (
+                prior_status if prior_status in {"confirmed", "produced"} else "confirmed"
+            )
+            _apply_reconciled_transition(
+                item,
+                failure_status,
+                "production_failed",
+                {"message": incomplete.get("message", "部分任务未能提交。")},
+            )
+            save_item(item)
+            return item
         _apply_reconciled_transition(
             item,
             "produced",
@@ -256,6 +271,7 @@ def _reconcile_production_state(item: ContentItem) -> ContentItem:
             {"task_ids": [task.task_id for task in current_tasks]},
         )
         item.automation.pop("production_failure", None)
+        item.automation.pop("production_prior_status", None)
         save_item(item)
     elif statuses.issubset({"completed", "failed", "cancelled", "interrupted"}) and any(
         status in {"failed", "cancelled", "interrupted"} for status in statuses
@@ -269,9 +285,11 @@ def _reconcile_production_state(item: ContentItem) -> ContentItem:
             "message": message,
             "task_ids": [task.task_id for task in current_tasks],
         }
+        prior_status = item.automation.pop("production_prior_status", "confirmed")
+        failure_status = prior_status if prior_status in {"confirmed", "produced"} else "confirmed"
         _apply_reconciled_transition(
             item,
-            "confirmed",
+            failure_status,
             "production_failed",
             {"message": message},
         )

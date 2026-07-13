@@ -72,7 +72,7 @@ RUN export UV_HTTP_TIMEOUT=300 && \
 
 # Copy rest of application code
 COPY api ./api
-COPY ops ./ops
+COPY agent_plugin ./agent_plugin
 COPY --from=console-builder /console/dist ./apps/console/dist
 COPY bgm ./bgm
 COPY templates ./templates

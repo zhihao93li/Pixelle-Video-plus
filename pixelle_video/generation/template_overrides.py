@@ -3,7 +3,7 @@
 模板级默认生成配置：三层配置模型的中间层（设置管接入，模板管默认，表单管这一次）。
 Overrides are stored as JSON at ``data/production-template-overrides.json`` and
 merged into each template's ``fixed_params`` when the registry is built, so
-every request (React, Ops, Codex) sees the same effective defaults.
+every request (React or Agent) sees the same effective defaults.
 
 Only whitelisted keys can be overridden, and only when the target template also
 allows them as user params — pipeline-level wiring (pipeline_id, entry,
