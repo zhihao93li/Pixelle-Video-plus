@@ -1,23 +1,14 @@
 import pytest
 
 from pixelle_video.generation.templates import (
-    ProductionTemplate,
     ProductionTemplateError,
     build_default_production_template_registry,
 )
 
 STANDARD_SKELETON = "pipeline_standard_base_v1"
+TOPIC_SKELETON = "pipeline_topic_to_video_base_v1"
 ASSET_SKELETON = "pipeline_asset_based_base_v1"
 CODEX_IMAGE_STORY = "codex_image_story_v1"
-
-RETIRED_TEMPLATES = [
-    "petwoods_xhs_daily_v1",
-    "petwoods_xhs_static_subtitle_v1",
-    "petwoods_xhs_topic_to_video_v1",
-    "petwoods_xhs_quality_explainer_v1",
-    "petwoods_xhs_asset_enhanced_v1",
-    "petwoods_xhs_real_material_montage_v1",
-]
 
 
 def test_standard_skeleton_compiles_to_existing_generation_request():
@@ -38,8 +29,7 @@ def test_standard_skeleton_compiles_to_existing_generation_request():
         metadata={"experiment_id": "exp-1"},
     )
 
-    assert request.pipeline_id == "standard"
-    assert request.entry == "script"
+    assert request.pipeline_id == "script_to_video"
     assert request.input == {"script": "Scene one.\nScene two."}
     assert request.params["title"] == "User title"
     assert request.params["bgm_volume"] == 0.12
@@ -52,8 +42,9 @@ def test_standard_skeleton_compiles_to_existing_generation_request():
     assert request.metadata["production_template"] == {
         "id": STANDARD_SKELETON,
         "version": "v1",
-        "name": "图文口播视频",
-        "quality_tier": "daily",
+            "name": "图文口播视频",
+            "pipeline_id": "script_to_video",
+            "quality_tier": "daily",
     }
 
 
@@ -71,7 +62,6 @@ def test_codex_image_story_is_codex_only_and_preserves_confirmed_scenes():
     template = registry.get(CODEX_IMAGE_STORY)
     assert template.access_scope == "agent"
     assert template.pipeline_id == "codex_scene_video"
-    assert template.entry == "scenes"
     assert "prompt_prefix" in template.allowed_user_params
 
     with pytest.raises(ProductionTemplateError, match="only available through an Agent"):
@@ -91,11 +81,21 @@ def test_codex_image_story_is_codex_only_and_preserves_confirmed_scenes():
     assert "media_workflow" not in request.params
 
 
-def test_legacy_codex_access_scope_is_normalized_to_agent():
-    template = build_default_production_template_registry().get(CODEX_IMAGE_STORY)
-    payload = template.model_dump(mode="json")
-    payload["access_scope"] = "codex"
-    assert ProductionTemplate.model_validate(payload).access_scope == "agent"
+def test_writing_and_scene_settings_belong_to_the_route_recipe():
+    registry = build_default_production_template_registry()
+    topic = registry.get(TOPIC_SKELETON)
+    script = registry.get(STANDARD_SKELETON)
+
+    assert topic.fixed_params["script_template_name"] == "Short Oral Script"
+    assert topic.fixed_params["split_template_name"] == "Copy-Safe Scene Split"
+    assert "script_template_name" in topic.allowed_user_params
+    assert "split_template_name" in topic.allowed_user_params
+    assert "script_template_name" not in script.allowed_user_params
+    assert script.fixed_params["split_template_name"] == "Copy-Safe Scene Split"
+    assert "n_scenes" not in topic.fixed_params
+    assert "n_scenes" not in script.fixed_params
+    assert "split_mode" not in topic.fixed_params
+    assert "split_mode" not in script.fixed_params
 
 
 def test_explicit_null_clears_an_inherited_per_run_setting():
@@ -123,10 +123,8 @@ def test_registry_default_is_standard_skeleton():
         registry.default_template_id(project="PetWoods", channel="xiaohongshu") == STANDARD_SKELETON
     )
     template = registry.get(STANDARD_SKELETON)
-    assert template.pipeline_id == "standard"
-    assert template.entry == "script"
+    assert template.pipeline_id == "script_to_video"
     assert template.enabled is True
-    assert template.migration_status == "ready"
 
 
 def test_standard_and_asset_skeletons_allow_compose_runtime_override():
@@ -144,16 +142,6 @@ def test_skeletons_fixed_params_have_no_brand_words():
         assert "petwoods" not in blob
         assert template.project is None
         assert template.channel is None
-
-
-def test_retired_templates_are_disabled_and_reject_compile():
-    registry = build_default_production_template_registry()
-    for template_id in RETIRED_TEMPLATES:
-        template = registry.get(template_id)  # 仍在注册表里（退役≠删除）
-        assert template.enabled is False
-        assert "退役" in template.migration_notes
-        with pytest.raises(ProductionTemplateError):
-            registry.compile_request(template_id, input={"script": "x"})
 
 
 def test_asset_skeleton_compiles_to_asset_based_request():
@@ -174,7 +162,6 @@ def test_asset_skeleton_compiles_to_asset_based_request():
     )
 
     assert request.pipeline_id == "asset_based"
-    assert request.entry == "assets"
     assert request.input["assets"][0] == "/footage/clip-1.mp4"
     assert request.params["compose_runtime"] == "html_ffmpeg"
     assert request.params["source"] == "runninghub"  # 固定，用户传的 selfhost 不通过
@@ -204,36 +191,14 @@ def test_standard_skeleton_requires_ffmpeg_capability():
         )
 
 
-def test_registry_lists_skeletons_before_retired_and_placeholders():
+def test_registry_lists_current_skeletons_in_stable_order():
     registry = build_default_production_template_registry()
     ids = [template.id for template in registry.list()]
 
-    assert ids[0] == STANDARD_SKELETON
-    assert ids[1] == CODEX_IMAGE_STORY
-    assert ids[2] == ASSET_SKELETON
-    for template_id in RETIRED_TEMPLATES:
-        assert template_id in ids  # 退役但保留
-        assert ids.index(template_id) < ids.index("pixelle_script_review_v1")
-    # 自定义模板会追加在内置占位模板之后，不能假设占位模板永远是列表最后一项。
-    assert "pixelle_script_review_v1" in ids
-
-
-def test_annotate_retired_marks_only_retired_generate_presets():
-    from pixelle_video.generation.templates import annotate_retired
-
-    registry = build_default_production_template_registry()
-    templates = registry.list()
-    annotate_retired(templates)
-    by_id = {template.id: template for template in templates}
-
-    for template_id in RETIRED_TEMPLATES:
-        assert by_id[template_id].retired is True
-    # 骨架、workflow 直跑不算退役
-    assert by_id[STANDARD_SKELETON].retired is False
-    assert by_id[ASSET_SKELETON].retired is False
-    assert by_id["pixelle_i2v_basic_v1"].retired is False
-    # 专用流程入口占位（enabled=False 但 product_entry != generate）不算退役
-    assert by_id["pixelle_script_review_v1"].retired is False
+    assert ids[0] == TOPIC_SKELETON
+    assert ids[1] == STANDARD_SKELETON
+    assert ids[2] == CODEX_IMAGE_STORY
+    assert ids[3] == ASSET_SKELETON
 
 
 def test_special_workflow_templates_compile_to_unified_generation_requests():
@@ -279,13 +244,3 @@ def test_special_workflow_templates_compile_to_unified_generation_requests():
     assert digital_request.pipeline_id == "digital_human"
     assert digital_request.params["mode"] == "digital"
     assert digital_request.params["tts_voice"] == "fish-ref"
-
-
-def test_dedicated_workflow_templates_do_not_compile_through_generic_task_entry():
-    registry = build_default_production_template_registry()
-
-    with pytest.raises(ProductionTemplateError):
-        registry.compile_request(
-            "pixelle_script_review_v1",
-            input={"topic": "Cat hydration"},
-        )

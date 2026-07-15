@@ -14,10 +14,13 @@ const INPUT_LABELS: Record<string, string> = {
 }
 
 const LINE_LABELS: Record<string, string> = {
-  standard: "图文口播",
+  topic_to_video: "主题口播",
+  script_to_video: "文案口播",
   codex_scene_video: "Agent 配图合成",
   asset_based: "素材成片",
   image_post: "图文帖",
+  topic_to_image_post: "主题图文",
+  topic_to_long_form: "主题长文",
   long_form: "长文",
   i2v: "专用视频",
   action_transfer: "专用视频",
@@ -29,20 +32,22 @@ const PIPELINE_DESCRIPTIONS: Record<string, string> = {
     "Agent 规划分镜并生成图片，Pixelle 完成配音、字幕和视频合成。",
   asset_based: "上传图片或视频素材，整理成带字幕与配音的完整短片。",
   image_post: "把文案排成封面和多页配图，生成可直接发布的图集。",
+  topic_to_image_post: "从主题生成适合图文媒介的文案，确认文案和分页后生成图集。",
+  topic_to_long_form: "从主题直接生成结构化长文，产出后在作品库检查。",
   long_form: "把确认稿扩写成结构化长文，适合公众号、知乎和长图文。",
   i2v: "上传一张图片并描述运动方式，生成一段动态视频。",
   action_transfer: "上传参考动作视频和目标人物图，生成动作迁移视频。",
   digital_human: "上传角色形象，再使用文案或商品素材生成数字人口播。",
 }
 
-/** 精确保留配方身份的生产入口；专用生成页同样携带 template id。 */
+/** 精确保留模板身份的生产入口；专用生成页同样携带 template id。 */
 export function productionStartRoute(template: ProductionTemplate) {
-  if (template.product_entry === "script_review") {
-    return "/create/script-review"
-  }
-  if (template.product_entry !== "generate") {
-    return `/create/special/${template.product_entry}/${template.id}`
-  }
+  if (template.pipeline_id === "i2v")
+    return `/create/special/image_to_video/${template.id}`
+  if (template.pipeline_id === "action_transfer")
+    return `/create/special/action_transfer/${template.id}`
+  if (template.pipeline_id === "digital_human")
+    return `/create/special/digital_human/${template.id}`
   return `/create/generate/${template.id}`
 }
 
@@ -83,17 +88,13 @@ export function productionLineSummary(template: ProductionTemplate) {
 }
 
 export function productionSubmissionSummary(template: ProductionTemplate) {
-  if (template.access_scope === "agent" || template.access_scope === "codex") {
+  if (template.access_scope === "agent") {
     return "仅 Agent 发起"
-  }
-  if (template.product_entry === "script_review") {
-    return "审核后批量"
   }
   if (template.pipeline_id === "i2v") {
     return "单条或图片批量"
   }
   const supportsScriptBatch =
-    template.product_entry === "generate" &&
     template.input_requirements.includes("script") &&
     !template.requires_user_assets &&
     !template.input_requirements.includes("assets") &&

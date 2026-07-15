@@ -5,19 +5,10 @@ type ImportMetaWithEnv = ImportMeta & {
 }
 
 export const API_BASE_URL =
-  (import.meta as ImportMetaWithEnv).env?.VITE_PIXELLE_API_BASE_URL ??
-  "/api"
+  (import.meta as ImportMetaWithEnv).env?.VITE_PIXELLE_API_BASE_URL ?? "/api"
 
 export type GenerationStatus =
   "pending" | "running" | "completed" | "failed" | "cancelled" | "interrupted"
-
-export type DraftingSpec = {
-  script_template_name: string
-  split_template_name: string
-  script_model: string
-  split_model: string
-  language_script_models: Record<string, string>
-}
 
 export type ProductionTemplate = {
   id: string
@@ -36,38 +27,25 @@ export type ProductionTemplate = {
   input_requirements: string[]
   quality_tier: string
   pipeline_id: string
-  entry: string
-  drafting: DraftingSpec
   fixed_params: Record<string, unknown>
   required_capabilities: string[]
   user_selectable_runtime: boolean
   user_selectable_providers: string[]
   enabled: boolean
-  /** 代码层退役标记：已退役的内置预设（只读、不可复活、归入「已退役」分组）。 */
-  retired: boolean
-  migration_status: "ready" | "partial" | "legacy_only" | "planned"
-  product_entry: string
-  streamlit_source: string | null
-  migration_notes: string
   allowed_user_params: string[]
   passthrough_input_fields: string[]
   is_custom?: boolean
-  access_scope?: "public" | "agent" | "codex"
+  access_scope?: "public" | "agent"
 }
 
 export type TemplateListResponse = {
   default_template: string | null
   templates: ProductionTemplate[]
   agent_templates?: ProductionTemplate[]
-  /** @deprecated Transitional server alias. */
-  codex_templates?: ProductionTemplate[]
 }
 
 export function templatesForManagement(response: TemplateListResponse) {
-  return [
-    ...response.templates,
-    ...(response.agent_templates ?? response.codex_templates ?? []),
-  ]
+  return [...response.templates, ...(response.agent_templates ?? [])]
 }
 
 export type GenerationProgress = {
@@ -89,8 +67,12 @@ export type GenerationError = {
 export type GenerationTask = {
   task_id: string
   pipeline_id: string
-  entry: string
   status: GenerationStatus
+  request?: {
+    input: Record<string, unknown>
+    params: Record<string, unknown>
+    metadata: Record<string, unknown>
+  }
   progress: GenerationProgress
   error: GenerationError | null
   created_at: string
@@ -109,9 +91,8 @@ export type GenerationArtifact = {
 export type GenerationResult = {
   task_id: string
   pipeline_id: string
-  entry: string
   status: "completed"
-  // 产物形态：video（默认）/ image_set（图文帖图集）/ text（长文）。旧数据无此字段 → 按 video 处理
+  // 产物形态：video（默认）/ image_set（图文帖图集）/ text（长文）。
   artifact_type?: "video" | "image_set" | "text"
   artifacts: GenerationArtifact[]
   // 图集产物没有主视频；读取前先判 artifact_type / 判空
@@ -122,143 +103,191 @@ export type GenerationResult = {
   metadata: Record<string, unknown>
 }
 
-export type GenerationBatchItem = {
-  index: number
-  input: Record<string, unknown>
-  params: Record<string, unknown>
-  metadata: Record<string, unknown>
-  task_id: string | null
-  status: string
-  progress: GenerationProgress | null
+export type PipelineInputField = {
+  name: string
+  field_type: string
+  description: string
+  default: unknown
+}
+
+export type PipelineStage = {
+  id: string
+  name: string
+  description: string
+  setting_keys: string[]
+  actor: "system" | "user" | "agent"
+}
+
+export type PipelineOutput = {
+  kind: string
+  role: string
+  description: string
+  required: boolean
+}
+
+export type PipelineManifest = {
+  id: string
+  name: string
+  description: string
+  category: string
+  product_family: string
+  input: {
+    description: string
+    required_fields: PipelineInputField[]
+    optional_fields: PipelineInputField[]
+  }
+  stages: PipelineStage[]
+  quick_setting_keys: string[]
+  outputs: PipelineOutput[]
+  required_capabilities: string[]
+  access_scope: "public" | "agent"
+  launch_surfaces: Array<"react" | "agent" | "batch">
+}
+
+export type PipelineListResponse = {
+  default_pipeline: string | null
+  pipelines: PipelineManifest[]
+}
+
+export type ProductionTaskState =
+  "needs_user" | "in_progress" | "failed" | "produced" | "cancelled"
+
+export type ProductionTask = {
+  production_task_id: string
+  content_item_id: string
+  project_id: string
+  pipeline_id: string
+  recipe_id: string
+  recipe_version: string
+  title: string
+  artifact_type: "video" | "image_set" | "text" | "audio"
+  source: "react" | "agent" | "batch"
+  actor: "user" | "system" | "agent"
+  client_name: string | null
+  agent_session_id: string | null
+  batch_id: string | null
+  state: ProductionTaskState
+  stage_id: string
+  stage_label: string
+  next_actor: "user" | "system" | "agent"
+  progress_current: number | null
+  progress_total: number | null
+  progress_percentage: number | null
+  action_type: string | null
+  action_label: string | null
+  input_snapshot: Record<string, unknown>
+  confirmed_version_refs: Record<string, string>
+  effective_params: Record<string, unknown>
+  request_id: string
+  request_hash: string
+  operation_ids: string[]
+  generation_task_ids: string[]
+  artifact_ids: string[]
+  provider_job_ids: string[]
+  attempts: Array<{
+    generation_task_id: string
+    run_id: string
+    status: string
+    stage: string
+    error: GenerationError | null
+    required_artifacts_ok: boolean | null
+    artifact_ids: string[]
+    provider_job_ids: string[]
+    created_at: string
+    updated_at: string
+  }>
+  created_at: string
+  updated_at: string
+  state_since: string
+  waiting_since: string | null
+  failed_at: string | null
+  produced_at: string | null
+  cancelled_at: string | null
+  cancellation_request_id: string | null
   error: GenerationError | null
 }
 
-export type GenerationBatch = {
-  batch_id: string
-  template_id: string
-  status: string
-  total_count: number
-  submitted_count: number
-  failed_count: number
+export type ProductionTaskCreateResponse = {
+  production_task_id: string
+  content_item_id: string
+  state: ProductionTaskState
+  created: boolean
+  task: ProductionTask
+}
+
+export type WorkbenchTaskCard = {
+  production_task_id: string
+  content_item_id: string
+  project_id: string
+  project_name: string
+  state: ProductionTaskState
+  title: string
+  pipeline_id: string
+  recipe_id: string
+  artifact_type: string
+  source: string
+  stage: { id: string; label: string }
+  progress: {
+    current: number | null
+    total: number | null
+    percentage: number | null
+  } | null
+  next_actor: "user" | "system" | "agent"
+  action: { type: string; label: string } | null
+  error: { layer: string; code?: string | null; message: string } | null
   created_at: string
   updated_at: string
-  metadata: Record<string, unknown>
-  items: GenerationBatchItem[]
+  state_since: string
+  waiting_since: string | null
+  failed_at: string | null
+  produced_at: string | null
 }
 
-export type GenerationBatchListResponse = {
-  batches: GenerationBatch[]
+export type WorkbenchTaskListResponse = {
+  items: WorkbenchTaskCard[]
+  counts: Record<ProductionTaskState, number>
+  next_cursor: string | null
 }
 
-export type GenerationBatchCreateInput = {
-  templateId: string
-  items: Array<{
-    input: Record<string, unknown>
-    metadata?: Record<string, unknown>
-    idempotencyKey?: string
-  }>
-  metadata?: Record<string, unknown>
-  idempotencyKey?: string
-  projectId?: string
-}
-
-export type ScriptReviewPromptTemplate = {
+export type PromptTemplate = {
   name: string
   content: string
   source: string
 }
 
-export type ScriptReviewTemplateListResponse = {
+export type PromptTemplateListResponse = {
   default_languages: string[]
-  script_templates: ScriptReviewPromptTemplate[]
-  split_templates: ScriptReviewPromptTemplate[]
+  script_templates: PromptTemplate[]
+  split_templates: PromptTemplate[]
 }
 
-export type ScriptReviewLanguageDraft = {
-  title: string
-  script: string
-  narrations: string[]
+export type PromptTemplateKind = "script" | "split"
+
+export type PromptTemplateWriteInput = {
+  kind: PromptTemplateKind
+  name: string
+  content: string
+  new_name?: string
 }
 
-export type ScriptReviewDraft = {
-  index?: number
-  topic: string
-  title?: string
-  language_drafts?: Record<string, ScriptReviewLanguageDraft>
-  selected_languages?: string[]
-  selected_for_generation?: boolean
-  script_model?: string
-  split_model?: string
-  workflow_mode?: string
-  [key: string]: unknown
+export type PromptTemplateWriteResponse = {
+  kind: PromptTemplateKind
+  name: string
+  source: string
 }
 
-/** 草稿集溯源字段（读取时收窄；其余字段仍为 unknown）。 */
-export type DraftSetSettings = {
-  production_template_id?: string
-  production_template_name?: string
-  script_model?: string
-  script_template_name?: string
-  project_id?: string
+export type LlmModelProvider = {
+  id: string
+  label: string
+  provider_type: string
+  configured: boolean
+  error?: string | null
+  models: Array<{ id: string; label: string }>
 }
 
-export type ScriptReviewDraftSet = {
-  draft_set_id: string
-  status: string
-  created_at: string
-  updated_at: string
-  topics: string[]
-  languages: string[]
-  metadata: Record<string, unknown>
-  draft_settings: Record<string, unknown>
-  drafts: ScriptReviewDraft[]
-  errors: Array<Record<string, unknown>>
-  submissions: Array<Record<string, unknown>>
-}
-
-export type ScriptReviewDraftSetListResponse = {
-  draft_sets: ScriptReviewDraftSet[]
-}
-
-export type ScriptReviewCreateInput = {
-  topics: string[]
-  languages: string[]
-  projectId?: string
-  templateId?: string
-  scriptTemplateName?: string
-  splitTemplateName?: string
-  scriptModel?: string
-  splitModel?: string
-  languageScriptTemplates?: Record<string, string>
-  languageScriptModels?: Record<string, string>
-  metadata?: Record<string, unknown>
-  idempotencyKey?: string
-}
-
-export type ScriptReviewUpdateInput = {
-  drafts: ScriptReviewDraft[]
-  metadata?: Record<string, unknown>
-}
-
-export type ScriptReviewSubmitInput = {
-  drafts?: ScriptReviewDraft[]
-  templateId?: string
-  baseParams?: Record<string, unknown>
-  languageTtsOverrides?: Record<string, Record<string, unknown>>
-  metadata?: Record<string, unknown>
-  idempotencyKey?: string
-}
-
-export type ScriptReviewSubmitResponse = {
-  draft_set: ScriptReviewDraftSet
-  batch: GenerationBatch
-}
-
-export type GenerationSubmitResponse = {
-  success: boolean
-  message: string
-  generation_task_id: string
-  task: GenerationTask
+export type LlmModelCatalogResponse = {
+  configured: boolean
+  providers: LlmModelProvider[]
 }
 
 export type UploadedGenerationAsset = {
@@ -444,6 +473,8 @@ export type AppSettingsConfig = {
     clear_api_key?: boolean
     base_url: string
     model: string
+    default_provider_id?: string
+    providers?: Record<string, LlmProviderConfig>
   }
   comfyui: {
     comfyui_url: string
@@ -491,6 +522,22 @@ export type AppSettingsConfig = {
     }
   }
   [key: string]: unknown
+}
+
+export type LlmProviderConfig = {
+  name: string
+  provider_type:
+    | "aihubmix"
+    | "openai"
+    | "aliyun_bailian"
+    | "volcengine_ark"
+    | "custom_openai"
+  enabled: boolean
+  api_key: string
+  api_key_configured?: boolean
+  clear_api_key?: boolean
+  base_url: string
+  default_model: string
 }
 
 export type SettingsConfigResponse = {
@@ -666,6 +713,92 @@ export async function listTemplates(projectId?: string) {
   return fetchJson<TemplateListResponse>(`/generation/templates${query}`)
 }
 
+export async function listPipelines() {
+  return fetchJson<PipelineListResponse>("/generation/pipelines")
+}
+
+export async function createProductionTask(input: {
+  projectId: string
+  pipelineId: string
+  recipeId: string
+  payload: Record<string, unknown>
+  overrides?: Record<string, unknown>
+  contentItemId?: string
+  source?: "react"
+  requestId?: string
+}) {
+  return fetchJson<ProductionTaskCreateResponse>("/production-tasks", {
+    method: "POST",
+    body: JSON.stringify({
+      request_id: input.requestId ?? newContentRequestId("production"),
+      project_id: input.projectId,
+      pipeline_id: input.pipelineId,
+      recipe_id: input.recipeId,
+      input: input.payload,
+      overrides: input.overrides ?? {},
+      content_item_id: input.contentItemId ?? null,
+      source: input.source ?? "react",
+      client_name: "react-console",
+    }),
+  })
+}
+
+export async function getProductionTask(taskId: string) {
+  return fetchJson<ProductionTask>(`/production-tasks/${taskId}`)
+}
+
+export async function cancelProductionTask(taskId: string) {
+  const requestId = newContentRequestId("cancel")
+  return fetchJson<ProductionTask>(
+    `/production-tasks/${taskId}?request_id=${encodeURIComponent(requestId)}`,
+    {
+      method: "DELETE",
+    }
+  )
+}
+
+export async function retryProductionTask(taskId: string, requestId?: string) {
+  return fetchJson<ProductionTask>(`/production-tasks/${taskId}/retry`, {
+    method: "POST",
+    body: JSON.stringify({
+      request_id: requestId ?? newContentRequestId("retry"),
+      client_name: "react-console",
+      source: "react",
+    }),
+  })
+}
+
+export async function listWorkbenchTasks(params?: {
+  state?: ProductionTaskState
+  projectId?: string
+  pipelineId?: string
+  recipeId?: string
+  artifactType?: string
+  source?: string
+  createdFrom?: string
+  createdTo?: string
+  includeArchived?: boolean
+  cursor?: string
+  limit?: number
+}) {
+  const search = new URLSearchParams()
+  if (params?.state) search.set("state", params.state)
+  if (params?.projectId) search.set("project_id", params.projectId)
+  if (params?.pipelineId) search.set("pipeline_id", params.pipelineId)
+  if (params?.recipeId) search.set("recipe_id", params.recipeId)
+  if (params?.artifactType) search.set("artifact_type", params.artifactType)
+  if (params?.source) search.set("source", params.source)
+  if (params?.createdFrom) search.set("created_from", params.createdFrom)
+  if (params?.createdTo) search.set("created_to", params.createdTo)
+  if (params?.includeArchived) search.set("include_archived", "true")
+  if (params?.cursor) search.set("cursor", params.cursor)
+  if (params?.limit != null) search.set("limit", String(params.limit))
+  const query = search.toString()
+  return fetchJson<WorkbenchTaskListResponse>(
+    `/production-tasks${query ? `?${query}` : ""}`
+  )
+}
+
 export type TemplateGenerationConfig = {
   template_id: string
   overridable_keys: string[]
@@ -690,35 +823,6 @@ export async function updateTemplateGenerationConfig(
       method: "PUT",
       body: JSON.stringify({ overrides }),
     }
-  )
-}
-
-export type TemplateDraftingConfig = {
-  template_id: string
-  drafting: DraftingSpec
-  is_overridden: boolean
-}
-
-export async function getTemplateDraftingConfig(templateId: string) {
-  return fetchJson<TemplateDraftingConfig>(
-    `/generation/templates/${templateId}/drafting-config`
-  )
-}
-
-export async function updateTemplateDraftingConfig(
-  templateId: string,
-  drafting: DraftingSpec
-) {
-  return fetchJson<TemplateDraftingConfig>(
-    `/generation/templates/${templateId}/drafting-config`,
-    { method: "PUT", body: JSON.stringify({ drafting }) }
-  )
-}
-
-export async function resetTemplateDraftingConfig(templateId: string) {
-  return fetchJson<TemplateDraftingConfig>(
-    `/generation/templates/${templateId}/drafting-config`,
-    { method: "DELETE" }
   )
 }
 
@@ -765,149 +869,82 @@ export async function setTemplateEnabled(templateId: string, enabled: boolean) {
 
 export async function createGenerationTemplateTask(
   templateId: string,
+  pipelineId: string,
   input: Record<string, unknown>,
-  metadata: Record<string, unknown> = { source: "react_production_studio" },
-  projectId?: string
+  projectId: string,
+  overrides: Record<string, unknown> = {}
 ) {
-  return fetchJson<GenerationSubmitResponse>(
-    `/generation/templates/${templateId}/tasks`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        input,
-        metadata: projectId ? { ...metadata, project_id: projectId } : metadata,
-      }),
-    }
-  )
+  return createProductionTask({
+    projectId,
+    pipelineId,
+    recipeId: templateId,
+    payload: input,
+    requestId: newContentRequestId("production"),
+    source: "react",
+    overrides,
+  })
 }
 
-export async function createDailyVideoTask(templateId: string, script: string) {
-  return createGenerationTemplateTask(
-    templateId,
-    { script },
-    { source: "react_production_studio" }
-  )
+export async function listPromptTemplates() {
+  return fetchJson<PromptTemplateListResponse>("/drafting/prompt-templates")
 }
 
-export async function createGenerationBatch(input: GenerationBatchCreateInput) {
-  const metadata = input.projectId
-    ? { ...(input.metadata ?? {}), project_id: input.projectId }
-    : (input.metadata ?? {})
-  return fetchJson<GenerationBatch>("/generation/batches", {
+export async function createPromptTemplate(input: PromptTemplateWriteInput) {
+  return fetchJson<PromptTemplateWriteResponse>("/drafting/prompt-templates", {
     method: "POST",
-    body: JSON.stringify({
-      template_id: input.templateId,
-      items: input.items.map((item) => ({
-        input: item.input,
-        metadata: item.metadata ?? {},
-        idempotency_key: item.idempotencyKey ?? null,
-      })),
-      metadata,
-      idempotency_key: input.idempotencyKey ?? null,
-    }),
+    body: JSON.stringify(input),
   })
 }
 
-export async function getGenerationBatch(batchId: string) {
-  return fetchJson<GenerationBatch>(`/generation/batches/${batchId}`)
-}
-
-export async function cancelGenerationBatch(batchId: string) {
-  return fetchJson<GenerationBatch>(`/generation/batches/${batchId}`, {
-    method: "DELETE",
+export async function updatePromptTemplate(input: PromptTemplateWriteInput) {
+  return fetchJson<PromptTemplateWriteResponse>("/drafting/prompt-templates", {
+    method: "PUT",
+    body: JSON.stringify(input),
   })
 }
 
-export async function retryGenerationBatchItem(
-  batchId: string,
-  itemIndex: number
+export async function deletePromptTemplate(
+  kind: PromptTemplateKind,
+  name: string
 ) {
-  return fetchJson<GenerationBatch>(
-    `/generation/batches/${batchId}/items/${itemIndex}/retry`,
-    { method: "POST" }
+  const query = new URLSearchParams({ kind, name })
+  return fetchJson<{ deleted: boolean }>(
+    `/drafting/prompt-templates?${query.toString()}`,
+    { method: "DELETE" }
   )
 }
 
-export async function listGenerationBatches() {
-  return fetchJson<GenerationBatchListResponse>("/generation/batches")
+export async function getLlmModelCatalog() {
+  return fetchJson<LlmModelCatalogResponse>("/settings/llm/model-catalog")
 }
 
-export async function listScriptReviewTemplates() {
-  return fetchJson<ScriptReviewTemplateListResponse>(
-    "/generation/script-review/templates"
-  )
-}
-
-export async function createScriptReviewDraftSet(
-  input: ScriptReviewCreateInput
+export async function updateLlmProvider(
+  providerId: string,
+  provider: LlmProviderConfig
 ) {
-  return fetchJson<ScriptReviewDraftSet>(
-    "/generation/script-review/draft-sets",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        topics: input.topics,
-        languages: input.languages,
-        project_id: input.projectId ?? null,
-        template_id: input.templateId ?? null,
-        script_template_name: input.scriptTemplateName || null,
-        split_template_name: input.splitTemplateName || null,
-        script_model: input.scriptModel || null,
-        split_model: input.splitModel || null,
-        language_script_templates: input.languageScriptTemplates ?? {},
-        language_script_models: input.languageScriptModels ?? {},
-        metadata: input.metadata ?? {},
-        idempotency_key: input.idempotencyKey ?? null,
-      }),
-    }
-  )
-}
-
-export async function listScriptReviewDraftSets(projectId?: string) {
-  const query = projectId ? `?project=${encodeURIComponent(projectId)}` : ""
-  return fetchJson<ScriptReviewDraftSetListResponse>(
-    `/generation/script-review/draft-sets${query}`
-  )
-}
-
-export async function getScriptReviewDraftSet(draftSetId: string) {
-  return fetchJson<ScriptReviewDraftSet>(
-    `/generation/script-review/draft-sets/${draftSetId}`
-  )
-}
-
-export async function updateScriptReviewDraftSet(
-  draftSetId: string,
-  input: ScriptReviewUpdateInput
-) {
-  return fetchJson<ScriptReviewDraftSet>(
-    `/generation/script-review/draft-sets/${draftSetId}`,
+  return fetchJson<SettingsConfigResponse>(
+    `/settings/llm/providers/${providerId}`,
     {
       method: "PUT",
-      body: JSON.stringify({
-        drafts: input.drafts,
-        metadata: input.metadata ?? {},
-      }),
+      body: JSON.stringify(provider),
     }
   )
 }
 
-export async function submitScriptReviewDraftSetTasks(
-  draftSetId: string,
-  input: ScriptReviewSubmitInput
-) {
-  return fetchJson<ScriptReviewSubmitResponse>(
-    `/generation/script-review/draft-sets/${draftSetId}/tasks`,
+export async function deleteLlmProvider(providerId: string) {
+  return fetchJson<SettingsConfigResponse>(
+    `/settings/llm/providers/${providerId}`,
     {
-      method: "POST",
-      body: JSON.stringify({
-        drafts: input.drafts ?? null,
-        template_id: input.templateId ?? null,
-        base_params: input.baseParams ?? {},
-        language_tts_overrides: input.languageTtsOverrides ?? {},
-        metadata: input.metadata ?? {},
-        idempotency_key: input.idempotencyKey ?? null,
-      }),
+      method: "DELETE",
+    }
+  )
+}
+
+export async function setDefaultLlmProvider(providerId: string) {
+  return fetchJson<SettingsConfigResponse>(
+    `/settings/llm/default-provider/${providerId}`,
+    {
+      method: "PUT",
     }
   )
 }
@@ -934,8 +971,6 @@ export type ContentEvent = {
 }
 
 export type ContentItemLinks = {
-  draft_set_id?: string | null
-  draft_index?: number
   task_ids?: string[]
   batch_ids?: string[]
   publish_record_ids?: string[]
@@ -961,6 +996,7 @@ export type SceneDraft = {
 }
 
 export type SceneManifest = {
+  review_kind: "video_scenes" | "agent_image_scenes" | "image_pages"
   scenes: SceneDraft[]
   confirmed: boolean
   updated_at: string
@@ -1025,11 +1061,8 @@ export type PatchContentItemInput = {
   assetPaths?: string[]
   metrics?: Record<string, unknown>
   links?: Record<string, unknown>
-}
-
-export type ImportExistingResponse = {
-  created: number
-  skipped: number
+  sceneManifest?: SceneManifest
+  contentVersion?: string
 }
 
 export async function listContentItems(params?: {
@@ -1082,7 +1115,7 @@ export function newContentRequestId(prefix = "react") {
 export async function createContentTopics(input: {
   titles: string[]
   languages?: string[]
-  projectId?: string
+  projectId: string
   source?: "manual" | "derived"
   requestId?: string
 }) {
@@ -1091,7 +1124,7 @@ export async function createContentTopics(input: {
     body: JSON.stringify({
       titles: input.titles,
       languages: input.languages ?? null,
-      project_id: input.projectId ?? null,
+      project_id: input.projectId,
       content_source: input.source ?? "manual",
       request_id: input.requestId ?? newContentRequestId("topics"),
       client_name: "react-console",
@@ -1102,12 +1135,12 @@ export async function createContentTopics(input: {
 
 export async function startContentDraft(
   itemId: string,
-  input: { templateId?: string; requestId?: string } = {}
+  input: { recipeId: string; requestId?: string }
 ) {
   return fetchJson<ContentFlowOperation>(`/content-items/${itemId}/draft`, {
     method: "POST",
     body: JSON.stringify({
-      template_id: input.templateId ?? null,
+      recipe_id: input.recipeId,
       request_id: input.requestId ?? newContentRequestId("draft"),
       client_name: "react-console",
       source: "react",
@@ -1133,6 +1166,36 @@ export async function confirmContentItem(
       variants: variants ?? null,
     }),
   })
+}
+
+export async function reviseContentReview(input: {
+  itemId: string
+  action:
+    "direct_edit" | "rewrite_script" | "regenerate_selected" | "regenerate_all"
+  contentVersion: string
+  selectedSceneIds?: string[]
+  instruction?: string
+  variants?: Record<string, ContentVariant>
+  sceneManifest?: SceneManifest
+  requestId?: string
+}) {
+  return fetchJson<ContentItem>(
+    `/content-items/${encodeURIComponent(input.itemId)}/revise-review`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        action: input.action,
+        content_version: input.contentVersion,
+        selected_scene_ids: input.selectedSceneIds ?? [],
+        instruction: input.instruction?.trim() || null,
+        variants: input.variants ?? null,
+        scene_manifest: input.sceneManifest ?? null,
+        request_id: input.requestId ?? newContentRequestId("revise-review"),
+        client_name: "react-console",
+        source: "react",
+      }),
+    }
+  )
 }
 
 export type ContentProduceResponse = {
@@ -1232,6 +1295,8 @@ export async function patchContentItem(
       asset_paths: input.assetPaths ?? null,
       metrics: input.metrics ?? null,
       links: input.links ?? null,
+      scene_manifest: input.sceneManifest ?? null,
+      content_version: input.contentVersion ?? null,
     }),
   })
 }
@@ -1245,19 +1310,6 @@ export async function transitionContentItem(
   return fetchJson<ContentItem>(`/content-items/${itemId}/transition`, {
     method: "POST",
     body: JSON.stringify({ to, actor, detail }),
-  })
-}
-
-export async function deleteContentItem(itemId: string) {
-  return fetchJson<{ deleted: boolean; item_id: string }>(
-    `/content-items/${itemId}`,
-    { method: "DELETE" }
-  )
-}
-
-export async function importExistingContentItems() {
-  return fetchJson<ImportExistingResponse>("/content-items/import-existing", {
-    method: "POST",
   })
 }
 
@@ -1680,44 +1732,6 @@ function outputRelativePath(path: string) {
   }
 
   return null
-}
-
-// ---------------------------------------------------------------------------
-// Prompt 模板自助管理
-// ---------------------------------------------------------------------------
-
-export type PromptTemplateWriteInput = {
-  kind: "script" | "split"
-  name: string
-  content: string
-}
-
-export async function createPromptTemplate(input: PromptTemplateWriteInput) {
-  return fetchJson<{ kind: string; name: string }>(
-    "/drafting/prompt-templates",
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    }
-  )
-}
-
-export async function updatePromptTemplate(input: PromptTemplateWriteInput) {
-  return fetchJson<{ kind: string; name: string }>(
-    "/drafting/prompt-templates",
-    {
-      method: "PUT",
-      body: JSON.stringify(input),
-    }
-  )
-}
-
-export async function deletePromptTemplate(kind: string, name: string) {
-  const search = new URLSearchParams({ kind, name })
-  return fetchJson<{ deleted: boolean }>(
-    `/drafting/prompt-templates?${search.toString()}`,
-    { method: "DELETE" }
-  )
 }
 
 // ---------------------------------------------------------------------------

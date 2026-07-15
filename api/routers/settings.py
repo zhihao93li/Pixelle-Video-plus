@@ -1,8 +1,7 @@
 """
 Application settings API.
 
-This exposes the same config_manager-backed settings currently edited by the
-Streamlit Settings page.
+This exposes config-manager-backed settings to the React console.
 """
 
 import shutil
@@ -16,6 +15,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from api.dependencies import ConfigManagerDep
 from pixelle_video.config.schema import PixelleVideoConfig
+from pixelle_video.generation.templates import build_default_production_template_registry
 from pixelle_video.services.buffer_publisher import BufferPublisher, BufferPublishError
 from pixelle_video.services.image_providers import (
     ImageGenerationRequest,
@@ -42,6 +42,41 @@ class LlmConnectionRequest(BaseModel):
 
 class LlmModelListResponse(BaseModel):
     models: list[str]
+
+
+class LlmModelOption(BaseModel):
+    id: str
+    label: str
+
+
+class LlmProviderOption(BaseModel):
+    id: str
+    label: str
+    provider_type: str
+    configured: bool
+    error: str | None = None
+    models: list[LlmModelOption]
+
+
+class LlmModelCatalogResponse(BaseModel):
+    configured: bool
+    providers: list[LlmProviderOption]
+
+
+class LlmProviderUpdateRequest(BaseModel):
+    name: str
+    provider_type: Literal[
+        "aihubmix",
+        "openai",
+        "aliyun_bailian",
+        "volcengine_ark",
+        "custom_openai",
+    ]
+    enabled: bool = True
+    api_key: str = ""
+    clear_api_key: bool = False
+    base_url: str
+    default_model: str = ""
 
 
 class LlmConnectionResponse(BaseModel):
@@ -235,6 +270,112 @@ async def list_llm_models(request: LlmConnectionRequest, config_manager: ConfigM
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return LlmModelListResponse(models=models)
+
+
+@router.get("/llm/model-catalog", response_model=LlmModelCatalogResponse)
+async def get_llm_model_catalog(config_manager: ConfigManagerDep):
+    """Read models from each real configured LLM connection."""
+    providers: list[LlmProviderOption] = []
+    for provider_id, provider in config_manager.config.llm.providers.items():
+        configured = bool(provider.api_key.strip() and provider.base_url.strip())
+        models: list[str] = []
+        error: str | None = None
+        if provider.enabled and configured:
+            try:
+                models = await run_in_threadpool(
+                    fetch_available_models,
+                    provider.api_key,
+                    provider.base_url,
+                )
+            except Exception as exc:
+                error = str(exc)
+        providers.append(
+            LlmProviderOption(
+                id=provider_id,
+                label=provider.name or provider_id,
+                provider_type=provider.provider_type,
+                configured=configured,
+                error=error,
+                models=[
+                    LlmModelOption(id=model, label=model)
+                    for model in sorted(set(models), key=str.lower)
+                ],
+            )
+        )
+    return LlmModelCatalogResponse(
+        configured=any(provider.configured for provider in providers),
+        providers=providers,
+    )
+
+
+@router.put("/llm/providers/{provider_id}")
+async def update_llm_provider(
+    provider_id: str,
+    request: LlmProviderUpdateRequest,
+    config_manager: ConfigManagerDep,
+):
+    if not provider_id or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for character in provider_id):
+        raise HTTPException(status_code=400, detail="LLM 服务 ID 只能包含小写字母、数字、- 和 _。")
+    current = config_manager.config.to_dict()
+    llm = current.setdefault("llm", {})
+    providers = llm.setdefault("providers", {})
+    existing = dict(providers.get(provider_id) or {})
+    incoming = request.model_dump(exclude={"clear_api_key"})
+    api_key = incoming.pop("api_key", "").strip()
+    if request.clear_api_key:
+        existing["api_key"] = ""
+    elif api_key:
+        existing["api_key"] = api_key
+    existing.update(incoming)
+    providers[provider_id] = existing
+    if not llm.get("default_provider_id"):
+        llm["default_provider_id"] = provider_id
+    config_manager.config = PixelleVideoConfig(**current)
+    config_manager.save()
+    return _settings_payload(config_manager)
+
+
+@router.delete("/llm/providers/{provider_id}")
+async def delete_llm_provider(provider_id: str, config_manager: ConfigManagerDep):
+    current = config_manager.config.to_dict()
+    llm = current.setdefault("llm", {})
+    providers = llm.setdefault("providers", {})
+    if provider_id not in providers:
+        raise HTTPException(status_code=404, detail="LLM 服务不存在。")
+    for recipe in build_default_production_template_registry().list():
+        params = recipe.fixed_params
+        language_services = {
+            str(selection.get("provider_id") or "")
+            for selection in (params.get("language_script_models") or {}).values()
+            if isinstance(selection, dict)
+        }
+        if provider_id in {
+            params.get("script_provider_id"),
+            params.get("split_provider_id"),
+            params.get("llm_provider_id"),
+            *language_services,
+        }:
+            raise HTTPException(
+                status_code=400,
+                detail=f"LLM 服务正被模板「{recipe.display_name}」使用，请先调整该模板。",
+            )
+    del providers[provider_id]
+    if llm.get("default_provider_id") == provider_id:
+        llm["default_provider_id"] = next(iter(providers), "")
+    if not providers:
+        llm.update({"api_key": "", "model": "", "default_provider_id": ""})
+    config_manager.config = PixelleVideoConfig(**current)
+    config_manager.save()
+    return _settings_payload(config_manager)
+
+
+@router.put("/llm/default-provider/{provider_id}")
+async def set_default_llm_provider(provider_id: str, config_manager: ConfigManagerDep):
+    if provider_id not in config_manager.config.llm.providers:
+        raise HTTPException(status_code=404, detail="LLM 服务不存在。")
+    config_manager.update({"llm": {"default_provider_id": provider_id}})
+    config_manager.save()
+    return _settings_payload(config_manager)
 
 
 @router.post("/llm/test", response_model=LlmConnectionResponse)

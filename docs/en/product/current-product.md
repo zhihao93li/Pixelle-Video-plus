@@ -1,28 +1,29 @@
 # Current Product Contract
 
-This document describes the current product and code boundaries. Historical proposals, implementation phases, and migration records are not product sources of truth.
+This file is the product truth for the current behavior and code boundaries.
 
 ## Product Definition
 
 Pixelle is an AI content production workspace for solo content operators:
 
 ```text
-Project → Topic → Draft → Review → Production → Artifact → Publish
+Project → Content ledger → Production task → Artifact
+                       └→ Confirmation / publish evidence / metrics
 ```
 
-A project owns its content, languages, drafting behavior, production defaults, and publishing targets. People and automation operate the same entities through the same APIs.
+A project carries brand, channel, audience, language, and asset context, but does not bind one production route. People and agents create content-ledger records and production tasks through the same use-case APIs.
 
 ## Product Surfaces
 
 The React console in `apps/console` has five primary destinations:
 
-1. Board for content lifecycle management.
-2. Quick Create for recipe and artifact selection.
-3. Tasks for run progress, cancellation, and retry.
-4. Library for artifact preview and publishing.
-5. Settings for projects, AI, voice, generation, storage, and recipes.
+1. Workbench groups production tasks by confirmed facts: needs attention, in progress, failed, or produced.
+2. Quick Create selects an artifact type and recipe, then opens a standard or specialized production flow.
+3. Tasks shows execution attempts, batches, cancellation, and retry.
+4. Library filters, previews, and publishes generated artifacts.
+5. Settings manages projects, AI, voice, generation engines, storage, and recipes.
 
-Artifacts are represented by one discriminated union: `video`, `image_set`, or `text`.
+Artifacts use one discriminated union: `video`, `image_set`, or `text`.
 
 ## Runtime Architecture
 
@@ -31,40 +32,56 @@ flowchart LR
     UI[React Console] --> API[FastAPI]
     Agent[Agent MCP Plugin] --> API
     API --> Content[Content and Projects]
+    API --> Ledger[Content Ledger and Production Tasks]
     API --> Generation[Generation Registry and Service]
-    API --> Tasks[Generation Task Store]
     Generation --> Pipelines[Production Pipelines]
     Pipelines --> Services[LLM / TTS / Image / Video / Storage]
-    Tasks --> History[History and Artifacts]
+    Generation --> Attempts[Execution Attempts]
+    Attempts --> History[History and Artifacts]
     History --> Publish[Publish Services]
 ```
 
 | Layer | Location | Responsibility |
 | --- | --- | --- |
 | Product UI | `apps/console/src` | Routing, interaction, and ViewModel rendering |
-| API | `api/routers`, `api/schemas` | HTTP contracts and validation |
-| Production Tasks | `pixelle_video/generation` | Task identity, durable state, progress, and restart semantics |
-| Content | `pixelle_video/content` | Projects, content items, and drafting profiles |
-| Generation | `pixelle_video/generation` | Recipe resolution, overrides, execution, and quality |
-| Pipelines | `pixelle_video/pipelines` | Video, asset, image-set, text, and workflow pipelines |
+| API | `api/routers`, `api/schemas` | HTTP contracts and permission boundaries |
+| Production tasks | `pixelle_video/content/production_tasks.py` | User-visible flow from submission and confirmation to produced output |
+| Execution attempts | `pixelle_video/generation` | Runtime progress, failure evidence, restart semantics, and artifacts |
+| Content and projects | `pixelle_video/content` | Projects, content ledger, confirmation, publish evidence, and metrics |
+| Registry and compilation | `pixelle_video/generation` | Recipe resolution, overrides, execution, and quality |
+| Pipelines | `pixelle_video/pipelines` | Video, asset, image-set, text, and workflow routes |
 | Services | `pixelle_video/services` | LLM, TTS, media, storage, and publishing |
-| Content operations | `pixelle_video/content` | Projects, items, publication evidence, and recoverable use cases |
-| Agent Interface | `agent_plugin` + `/api/agent/capabilities` | MCP thin client over shared use-case APIs; confirmation is human-only |
+| Agent interface | `agent_plugin` + `/api/agent/capabilities` | Thin MCP client over shared use-case APIs; confirmation remains human-only |
 
-## Ownership and Contracts
+## Production Contract
 
-- Backend persistence owns projects, content, tasks, artifacts, and publish attempts.
-- The generation layer owns recipe registration and effective-parameter merging.
-- The UI stores only unsubmitted drafts, presentation preferences, and URL-backed filters.
-- Every production request is compiled through the recipe registry before entering a pipeline.
-- Setting precedence is project defaults → effective recipe defaults → run overrides.
-- The UI submits only overrides changed for the current run.
-- Raw backend states are adapted to shared ViewModels before rendering.
-- Unknown states remain unknown; they are not silently classified as running or complete.
-- Failures remain observable and cannot be hidden behind default values or fake success.
-- Production task state is durable. A restart preserves terminal tasks and marks unfinished work as `interrupted` for an explicit retry.
-- Cancelling a batch stops only unfinished child tasks; completed artifacts remain available.
-- Content production state advances on the backend from canonical production tasks. The UI never writes lifecycle transitions merely to reconcile a view.
+One pipeline represents one input contract and one complete route. Different inputs, required stages, or required artifacts require different pipelines; providers and composition services remain reusable. The current contract has no `entry`, `entries`, or `default_entry` concept.
+
+A recipe binds exactly one pipeline and stores long-lived defaults. Every formal production request creates or binds a content-ledger item and a stable `production_task_id` before starting a provider. The old direct-generation write endpoints have been removed and are absent from OpenAPI. `/api/media/generate` is a settings preview and does not create a formal artifact.
+
+Setting precedence is:
+
+```text
+Project defaults → Effective recipe defaults → Run overrides
+```
+
+The workbench consumes only persisted production-task states:
+
+```text
+needs_user | in_progress | failed | produced | cancelled
+```
+
+`produced` means execution succeeded and every required artifact is present and readable. Publishing and metrics do not alter that production fact. A service restart preserves terminal tasks and marks unfinished work as `interrupted` for explicit retry.
+
+An unchanged retry appends an execution attempt. Changing the script, scenes, images, recipe, or effective parameters creates a new production task and preserves old tasks and artifacts.
+
+## Code Constraints
+
+- Routes, titles, layout, and project scope come from `apps/console/src/lib/router.ts`.
+- Console pages consume API clients, adapters, and ViewModels.
+- Raw provider, workflow, runtime, and backend status values do not enter ordinary product UI.
+- Failures remain observable and cannot be hidden behind defaults, empty results, or fake success.
+- New capabilities extend shared contracts instead of adding page-private implementations.
 
 ## Verification
 

@@ -54,14 +54,14 @@ export function ImageSetView({
               className="aspect-[3/4] w-full object-cover"
               src={item.url}
             />
-            <span className="absolute left-1 top-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">
+            <span className="absolute top-1 left-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">
               {item.label}
             </span>
           </a>
         ))}
       </div>
       {caption && (
-        <p className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2 text-xs leading-5 text-muted-foreground">
+        <p className="max-h-40 overflow-y-auto rounded-md bg-muted/40 p-2 text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
           {caption}
         </p>
       )}

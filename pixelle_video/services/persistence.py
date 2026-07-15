@@ -356,7 +356,7 @@ class PersistenceService:
         """Convert dict to StoryboardConfig"""
         return StoryboardConfig(
             task_id=data.get("task_id"),
-            n_storyboard=data.get("n_storyboard", 5),
+            n_storyboard=data.get("n_storyboard", 0),
             min_narration_words=data.get("min_narration_words", 5),
             max_narration_words=data.get("max_narration_words", 20),
             min_image_prompt_words=data.get("min_image_prompt_words", 30),
@@ -367,18 +367,12 @@ class PersistenceService:
             tts_workflow=data.get("tts_workflow"),
             tts_speed=data.get("tts_speed"),
             ref_audio=data.get("ref_audio"),
-            media_width=data.get(
-                "media_width", data.get("image_width", 1024)
-            ),  # Backward compatibility
-            media_height=data.get(
-                "media_height", data.get("image_height", 1024)
-            ),  # Backward compatibility
-            media_workflow=data.get(
-                "media_workflow", data.get("image_workflow")
-            ),  # Backward compatibility
+            media_width=data.get("media_width", 1024),
+            media_height=data.get("media_height", 1024),
+            media_workflow=data.get("media_workflow"),
             image_provider=data.get("image_provider"),
             image_model=data.get("image_model"),
-            frame_template=data.get("frame_template", "1080x1920/default.html"),
+            frame_template=data.get("frame_template", "1080x1920/image_default.html"),
             template_params=data.get("template_params"),
         )
 

@@ -6,9 +6,9 @@ merged into each template's ``fixed_params`` when the registry is built, so
 every request (React or Agent) sees the same effective defaults.
 
 Only whitelisted keys can be overridden, and only when the target template also
-allows them as user params — pipeline-level wiring (pipeline_id, entry,
+allows them as user params — pipeline-level wiring (pipeline_id,
 capabilities) is never overridable from the API. ``compose_runtime`` IS
-overridable now（html_ffmpeg / hyperframes），让用户零代码自建动效配方；选
+overridable now（html_ffmpeg / hyperframes），让用户零代码自建动效模板；选
 hyperframes 时校验本机有 npx（动效合成依赖 Node 环境）。
 """
 
@@ -25,6 +25,15 @@ OVERRIDES_FILENAME = "production-template-overrides.json"
 
 # 可通过 API 覆盖的生成默认值白名单。pipeline 结构性参数一律不在此列。
 OVERRIDABLE_PARAMS: dict[str, type | tuple[type, ...]] = {
+    "script_template_name": str,
+    "script_prompt": str,
+    "script_provider_id": str,
+    "script_model": str,
+    "language_script_models": dict,
+    "split_template_name": str,
+    "split_prompt": str,
+    "split_provider_id": str,
+    "split_model": str,
     "split_mode": str,
     "frame_template": str,
     "media_workflow": str,
@@ -53,6 +62,7 @@ OVERRIDABLE_PARAMS: dict[str, type | tuple[type, ...]] = {
     "long_form_prompt": str,
     "word_count": int,
     "llm_model": str,
+    "llm_provider_id": str,
 }
 
 # 长文目标字数的合理区间
@@ -62,6 +72,28 @@ WORD_COUNT_MAX = 20000
 # compose_runtime 合法枚举（与 compose_runtime.py 注册的运行时一致）
 COMPOSE_RUNTIMES = ("html_ffmpeg", "hyperframes")
 IMAGE_PROVIDERS = ("comfy_workflow", "aliyun_bailian", "volcengine_ark")
+
+# 这些字符串参数的空值本身有产品含义（例如明确不使用 BGM），必须与“删除
+# 当前层覆盖、继承上层值”区分。结构性枚举和必填模板仍把空值视为 reset。
+CLEARABLE_STRING_PARAMS = {
+    "media_workflow",
+    "image_model",
+    "prompt_prefix",
+    "image_prompt_visual_context",
+    "image_prompt_generation_rules",
+    "bgm_path",
+    "tts_workflow",
+    "tts_voice",
+    "ref_audio",
+    "llm_model",
+    "script_model",
+    "split_model",
+    "script_provider_id",
+    "split_provider_id",
+    "llm_provider_id",
+    "script_prompt",
+    "split_prompt",
+}
 
 _lock = threading.Lock()
 
@@ -104,9 +136,18 @@ def _validate_compose_runtime(value: str) -> None:
 
 
 def _validate_long_form_prompt(value: str) -> None:
-    # 空值已在 validate_overrides 里被当作"清除覆盖"跳过；这里只校验非空提示词
+    # long_form_prompt 不是可显式清空参数；这里只校验已通过基础类型检查的非空值。
     if "{script}" not in value:
         raise TemplateOverrideError("长文提示词缺少 {script} 占位符，确认稿将无法注入。")
+
+
+def _validate_creative_prompt(key: str, value: str) -> None:
+    if key == "script_prompt" and "{topic}" not in value:
+        raise TemplateOverrideError("写稿提示词缺少 {topic} 占位符，主题将无法注入。")
+    if key == "split_prompt" and not any(
+        placeholder in value for placeholder in ("{Content}", "{content}", "{script}", "{content2}")
+    ):
+        raise TemplateOverrideError("分镜提示词缺少正文占位符，文案将无法注入。")
 
 
 def _validate_word_count(value: int) -> None:
@@ -116,26 +157,16 @@ def _validate_word_count(value: int) -> None:
         )
 
 
-def _parse_entry(value: Any) -> tuple[dict[str, Any], bool | None, dict[str, Any] | None]:
-    """把一条模板记录解析成 (参数 overrides, enabled, drafting)。
-
-    兼容两种格式：
-    - 旧扁平格式 ``{param: value, ...}`` → 全部是参数，enabled=None。
-    - 新包裹格式 ``{"overrides": {...}, "enabled": bool}`` → 参数与启用开关平级。
-    """
+def _parse_entry(value: Any) -> tuple[dict[str, Any], bool | None]:
+    """把当前模板记录解析成 (参数 overrides, enabled)。"""
     if not isinstance(value, dict):
-        return {}, None, None
-    if "overrides" in value or "enabled" in value or "drafting" in value:
-        raw_overrides = value.get("overrides")
-        overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
-        enabled = value.get("enabled")
-        enabled = enabled if isinstance(enabled, bool) else None
-        raw_drafting = value.get("drafting")
-        drafting = raw_drafting if isinstance(raw_drafting, dict) else None
-    else:
-        overrides, enabled, drafting = value, None, None
+        return {}, None
+    raw_overrides = value.get("overrides")
+    overrides = dict(raw_overrides) if isinstance(raw_overrides, dict) else {}
+    enabled = value.get("enabled")
+    enabled = enabled if isinstance(enabled, bool) else None
     filtered = {key: val for key, val in overrides.items() if key in OVERRIDABLE_PARAMS}
-    return filtered, enabled, drafting
+    return filtered, enabled
 
 
 def _load_entries() -> dict[str, dict[str, Any]]:
@@ -153,11 +184,10 @@ def _load_entries() -> dict[str, dict[str, Any]]:
     for template_id, value in data.items():
         if not isinstance(template_id, str):
             continue
-        overrides, enabled, drafting = _parse_entry(value)
+        overrides, enabled = _parse_entry(value)
         entries[template_id] = {
             "overrides": overrides,
             "enabled": enabled,
-            "drafting": drafting,
         }
     return entries
 
@@ -167,16 +197,13 @@ def _write_entries(entries: dict[str, dict[str, Any]]) -> None:
     for template_id, entry in entries.items():
         overrides = entry.get("overrides") or {}
         enabled = entry.get("enabled")
-        drafting = entry.get("drafting")
-        if not overrides and enabled is None and drafting is None:
-            continue  # 两者都空 → 删除该条
+        if not overrides and enabled is None:
+            continue
         record: dict[str, Any] = {}
         if overrides:
             record["overrides"] = overrides
         if enabled is not None:
             record["enabled"] = enabled
-        if drafting is not None:
-            record["drafting"] = drafting
         out[template_id] = record
     path = _overrides_path()
     tmp_path = f"{path}.tmp"
@@ -210,25 +237,11 @@ def load_enabled(template_id: str) -> bool | None:
     return _load_entries().get(template_id, {}).get("enabled")
 
 
-def load_all_drafting() -> dict[str, dict[str, Any]]:
-    return {
-        template_id: entry["drafting"]
-        for template_id, entry in _load_entries().items()
-        if entry.get("drafting") is not None
-    }
-
-
-def load_drafting(template_id: str) -> dict[str, Any] | None:
-    return _load_entries().get(template_id, {}).get("drafting")
-
-
 def save_enabled(template_id: str, enabled: bool | None) -> None:
     """写入模板启用开关；None 清除该开关（回到代码默认）。"""
     with _lock:
         entries = _load_entries()
-        entry = entries.setdefault(
-            template_id, {"overrides": {}, "enabled": None, "drafting": None}
-        )
+        entry = entries.setdefault(template_id, {"overrides": {}, "enabled": None})
         entry["enabled"] = enabled
         _write_entries(entries)
 
@@ -248,8 +261,13 @@ def validate_overrides(
             raise TemplateOverrideError(f"参数 {key!r} 不允许作为模板默认值覆盖。")
         if key not in allowed_user_params:
             raise TemplateOverrideError(f"当前模板不支持参数 {key!r}，不能为它设置默认值。")
-        if value is None or value == "":
-            # 空值表示清除该项覆盖
+        if value is None:
+            # null 删除当前层覆盖并继承上层。
+            continue
+        if value == "":
+            if key in CLEARABLE_STRING_PARAMS:
+                cleaned[key] = ""
+            # 其他参数的空字符串表示删除覆盖。
             continue
         expected = OVERRIDABLE_PARAMS[key]
         if isinstance(expected, tuple):
@@ -268,8 +286,29 @@ def validate_overrides(
             )
         if key == "long_form_prompt":
             _validate_long_form_prompt(value)
+        if key in {"script_prompt", "split_prompt"}:
+            _validate_creative_prompt(key, value)
         if key == "word_count":
             _validate_word_count(value)
+        if key in {"script_template_name", "split_template_name"}:
+            from pixelle_video.generation.drafting_support import load_prompt_templates
+
+            kind = "script" if key == "script_template_name" else "split"
+            available = {item.name for item in load_prompt_templates(kind)}
+            if value not in available:
+                raise TemplateOverrideError(f"{key} 引用的提示词手册不存在：{value}")
+        if key == "language_script_models":
+            if any(
+                not isinstance(language, str)
+                or not language.strip()
+                or not isinstance(selection, dict)
+                or not isinstance(selection.get("provider_id"), str)
+                or not isinstance(selection.get("model"), str)
+                for language, selection in value.items()
+            ):
+                raise TemplateOverrideError(
+                    "language_script_models 必须是语言到“LLM 服务 + 模型”的映射。"
+                )
         cleaned[key] = value
     return cleaned
 
@@ -278,20 +317,7 @@ def save_overrides(template_id: str, overrides: dict[str, Any]) -> dict[str, Any
     """Persist param overrides for a template; preserves the enabled flag."""
     with _lock:
         entries = _load_entries()
-        entry = entries.setdefault(
-            template_id, {"overrides": {}, "enabled": None, "drafting": None}
-        )
+        entry = entries.setdefault(template_id, {"overrides": {}, "enabled": None})
         entry["overrides"] = overrides
         _write_entries(entries)
     return overrides
-
-
-def save_drafting(template_id: str, drafting: dict[str, Any] | None) -> None:
-    """Persist a complete recipe drafting spec; None restores the code default."""
-    with _lock:
-        entries = _load_entries()
-        entry = entries.setdefault(
-            template_id, {"overrides": {}, "enabled": None, "drafting": None}
-        )
-        entry["drafting"] = drafting
-        _write_entries(entries)

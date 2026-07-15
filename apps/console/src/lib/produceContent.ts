@@ -41,7 +41,9 @@ export async function submitContentProduction({
   allItems: ContentItem[]
   trackTask: (task: GenerationTask, templateName?: string | null) => void
 }) {
-  const itemIds = [...new Set(submissions.map((submission) => submission.itemId))]
+  const itemIds = [
+    ...new Set(submissions.map((submission) => submission.itemId)),
+  ]
   const responses = await Promise.all(
     itemIds.map((itemId) =>
       produceContentItem({
@@ -52,7 +54,9 @@ export async function submitContentProduction({
     )
   )
   const tasks = await Promise.allSettled(
-    responses.flatMap((response) => response.task_ids).map((taskId) => getTask(taskId))
+    responses
+      .flatMap((response) => response.task_ids)
+      .map((taskId) => getTask(taskId))
   )
   for (const task of tasks) {
     if (task.status === "fulfilled") trackTask(task.value, "内容出片")

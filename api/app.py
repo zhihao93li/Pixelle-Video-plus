@@ -47,7 +47,6 @@ from api.routers import (
     agent_router,
     content_flows_router,
     content_items_router,
-    content_router,
     drafting_router,
     files_router,
     frame_router,
@@ -55,19 +54,15 @@ from api.routers import (
     health_router,
     help_router,
     history_router,
-    image_router,
-    llm_router,
     media_router,
+    production_tasks_router,
     projects_router,
     publish_router,
     resources_router,
     settings_router,
-    tasks_router,
     tts_router,
-    video_router,
 )
 from api.security import ensure_agent_token
-from api.tasks import task_manager
 from pixelle_video.content.operations import recover_running_operations
 
 
@@ -86,14 +81,12 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "Pixelle API 正监听非本机地址；普通用户接口无登录认证，局域网内任何设备都可能操作。"
         )
-    await task_manager.start()
     logger.info("✅ Pixelle-Video API started successfully\n")
     
     yield
     
     # Shutdown
     logger.info("🛑 Shutting down Pixelle-Video API...")
-    await task_manager.stop()
     await shutdown_pixelle_video()
     logger.info("✅ Pixelle-Video API shutdown complete")
 
@@ -111,8 +104,8 @@ app = FastAPI(
     1. Check health: `GET /health`
     2. Read projects: `GET /api/projects`
     3. Read recipes: `GET /api/generation/templates`
-    4. Submit a task: `POST /api/generation/templates/{template_id}/tasks`
-    5. Track it: `GET /api/generation/tasks/{task_id}`
+    4. Submit production: `POST /api/production-tasks`
+    5. Track it: `GET /api/production-tasks/{task_id}`
     """,
     version="0.1.0",
     docs_url=api_config.docs_url,
@@ -138,17 +131,13 @@ app.include_router(health_router)
 app.include_router(agent_router, prefix=api_config.api_prefix)
 
 # API routers (with /api prefix)
-app.include_router(llm_router, prefix=api_config.api_prefix)
 app.include_router(tts_router, prefix=api_config.api_prefix)
-app.include_router(image_router, prefix=api_config.api_prefix)
 app.include_router(media_router, prefix=api_config.api_prefix)
-app.include_router(content_router, prefix=api_config.api_prefix)
 app.include_router(content_items_router, prefix=api_config.api_prefix)
 app.include_router(content_flows_router, prefix=api_config.api_prefix)
 app.include_router(drafting_router, prefix=api_config.api_prefix)
 app.include_router(projects_router, prefix=api_config.api_prefix)
-app.include_router(video_router, prefix=api_config.api_prefix)
-app.include_router(tasks_router, prefix=api_config.api_prefix)
+app.include_router(production_tasks_router, prefix=api_config.api_prefix)
 app.include_router(files_router, prefix=api_config.api_prefix)
 app.include_router(resources_router, prefix=api_config.api_prefix)
 app.include_router(frame_router, prefix=api_config.api_prefix)
@@ -177,13 +166,9 @@ async def api_info():
         "docs": api_config.docs_url,
         "health": "/health",
         "api": {
-            "llm": f"{api_config.api_prefix}/llm",
             "tts": f"{api_config.api_prefix}/tts",
-            "image": f"{api_config.api_prefix}/image",
             "media": f"{api_config.api_prefix}/media",
-            "content": f"{api_config.api_prefix}/content",
-            "video": f"{api_config.api_prefix}/video",
-            "tasks": f"{api_config.api_prefix}/tasks",
+            "production_tasks": f"{api_config.api_prefix}/production-tasks",
             "files": f"{api_config.api_prefix}/files",
             "resources": f"{api_config.api_prefix}/resources",
             "frame": f"{api_config.api_prefix}/frame",

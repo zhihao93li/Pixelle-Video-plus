@@ -86,6 +86,9 @@ class SceneDraft(BaseModel):
 class SceneManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    review_kind: Literal["video_scenes", "agent_image_scenes", "image_pages"] = (
+        "agent_image_scenes"
+    )
     scenes: list[SceneDraft] = Field(min_length=1, max_length=20)
     confirmed: bool = False
     updated_at: str = Field(default_factory=now_iso)
@@ -124,7 +127,7 @@ class ContentItem(BaseModel):
     variants: dict[str, ContentVariant] = Field(default_factory=dict)
     asset_paths: list[str] = Field(default_factory=list)
     links: dict = Field(default_factory=dict)
-    # links: {"draft_set_id": str|None, "task_ids": [str], "batch_ids": [str], "publish_record_ids": [str]}
+    # links: {"task_ids": [str], "batch_ids": [str], "publish_record_ids": [str]}
     metrics: dict = Field(default_factory=dict)
     # metrics: {"likes": int, "favorites": int, "comments": int, "note": str, "recorded_at": str}
     automation: dict = Field(default_factory=dict)  # 预留，本期不用

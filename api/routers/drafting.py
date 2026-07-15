@@ -9,9 +9,9 @@ import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from pixelle_video.generation.script_review import load_prompt_templates
+from pixelle_video.generation.drafting_support import DEFAULT_DRAFT_LANGUAGES, load_prompt_templates
 from pixelle_video.generation.templates import build_default_production_template_registry
 from pixelle_video.utils.os_util import get_data_path
 
@@ -29,6 +29,19 @@ class PromptTemplateWriteRequest(BaseModel):
     kind: str
     name: str
     content: str
+    new_name: str | None = None
+
+
+class PromptTemplateResponse(BaseModel):
+    name: str
+    content: str
+    source: str
+
+
+class PromptTemplateListResponse(BaseModel):
+    default_languages: list[str]
+    script_templates: list[PromptTemplateResponse] = Field(default_factory=list)
+    split_templates: list[PromptTemplateResponse] = Field(default_factory=list)
 
 
 def _prompt_dir(kind: str) -> Path:
@@ -60,6 +73,21 @@ def _find_custom_template_path(kind: str, name: str) -> Path | None:
 
 def _template_names(kind: str) -> set[str]:
     return {t.name for t in load_prompt_templates(kind)}
+
+
+@router.get("/prompt-templates", response_model=PromptTemplateListResponse)
+async def list_prompt_templates():
+    return PromptTemplateListResponse(
+        default_languages=list(DEFAULT_DRAFT_LANGUAGES),
+        script_templates=[
+            PromptTemplateResponse(name=item.name, content=item.content, source=item.source)
+            for item in load_prompt_templates("script")
+        ],
+        split_templates=[
+            PromptTemplateResponse(name=item.name, content=item.content, source=item.source)
+            for item in load_prompt_templates("split")
+        ],
+    )
 
 
 @router.post("/prompt-templates")
@@ -94,8 +122,26 @@ async def update_prompt_template(request: PromptTemplateWriteRequest):
             status_code=400,
             detail="内置模板不可修改；请先「复制为自定义」再编辑。",
         )
-    path.write_text(content, encoding="utf-8")
-    return {"kind": request.kind, "name": request.name, "source": str(path)}
+    final_path = path
+    final_name = request.name
+    if request.new_name and request.new_name.strip() != request.name:
+        for recipe in build_default_production_template_registry().list():
+            if request.name in {
+                recipe.fixed_params.get("script_template_name"),
+                recipe.fixed_params.get("split_template_name"),
+            }:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"提示词正被模板「{recipe.display_name}」使用，请先调整该模板。",
+                )
+        filename = _name_to_filename(request.new_name)
+        final_name = _derived_name(filename)
+        if final_name in _template_names(request.kind):
+            raise HTTPException(status_code=400, detail=f"已存在同名模板：{final_name}")
+        final_path = _prompt_dir(request.kind) / filename
+        path.rename(final_path)
+    final_path.write_text(content, encoding="utf-8")
+    return {"kind": request.kind, "name": final_name, "source": str(final_path)}
 
 
 @router.delete("/prompt-templates")
@@ -105,16 +151,16 @@ async def delete_prompt_template(kind: str, name: str):
     path = _find_custom_template_path(kind, name)
     if path is None:
         raise HTTPException(status_code=400, detail="内置模板不可删除，只能删除自定义模板。")
-    # 保护：仍被配方引用的模板不可删
+    # 保护：仍被模板引用的模板不可删
     recipes = build_default_production_template_registry().list()
     for recipe in recipes:
         if name in {
-            recipe.drafting.script_template_name,
-            recipe.drafting.split_template_name,
+            recipe.fixed_params.get("script_template_name"),
+            recipe.fixed_params.get("split_template_name"),
         }:
             raise HTTPException(
                 status_code=400,
-                detail=f"提示词正被配方「{recipe.display_name}」使用，请先调整该配方。",
+                detail=f"提示词正被模板「{recipe.display_name}」使用，请先调整该模板。",
             )
     path.unlink()
     return {"deleted": True, "kind": kind, "name": name}

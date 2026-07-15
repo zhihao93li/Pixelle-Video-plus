@@ -1,14 +1,14 @@
 # Pixelle
 
-Pixelle is an AI content production workspace for solo content operators. It keeps topics, drafting, generation, task tracking, artifacts, and publishing inside one project scope. The current product supports video, image-set, and long-form text artifacts.
+Pixelle is an AI content production workspace for solo content operators. It keeps the content ledger, human confirmation, production tasks, artifacts, and publishing inside one project scope. The current product supports video, image-set, and long-form text artifacts.
 
 ## Capabilities
 
 - Project and content lifecycle management
 - Standard video, asset-based video, image-set, text, and batch generation
 - Image-to-video, action transfer, and digital-human generation
-- Multilingual draft review and unified production submission
-- Run progress, failure recovery, and per-item retry
+- Topic drafting, human confirmation, and automatic production continuation
+- Unified workbench, observable failures, and history-preserving retry
 - Artifact preview, publish preparation, and publish status
 - Project, AI, voice, generation, storage, and recipe settings
 
@@ -21,10 +21,9 @@ Pixelle is an AI content production workspace for solo content operators. It kee
 | `pixelle_video` | Content generation, recipes, pipelines, and media services |
 | `pixelle_video/content` | Projects, content items, and recoverable operations |
 | `agent_plugin` | Agent MCP interface for Codex, Claude Code, and Cursor |
-| `web` | Frozen legacy Streamlit interface pending compatibility removal |
 | `tests` | Python unit and integration tests |
 
-See the [current product contract](docs/zh/product/current-product.md) and the console [design and implementation contract](apps/console/DESIGN.md).
+See the [current product contract](docs/en/product/current-product.md) and the console [design and implementation contract](apps/console/DESIGN.md).
 
 ## Local Development
 
@@ -57,9 +56,6 @@ To build the console and run the production product as one process:
 ```bash
 ./start_web.sh
 ```
-
-`web/app.py` is retained only as a migration-period legacy tool. It receives no
-new features and must not edit configuration concurrently with the React console.
 
 ## Verification
 

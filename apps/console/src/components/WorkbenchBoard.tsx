@@ -1,420 +1,514 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Bot,
-  Check,
-  LayoutDashboard,
-  Loader2,
-  Plus,
+  CheckCircle2,
+  CircleAlert,
+  CircleX,
+  Clock3,
   RefreshCcw,
 } from "lucide-react"
 
 import { AsyncState } from "@/components/shared/AsyncState"
-import { EmptyState } from "@/components/shared/EmptyState"
 import { PageFrame } from "@/components/shared/PageFrame"
+import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
+import { WorkspacePanel } from "@/components/shared/WorkspacePanel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
-import { useToast } from "@/components/ui/toast"
-import { ProductionSubmitPanel } from "@/components/shared/ProductionSubmitPanel"
-import type { ProductionOverrides } from "@/components/shared/ProductionSubmitPanel"
-import { ContentStatusBadge } from "@/components/shared/StatusBadge"
-import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
-import { WorkspacePanel } from "@/components/shared/WorkspacePanel"
-import { AddContentDialog } from "@/components/AddContentDialog"
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { BOARD_COLUMNS, contentProductionFailure } from "@/lib/contentItemMeta"
-import { formatDate, readableError } from "@/lib/format"
-import { languageLabel } from "@/lib/languages"
-import { navigate, routeHref } from "@/lib/router"
-import { generateDraftsForItems } from "@/lib/contentDrafting"
-import {
-  buildProduceSubmissions,
-  isProducibleItem,
-  submitContentProduction,
-} from "@/lib/produceContent"
 import { useCurrentProject } from "@/lib/currentProject"
-import { useTaskCenter } from "@/lib/taskCenter"
-import { cn } from "@/lib/utils"
+import { formatDate, readableError } from "@/lib/format"
 import {
-  importExistingContentItems,
-  listContentItems,
-  type ContentItem,
+  listWorkbenchTasks,
+  listPipelines,
+  listTemplates,
+  templatesForManagement,
+  type PipelineManifest,
+  type ProductionTemplate,
+  type ProductionTaskState,
+  type WorkbenchTaskCard,
 } from "@/lib/generationApi"
+import { routeHref } from "@/lib/router"
+import { cn } from "@/lib/utils"
 
-const POLL_INTERVAL_MS = 30000
-const PUBLISH_HOUR = 9 // 每天 09:00（Asia/Shanghai）发布节奏
+const POLL_INTERVAL_MS = 15_000
+const ALL_FILTER = "__all__"
 
-const isSelectable = isProducibleItem
+type WorkbenchColumn = {
+  key: ProductionTaskState
+  label: string
+  description: string
+  empty: string
+  icon: typeof Clock3
+}
 
-function ItemCard({
-  item,
-  selected,
-  selectable,
-  onToggleSelect,
-}: {
-  item: ContentItem
-  selected: boolean
-  selectable: boolean
-  onToggleSelect: () => void
-}) {
-  const taskCenter = useTaskCenter()
-  const taskIds = item.links.task_ids ?? []
-  const progress =
-    item.status === "producing"
-      ? taskIds
-          .map((id) => taskCenter.getTask(id)?.task.progress?.percentage ?? 0)
-          .reduce((sum, value, _index, list) => sum + value / list.length, 0)
-      : null
-  const productionFailure = contentProductionFailure(item)
+const WORKBENCH_COLUMNS: WorkbenchColumn[] = [
+  {
+    key: "needs_user" as const,
+    label: "待你处理",
+    description: "路线已暂停，等你确认或操作。",
+    empty: "目前没有需要你处理的生产任务",
+    icon: Clock3,
+  },
+  {
+    key: "in_progress" as const,
+    label: "进行中",
+    description: "系统或 Agent 正在继续执行。",
+    empty: "目前没有正在执行的任务",
+    icon: RefreshCcw,
+  },
+  {
+    key: "failed" as const,
+    label: "异常",
+    description: "任务已明确失败，需要查看原因。",
+    empty: "目前没有明确失败的任务",
+    icon: CircleAlert,
+  },
+  {
+    key: "produced" as const,
+    label: "已产出",
+    description: "必需产物已经生成，可以查看和使用。",
+    empty: "还没有符合当前筛选条件的产物",
+    icon: CheckCircle2,
+  },
+]
 
+const CANCELLED_COLUMN: WorkbenchColumn = {
+  key: "cancelled",
+  label: "已取消",
+  description: "只展示用户明确取消的生产任务。",
+  empty: "目前没有已取消的任务",
+  icon: CircleX,
+}
+type ColumnItems = Record<ProductionTaskState, WorkbenchTaskCard[]>
+
+const emptyItems = (): ColumnItems => ({
+  needs_user: [],
+  in_progress: [],
+  failed: [],
+  produced: [],
+  cancelled: [],
+})
+
+function sourceLabel(source: string) {
+  if (source === "agent") return "Agent 发起"
+  if (source === "batch") return "批量发起"
+  return "控制台发起"
+}
+
+function artifactLabel(artifactType: string) {
+  if (artifactType === "image_set") return "图集"
+  if (artifactType === "text") return "长文"
+  if (artifactType === "audio") return "音频"
+  return "视频"
+}
+
+function TaskCard({ task }: { task: WorkbenchTaskCard }) {
+  const progress = task.progress?.percentage
   return (
-    <article
-      className={cn(
-        "group relative rounded-lg border bg-card text-left transition-colors focus-within:border-primary/50 hover:border-primary/40",
-        selected && "border-primary bg-primary/5"
-      )}
-    >
-      {selectable && (
-        <button
-          aria-label={selected ? "取消选择" : "选择"}
-          className={cn(
-            "absolute top-2 right-2 z-10 flex size-5 items-center justify-center rounded border transition-opacity after:absolute after:-inset-3 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-            selected
-              ? "border-primary bg-primary text-primary-foreground"
-              : "border-muted-foreground/30 bg-background opacity-100 lg:opacity-0 lg:group-focus-within:opacity-100 lg:group-hover:opacity-100"
-          )}
-          onClick={(event) => {
-            event.stopPropagation()
-            onToggleSelect()
-          }}
-          type="button"
-        >
-          {selected && <Check className="size-3.5" />}
-        </button>
-      )}
-
+    <article className="group rounded-lg border bg-card text-left transition-colors hover:border-primary/40">
       <a
-        className="block rounded-lg p-3 pr-9 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
-        href={routeHref(`/board/item/${item.item_id}`)}
+        className="block rounded-lg p-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
+        href={routeHref(`/board/tasks/${task.production_task_id}`)}
       >
-        <div className="line-clamp-2 text-sm font-medium">{item.title}</div>
+        <div className="line-clamp-2 text-sm font-medium">{task.title}</div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <ContentStatusBadge status={item.status} />
-          {productionFailure ? (
-            <Badge variant="destructive">生产失败</Badge>
-          ) : null}
-          {item.languages.map((language) => {
-            const variant = item.variants[language]
-            const isConfirmed = variant?.status === "confirmed"
-            return (
-              <Badge
-                key={language}
-                variant={isConfirmed ? "success" : "outline"}
-              >
-                {languageLabel(language)}
-              </Badge>
-            )
-          })}
+          <Badge variant="outline">{artifactLabel(task.artifact_type)}</Badge>
+          <Badge
+            variant={task.state === "failed" ? "destructive" : "secondary"}
+          >
+            {task.stage.label}
+          </Badge>
         </div>
-        {progress != null && !productionFailure ? (
-          <Progress className="mt-3" value={progress} />
-        ) : null}
-        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1">
-            {item.source === "agent" ? <Bot className="size-3" /> : null}
-            {item.source === "agent"
-              ? "AI 起草"
-              : item.source === "derived"
-                ? "衍生选题"
-                : "手动添加"}
-          </span>
-          <span>{formatDate(item.updated_at)}</span>
-        </div>
-        {item.metrics.likes != null && (
-          <div className="mt-1 text-xs text-muted-foreground">
-            赞 {item.metrics.likes}
+
+        {progress != null && task.state === "in_progress" ? (
+          <div className="mt-3 flex flex-col gap-1">
+            <Progress value={progress} />
+            <span className="text-right text-[11px] text-muted-foreground tabular-nums">
+              {Math.round(progress)}%
+            </span>
           </div>
-        )}
+        ) : null}
+
+        {task.error ? (
+          <p className="mt-2 line-clamp-2 text-xs text-destructive">
+            {task.error.message}
+          </p>
+        ) : null}
+
+        {task.action ? (
+          <div className="mt-3 text-xs font-medium text-primary">
+            {task.action.label} →
+          </div>
+        ) : null}
+
+        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span className="inline-flex min-w-0 items-center gap-1">
+            {task.source === "agent" ? <Bot className="size-3" /> : null}
+            <span className="truncate">
+              {task.project_name} · {sourceLabel(task.source)}
+            </span>
+          </span>
+          <span>{formatDate(task.updated_at)}</span>
+        </div>
       </a>
     </article>
   )
 }
 
-type BoardColumn = (typeof BOARD_COLUMNS)[number]
-
-function LifecycleLane({
+function TaskLane({
   column,
   items,
-  onSchedule,
-  onToggleSelect,
-  selectedIds,
+  loadingMore,
+  nextCursor,
+  onLoadMore,
+  totalCount,
 }: {
-  column: BoardColumn
-  items: ContentItem[]
-  onSchedule?: () => void
-  onToggleSelect: (itemId: string) => void
-  selectedIds: Set<string>
+  column: WorkbenchColumn
+  items: WorkbenchTaskCard[]
+  loadingMore?: boolean
+  nextCursor?: string | null
+  onLoadMore?: () => void
+  totalCount: number
 }) {
-  const step = BOARD_COLUMNS.findIndex((item) => item.key === column.key) + 1
-
+  const Icon = column.icon
   return (
     <WorkspacePanel
       className="h-full bg-muted/20"
       contentClassName="flex flex-col gap-2"
-      headerAction={<Badge variant="secondary">{items.length}</Badge>}
+      description={column.description}
+      headerAction={<Badge variant="secondary">{totalCount}</Badge>}
       padding="compact"
       title={
         <span className="inline-flex items-center gap-2">
-          <span className="text-muted-foreground tabular-nums">
-            {String(step).padStart(2, "0")}
-          </span>
+          <Icon
+            className={cn(
+              "size-4",
+              column.key === "in_progress" && "text-primary"
+            )}
+          />
           {column.label}
         </span>
       }
     >
-      {column.key === "ready" && onSchedule ? (
-        <Button
-          className="h-11 w-full lg:h-7"
-          onClick={onSchedule}
-          size="sm"
-          variant="outline"
-        >
-          按节奏排期
-        </Button>
-      ) : null}
-      {items.map((item) => (
-        <ItemCard
-          item={item}
-          key={item.item_id}
-          onToggleSelect={() => onToggleSelect(item.item_id)}
-          selectable={isSelectable(item)}
-          selected={selectedIds.has(item.item_id)}
-        />
+      {items.map((task) => (
+        <TaskCard key={task.production_task_id} task={task} />
       ))}
       {items.length === 0 ? (
         <div className="flex min-h-24 items-center justify-center rounded-lg border border-dashed px-3 text-center text-xs text-muted-foreground">
-          这个阶段暂无内容
+          {column.empty}
         </div>
+      ) : null}
+      {nextCursor && onLoadMore ? (
+        <Button
+          disabled={loadingMore}
+          onClick={onLoadMore}
+          size="sm"
+          variant="ghost"
+        >
+          {loadingMore ? "正在读取…" : "加载更多"}
+        </Button>
       ) : null}
     </WorkspacePanel>
   )
 }
 
 export function WorkbenchBoard() {
-  const toast = useToast()
-  const taskCenter = useTaskCenter()
   const { projectId } = useCurrentProject()
-  const [items, setItems] = useState<ContentItem[]>([])
+  const [items, setItems] = useState<ColumnItems>(emptyItems)
+  const [counts, setCounts] = useState<Record<ProductionTaskState, number>>({
+    needs_user: 0,
+    in_progress: 0,
+    failed: 0,
+    produced: 0,
+    cancelled: 0,
+  })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [importing, setImporting] = useState(false)
-  const [addOpen, setAddOpen] = useState(false)
-  const [activeColumnKey, setActiveColumnKey] = useState(BOARD_COLUMNS[0].key)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-
-  const [produceOpen, setProduceOpen] = useState(false)
-  const [produceTemplateId, setProduceTemplateId] = useState("")
-  const [produceOverrides, setProduceOverrides] = useState<ProductionOverrides>(
-    {}
+  const [activeColumnKey, setActiveColumnKey] =
+    useState<ProductionTaskState>("needs_user")
+  const [artifactType, setArtifactType] = useState(ALL_FILTER)
+  const [source, setSource] = useState(ALL_FILTER)
+  const [pipelineId, setPipelineId] = useState(ALL_FILTER)
+  const [recipeId, setRecipeId] = useState(ALL_FILTER)
+  const [createdFrom, setCreatedFrom] = useState("")
+  const [createdTo, setCreatedTo] = useState("")
+  const [includeArchived, setIncludeArchived] = useState(false)
+  const [taskView, setTaskView] = useState<"active" | "cancelled">("active")
+  const [pipelines, setPipelines] = useState<PipelineManifest[]>([])
+  const [recipes, setRecipes] = useState<ProductionTemplate[]>([])
+  const [nextCursors, setNextCursors] = useState<
+    Record<ProductionTaskState, string | null>
+  >({
+    needs_user: null,
+    in_progress: null,
+    failed: null,
+    produced: null,
+    cancelled: null,
+  })
+  const [loadingMore, setLoadingMore] = useState<ProductionTaskState | null>(
+    null
   )
-  const [producing, setProducing] = useState(false)
+
+  const visibleColumns = useMemo(
+    () => (taskView === "cancelled" ? [CANCELLED_COLUMN] : WORKBENCH_COLUMNS),
+    [taskView]
+  )
+
+  useEffect(() => {
+    void Promise.all([listPipelines(), listTemplates(projectId ?? undefined)])
+      .then(([pipelineResponse, templateResponse]) => {
+        setPipelines(pipelineResponse.pipelines)
+        setRecipes(templatesForManagement(templateResponse))
+      })
+      .catch(() => {
+        setPipelines([])
+        setRecipes([])
+      })
+  }, [projectId])
+
+  const queryForState = useCallback(
+    (state: ProductionTaskState, cursor?: string) => ({
+      state,
+      projectId: projectId ?? undefined,
+      pipelineId: pipelineId === ALL_FILTER ? undefined : pipelineId,
+      recipeId: recipeId === ALL_FILTER ? undefined : recipeId,
+      artifactType: artifactType === ALL_FILTER ? undefined : artifactType,
+      source: source === ALL_FILTER ? undefined : source,
+      createdFrom: createdFrom ? `${createdFrom}T00:00:00Z` : undefined,
+      createdTo: createdTo ? `${createdTo}T23:59:59Z` : undefined,
+      includeArchived,
+      cursor,
+      limit: 24,
+    }),
+    [
+      artifactType,
+      createdFrom,
+      createdTo,
+      includeArchived,
+      pipelineId,
+      projectId,
+      recipeId,
+      source,
+    ]
+  )
 
   const refresh = useCallback(async () => {
+    if (!projectId) {
+      setItems(emptyItems())
+      setLoading(false)
+      return
+    }
     try {
-      const query = { limit: 500, project: projectId ?? undefined }
-      const list = await listContentItems(query)
-      setItems(list)
+      const responses = await Promise.all(
+        visibleColumns.map((column) =>
+          listWorkbenchTasks(queryForState(column.key))
+        )
+      )
+      const next = emptyItems()
+      const cursors: Record<ProductionTaskState, string | null> = {
+        needs_user: null,
+        in_progress: null,
+        failed: null,
+        produced: null,
+        cancelled: null,
+      }
+      visibleColumns.forEach((column, index) => {
+        next[column.key] = responses[index].items
+        cursors[column.key] = responses[index].next_cursor
+      })
+      setItems(next)
+      setNextCursors(cursors)
+      if (responses[0]) setCounts(responses[0].counts)
       setError(null)
     } catch (refreshError) {
       setError(readableError(refreshError))
     } finally {
       setLoading(false)
     }
-  }, [projectId])
+  }, [projectId, queryForState, visibleColumns])
+
+  const loadMore = useCallback(
+    async (state: ProductionTaskState) => {
+      const cursor = nextCursors[state]
+      if (!cursor) return
+      setLoadingMore(state)
+      try {
+        const response = await listWorkbenchTasks(queryForState(state, cursor))
+        setItems((current) => ({
+          ...current,
+          [state]: [
+            ...current[state],
+            ...response.items.filter(
+              (candidate) =>
+                !current[state].some(
+                  (item) =>
+                    item.production_task_id === candidate.production_task_id
+                )
+            ),
+          ],
+        }))
+        setNextCursors((current) => ({
+          ...current,
+          [state]: response.next_cursor,
+        }))
+      } catch (loadError) {
+        setError(readableError(loadError))
+      } finally {
+        setLoadingMore(null)
+      }
+    },
+    [nextCursors, queryForState]
+  )
 
   useEffect(() => {
-    async function tick() {
-      await refresh()
+    const timeout = window.setTimeout(() => void refresh(), 0)
+    const interval = window.setInterval(() => void refresh(), POLL_INTERVAL_MS)
+    return () => {
+      window.clearTimeout(timeout)
+      window.clearInterval(interval)
     }
-    void tick()
-    const interval = window.setInterval(() => {
-      void tick()
-    }, POLL_INTERVAL_MS)
-    return () => window.clearInterval(interval)
   }, [refresh])
 
-  const byColumn = useMemo(() => {
-    const map: Record<string, ContentItem[]> = {}
-    for (const column of BOARD_COLUMNS) {
-      map[column.key] = []
-    }
-    for (const item of items) {
-      const column = BOARD_COLUMNS.find((col) =>
-        col.statuses.includes(item.status)
-      )
-      if (column) {
-        map[column.key].push(item)
-      }
-    }
-    return map
-  }, [items])
-
-  const selectedItems = items.filter((item) => selectedIds.has(item.item_id))
-  const producedColumn =
-    byColumn.ready?.filter((item) => item.status === "produced") ?? []
-
-  function toggleSelect(itemId: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current)
-      if (next.has(itemId)) {
-        next.delete(itemId)
-      } else {
-        next.add(itemId)
-      }
-      return next
-    })
-  }
-
-  async function runImport() {
-    setImporting(true)
-    try {
-      const result = await importExistingContentItems()
-      toast({
-        title: `已导入 ${result.created} 条内容`,
-        variant: "success",
-      })
-      await refresh()
-    } catch (importError) {
-      toast({
-        title: "导入失败",
-        description: readableError(importError),
-        variant: "error",
-      })
-    } finally {
-      setImporting(false)
-    }
-  }
-
-  const draftableSelected = selectedItems.filter(
-    (item) => item.kind === "text" && item.status === "idea"
+  const hasTasks = useMemo(
+    () => visibleColumns.some((column) => items[column.key].length > 0),
+    [items, visibleColumns]
   )
-
-  async function submitDrafting() {
-    const items = draftableSelected
-    setSelectedIds(new Set())
-    try {
-      // 起草配置由后端按当前项目解析（1:1，自愈补建），前端只传 projectId
-      await generateDraftsForItems(items, toast, () => void refresh(), {
-        projectId: projectId ?? undefined,
-      })
-    } catch (draftError) {
-      toast({
-        title: "起草失败",
-        description: readableError(draftError),
-        variant: "error",
-      })
-    }
-  }
-
-  const produceSubmissions = useMemo(
-    () => buildProduceSubmissions(selectedItems),
-    [selectedItems]
-  )
-
-  async function submitProduction() {
-    if (!produceTemplateId || produceSubmissions.length === 0) {
-      return
-    }
-    setProducing(true)
-    try {
-      await submitContentProduction({
-        submissions: produceSubmissions,
-        templateId: produceTemplateId,
-        overrides: produceOverrides,
-        projectId: projectId ?? undefined,
-        allItems: items,
-        trackTask: taskCenter.trackTask,
-      })
-      toast({
-        title: `已提交 ${new Set(produceSubmissions.map((row) => row.itemId)).size} 条内容出片`,
-        variant: "success",
-      })
-      setProduceOpen(false)
-      setSelectedIds(new Set())
-      await refresh()
-    } catch (produceError) {
-      toast({
-        title: "出片失败",
-        description: readableError(produceError),
-        variant: "error",
-      })
-    } finally {
-      setProducing(false)
-    }
-  }
-
-  function scheduleByCadence() {
-    if (producedColumn.length === 0) {
-      return
-    }
-    const first = producedColumn[0]
-    const taskId = (first.links.task_ids ?? [])[0]
-    const start = new Date()
-    start.setDate(start.getDate() + 1)
-    start.setHours(PUBLISH_HOUR, 0, 0, 0)
-    toast({
-      title: `已按每天 ${PUBLISH_HOUR}:00 生成排期建议`,
-      description: `${producedColumn.length} 条待发布，最早 ${formatDate(
-        start.toISOString()
-      )}。逐条在发布页确认。`,
-    })
-    if (taskId) {
-      navigate(`/library?task=${taskId}`)
-    }
-  }
-
-  const hasItems = items.length > 0
   const activeColumn =
-    BOARD_COLUMNS.find((column) => column.key === activeColumnKey) ??
-    BOARD_COLUMNS[0]
-  const activeColumnItems = byColumn[activeColumn.key] ?? []
+    visibleColumns.find((column) => column.key === activeColumnKey) ??
+    visibleColumns[0]
 
   return (
     <PageFrame>
       <WorkspaceHeader
         actions={
-          <>
-            <Button
-              aria-label="刷新"
-              className="size-11 lg:size-7"
-              disabled={loading}
-              onClick={() => void refresh()}
-              size="icon-sm"
-              variant="outline"
-            >
-              <RefreshCcw className={cn(loading && "animate-spin")} />
-            </Button>
-            {hasItems && selectedItems.length === 0 ? (
-              <Button className="h-11 lg:h-8" onClick={() => setAddOpen(true)}>
-                <Plus data-icon="inline-start" />
-                添加内容
-              </Button>
-            ) : null}
-          </>
+          <Button
+            aria-label="刷新"
+            className="size-11 lg:size-7"
+            disabled={loading}
+            onClick={() => void refresh()}
+            size="icon-sm"
+            variant="outline"
+          >
+            <RefreshCcw className={cn(loading && "animate-spin")} />
+          </Button>
         }
-        description="按生命周期组织选题、草稿、审核、生产与发布；每条内容始终只有一个当前阶段。"
-        title="内容流水线"
+        description="所有生产路线都在这里汇总；先看是否需要你处理、是否正常运行，以及最终是否已经产出。"
+        title="工作台"
       />
 
-      {error && hasItems ? (
+      <div className="flex flex-wrap gap-2">
+        <Select
+          onValueChange={(value) =>
+            setTaskView(value as "active" | "cancelled")
+          }
+          value={taskView}
+        >
+          <SelectTrigger className="w-32" aria-label="按任务状态筛选">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">日常任务</SelectItem>
+            <SelectItem value="cancelled">已取消</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          onValueChange={(value) => {
+            setPipelineId(value)
+            setRecipeId(ALL_FILTER)
+          }}
+          value={pipelineId}
+        >
+          <SelectTrigger className="w-40" aria-label="按路线筛选">
+            <SelectValue placeholder="全部路线" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_FILTER}>全部路线</SelectItem>
+            {pipelines.map((pipeline) => (
+              <SelectItem key={pipeline.id} value={pipeline.id}>
+                {pipeline.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select onValueChange={setRecipeId} value={recipeId}>
+          <SelectTrigger className="w-40" aria-label="按模板筛选">
+            <SelectValue placeholder="全部模板" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_FILTER}>全部模板</SelectItem>
+            {recipes
+              .filter(
+                (recipe) =>
+                  pipelineId === ALL_FILTER || recipe.pipeline_id === pipelineId
+              )
+              .map((recipe) => (
+                <SelectItem key={recipe.id} value={recipe.id}>
+                  {recipe.display_name}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+        <Select onValueChange={setArtifactType} value={artifactType}>
+          <SelectTrigger className="w-32" aria-label="按产物筛选">
+            <SelectValue placeholder="全部产物" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_FILTER}>全部产物</SelectItem>
+            <SelectItem value="video">视频</SelectItem>
+            <SelectItem value="image_set">图集</SelectItem>
+            <SelectItem value="text">长文</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select onValueChange={setSource} value={source}>
+          <SelectTrigger className="w-32" aria-label="按来源筛选">
+            <SelectValue placeholder="全部来源" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_FILTER}>全部来源</SelectItem>
+            <SelectItem value="react">控制台</SelectItem>
+            <SelectItem value="agent">Agent</SelectItem>
+            <SelectItem value="batch">批量</SelectItem>
+          </SelectContent>
+        </Select>
+        <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-xs text-muted-foreground">
+          <span>起</span>
+          <input
+            aria-label="创建时间起点"
+            className="min-w-28 bg-transparent text-foreground outline-none"
+            onChange={(event) => setCreatedFrom(event.target.value)}
+            type="date"
+            value={createdFrom}
+          />
+        </label>
+        <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-xs text-muted-foreground">
+          <span>止</span>
+          <input
+            aria-label="创建时间终点"
+            className="min-w-28 bg-transparent text-foreground outline-none"
+            onChange={(event) => setCreatedTo(event.target.value)}
+            type="date"
+            value={createdTo}
+          />
+        </label>
+        <Button
+          aria-pressed={includeArchived}
+          onClick={() => setIncludeArchived((value) => !value)}
+          size="sm"
+          variant={includeArchived ? "secondary" : "outline"}
+        >
+          {includeArchived ? "已包含归档" : "包含归档"}
+        </Button>
+      </div>
+
+      {error && hasTasks ? (
         <AsyncState
           action={
             <Button onClick={() => void refresh()} size="sm" variant="outline">
@@ -422,20 +516,20 @@ export function WorkbenchBoard() {
             </Button>
           }
           className="max-w-none"
-          description={`${error} 当前仍展示上一次成功读取的内容。`}
+          description={`${error} 当前仍展示上一次成功读取的任务。`}
           state="stale"
-          title="内容可能已过期"
+          title="任务状态可能已过期"
         />
       ) : null}
 
-      {loading ? (
+      {loading && !hasTasks ? (
         <AsyncState
           className="max-w-none"
-          description="正在同步当前项目的内容与生产状态。"
+          description="正在同步所有生产路线。"
           state="loading"
-          title="正在读取内容…"
+          title="正在读取任务…"
         />
-      ) : error && !hasItems ? (
+      ) : error && !hasTasks ? (
         <AsyncState
           action={
             <Button onClick={() => void refresh()} size="sm" variant="outline">
@@ -445,183 +539,88 @@ export function WorkbenchBoard() {
           className="max-w-none"
           description={error}
           state="error"
-          title="内容读取失败"
+          title="任务读取失败"
         />
-      ) : !hasItems ? (
-        <EmptyState
-          actions={
-            <div className="flex flex-wrap justify-center gap-2">
-              <Button className="h-11 lg:h-8" onClick={() => setAddOpen(true)}>
-                <Plus data-icon="inline-start" />
-                添加第一条内容
-              </Button>
-              <Button
-                className="h-11 lg:h-8"
-                disabled={importing}
-                onClick={() => void runImport()}
-                variant="outline"
-              >
-                {importing ? (
-                  <Loader2 className="animate-spin" data-icon="inline-start" />
-                ) : null}
-                导入存量
-              </Button>
-            </div>
-          }
-          description="添加选题，或导入已有内容；之后会沿着草稿、审核、生产、发布逐步推进。"
-          icon={LayoutDashboard}
-          title="工作台还没有内容"
-        />
+      ) : !hasTasks ? (
+        <div className="flex min-h-64 flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-muted/10 p-6 text-center">
+          <div>
+            <div className="text-sm font-medium">还没有生产任务</div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              新生产统一从快速生产或 Agent 发起，任务会自动汇总到这里。
+            </p>
+          </div>
+          <Button asChild size="sm">
+            <a href={routeHref("/create")}>去快速生产</a>
+          </Button>
+        </div>
       ) : (
         <>
           <div className="flex flex-col gap-3 lg:hidden">
             <div className="overflow-x-auto pb-1">
               <ToggleGroup
-                aria-label="选择生命周期阶段"
+                aria-label="选择任务状态"
                 className="w-max justify-start"
-                onValueChange={(value) => {
-                  if (value) {
-                    setActiveColumnKey(value)
-                  }
-                }}
+                onValueChange={(value) =>
+                  value && setActiveColumnKey(value as ProductionTaskState)
+                }
                 spacing={1}
                 type="single"
                 value={activeColumn.key}
                 variant="outline"
               >
-                {BOARD_COLUMNS.map((column, index) => (
+                {visibleColumns.map((column) => (
                   <ToggleGroupItem
-                    aria-label={`第 ${index + 1} 阶段：${column.label}，${(byColumn[column.key] ?? []).length} 条`}
                     className="h-11 shrink-0 px-3"
                     key={column.key}
                     value={column.key}
                   >
                     {column.label}
                     <span className="text-xs text-muted-foreground tabular-nums">
-                      {(byColumn[column.key] ?? []).length}
+                      {counts[column.key]}
                     </span>
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
             </div>
-            <LifecycleLane
+            <TaskLane
               column={activeColumn}
-              items={activeColumnItems}
-              onSchedule={
-                activeColumn.key === "ready" && producedColumn.length > 0
-                  ? scheduleByCadence
-                  : undefined
-              }
-              onToggleSelect={toggleSelect}
-              selectedIds={selectedIds}
+              items={items[activeColumn.key]}
+              loadingMore={loadingMore === activeColumn.key}
+              nextCursor={nextCursors[activeColumn.key]}
+              onLoadMore={() => void loadMore(activeColumn.key)}
+              totalCount={counts[activeColumn.key]}
             />
           </div>
 
           <div
-            aria-label="内容生命周期看板"
+            aria-label="生产任务看板"
             className="hidden overflow-x-auto pb-2 lg:block"
             role="region"
           >
-            <div className="grid min-w-[72rem] grid-cols-6 items-stretch gap-3">
-              {BOARD_COLUMNS.map((column) => {
-                const columnItems = byColumn[column.key] ?? []
-                return (
-                  <LifecycleLane
-                    column={column}
-                    items={columnItems}
-                    key={column.key}
-                    onSchedule={
-                      column.key === "ready" && producedColumn.length > 0
-                        ? scheduleByCadence
-                        : undefined
-                    }
-                    onToggleSelect={toggleSelect}
-                    selectedIds={selectedIds}
-                  />
-                )
-              })}
+            <div
+              className={cn(
+                "grid items-stretch gap-3",
+                taskView === "cancelled"
+                  ? "grid-cols-1"
+                  : "min-w-[64rem] grid-cols-4"
+              )}
+            >
+              {visibleColumns.map((column) => (
+                <TaskLane
+                  column={column}
+                  items={items[column.key]}
+                  key={column.key}
+                  loadingMore={loadingMore === column.key}
+                  nextCursor={nextCursors[column.key]}
+                  onLoadMore={() => void loadMore(column.key)}
+                  totalCount={counts[column.key]}
+                />
+              ))}
             </div>
           </div>
         </>
       )}
 
-      {/* 多选操作条：选题→生成草稿，确认稿→出片 */}
-      {selectedItems.length > 0 ? (
-        <div className="sticky bottom-[calc(4.5rem+var(--safe-area-bottom)+0.75rem)] z-30 mx-auto flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border bg-background/95 p-2 shadow-lg backdrop-blur lg:bottom-4 lg:w-fit lg:justify-start lg:gap-3 lg:rounded-full lg:px-4">
-          <span className="px-1 text-sm">已选 {selectedItems.length} 条</span>
-          <Button
-            className="h-10 lg:h-7"
-            onClick={() => setSelectedIds(new Set())}
-            size="sm"
-            variant="ghost"
-          >
-            取消
-          </Button>
-          {draftableSelected.length > 0 ? (
-            <Button
-              className="h-10 lg:h-7"
-              onClick={() => void submitDrafting()}
-              size="sm"
-              variant={produceSubmissions.length > 0 ? "outline" : "default"}
-            >
-              生成草稿（{draftableSelected.length}）
-            </Button>
-          ) : null}
-          {produceSubmissions.length > 0 ? (
-            <Button
-              className="h-10 lg:h-7"
-              onClick={() => setProduceOpen(true)}
-              size="sm"
-            >
-              出片
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-
-      <AddContentDialog
-        onCreated={() => void refresh()}
-        onOpenChange={setAddOpen}
-        open={addOpen}
-      />
-
-      {/* 出片 Sheet */}
-      <Sheet onOpenChange={setProduceOpen} open={produceOpen}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle>出片</SheetTitle>
-            <SheetDescription className="text-left">
-              为 {selectedItems.length} 条内容、共 {produceSubmissions.length}{" "}
-              个出片任务选择生产模板。
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex flex-col gap-4 px-4 pb-4">
-            <ProductionSubmitPanel
-              onOverridesChange={setProduceOverrides}
-              onTemplateChange={setProduceTemplateId}
-              overrides={produceOverrides}
-              projectId={projectId ?? undefined}
-              requiredInput="script"
-              templateId={produceTemplateId}
-            />
-          </div>
-          <SheetFooter>
-            <Button
-              disabled={
-                producing ||
-                !produceTemplateId ||
-                produceSubmissions.length === 0
-              }
-              onClick={() => void submitProduction()}
-            >
-              {producing ? (
-                <Loader2 className="animate-spin" data-icon="inline-start" />
-              ) : null}
-              开始出片（{produceSubmissions.length}）
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
     </PageFrame>
   )
 }

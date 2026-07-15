@@ -4,24 +4,21 @@
 调用现有 API，再通过这些端点回写条目状态；后端不做事件驱动重构。
 """
 
-import json
-from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from loguru import logger
 from pydantic import BaseModel, Field
 
-from api.dependencies import PixelleVideoDep
 from pixelle_video.content.models import (
     STATUSES,
     ContentItem,
     ContentVariant,
+    SceneManifest,
     is_valid_transition,
     new_content_item,
     now_iso,
 )
-from pixelle_video.content.projects import ensure_migrated, get_default_project
+from pixelle_video.content.projects import ensure_default_project, get_default_project
 from pixelle_video.content.store import (
     delete_item,
     list_items,
@@ -29,26 +26,15 @@ from pixelle_video.content.store import (
     save_item,
 )
 from pixelle_video.generation.task_store import load_generation_task
-from pixelle_video.utils.os_util import get_data_path
 
 router = APIRouter(prefix="/content-items", tags=["Content Items"])
 
 
 def _default_project_id() -> str:
-    """当前默认项目 id（触发迁移）；无项目时回退到 'PetWoods' 兜底。"""
-    ensure_migrated()
+    """Return the current default project id, creating it for a new installation."""
+    ensure_default_project()
     project = get_default_project()
     return project.project_id if project else "PetWoods"
-
-
-# 可被测试覆盖的存量草稿目录（None 时回落到 data/script-review-drafts/）。
-SCRIPT_REVIEW_DIR: Path | None = None
-
-
-def _script_review_dir() -> Path:
-    if SCRIPT_REVIEW_DIR is not None:
-        return Path(SCRIPT_REVIEW_DIR)
-    return Path(get_data_path("script-review-drafts"))
 
 
 # ---------------------------------------------------------------------------
@@ -76,17 +62,14 @@ class ContentItemPatchRequest(BaseModel):
     asset_paths: list[str] | None = None
     metrics: dict | None = None
     links: dict | None = None
+    scene_manifest: SceneManifest | None = None
+    content_version: str | None = None
 
 
 class ContentItemTransitionRequest(BaseModel):
     to: str
     actor: str = "user"
     detail: dict = Field(default_factory=dict)
-
-
-class ImportExistingResponse(BaseModel):
-    created: int
-    skipped: int
 
 
 # ---------------------------------------------------------------------------
@@ -100,8 +83,8 @@ async def list_content_items(
     project: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
 ):
-    # 触发一次幂等迁移（存量条目归拢到默认项目）；无 project 参数返回全部。
-    ensure_migrated()
+    # A new installation always has one project; no project filter returns all items.
+    ensure_default_project()
     items = list_items(limit=1000, project=project)
     reconciled = [_reconcile_production_state(item) for item in items]
     if status:
@@ -185,12 +168,40 @@ async def patch_content_item(item_id: str, request: ContentItemPatchRequest):
     if request.links is not None:
         item.links = {**item.links, **request.links}
         changed.append("links")
+    if request.scene_manifest is not None:
+        if item.status != "pending_review":
+            raise HTTPException(status_code=409, detail="只有待确认的分镜可以直接编辑。")
+        if request.content_version != item.updated_at:
+            raise HTTPException(status_code=409, detail="分镜已经更新，请刷新后再编辑。")
+        item.scene_manifest = request.scene_manifest.model_copy(
+            update={"confirmed": False, "updated_at": now_iso()}
+        )
+        changed.append("scene_manifest")
 
     if changed:
         event_type = "metrics_recorded" if changed == ["metrics"] else "note"
         item.add_event(event_type, "user", {"changed": changed})
         item.updated_at = now_iso()
         save_item(item)
+        if "scene_manifest" in changed:
+            from pixelle_video.content.production_tasks import (
+                latest_task_for_content,
+                set_task_state,
+            )
+
+            task = latest_task_for_content(
+                item.item_id, states={"needs_user", "in_progress"}
+            )
+            if task is not None:
+                set_task_state(
+                    task.production_task_id,
+                    state="needs_user",
+                    stage_id="review_scenes",
+                    stage_label="确认分镜",
+                    next_actor="user",
+                    action_type="confirm_scenes",
+                    action_label="确认分镜",
+                )
     return item
 
 
@@ -319,168 +330,3 @@ async def delete_content_item(item_id: str):
     if not delete_item(item_id):
         raise HTTPException(status_code=404, detail=f"未找到内容条目：{item_id}")
     return {"deleted": True, "item_id": item_id}
-
-
-# ---------------------------------------------------------------------------
-# Import existing data (幂等)
-# ---------------------------------------------------------------------------
-
-
-def _import_from_draft_sets(
-    existing: list[ContentItem], default_project: str
-) -> tuple[list[ContentItem], int]:
-    """为存量 script-review 草稿集建卡。幂等：用 (draft_set_id, draft_index) 去重。"""
-    linked_keys: set[tuple[str, int]] = set()
-    for item in existing:
-        draft_set_id = item.links.get("draft_set_id")
-        if draft_set_id:
-            linked_keys.add((draft_set_id, int(item.links.get("draft_index", -1))))
-
-    created: list[ContentItem] = []
-    skipped = 0
-    directory = _script_review_dir()
-    if not directory.exists():
-        return created, skipped
-
-    for path in sorted(directory.glob("*.json")):
-        try:
-            with open(path, encoding="utf-8") as handle:
-                draft_set = json.load(handle)
-        except (OSError, json.JSONDecodeError):
-            continue
-        draft_set_id = draft_set.get("draft_set_id") or path.stem
-        drafts = draft_set.get("drafts") or []
-        submissions = draft_set.get("submissions") or []
-        has_submissions = len(submissions) > 0
-        batch_ids = [s.get("batch_id") for s in submissions if s.get("batch_id")]
-        set_languages = draft_set.get("languages") or ["Chinese"]
-
-        for draft in drafts:
-            index = int(draft.get("index", 0))
-            key = (draft_set_id, index)
-            if key in linked_keys:
-                skipped += 1
-                continue
-
-            status = "produced" if has_submissions else "pending_review"
-            variant_status = "confirmed" if has_submissions else "pending"
-            language_drafts = draft.get("language_drafts") or {}
-            variants: dict[str, ContentVariant] = {}
-            for language, payload in language_drafts.items():
-                variants[language] = ContentVariant(
-                    language=language,
-                    status=variant_status,
-                    title=(payload or {}).get("title", ""),
-                    script=(payload or {}).get("script", ""),
-                    narrations=list((payload or {}).get("narrations", []) or []),
-                )
-            languages = (
-                draft.get("selected_languages") or list(language_drafts.keys()) or set_languages
-            )
-            title = draft.get("title") or draft.get("topic") or "未命名选题"
-
-            item = new_content_item(
-                title=title,
-                kind="text",
-                source="agent",
-                status=status,
-                languages=list(languages),
-                variants=variants,
-                links={
-                    "draft_set_id": draft_set_id,
-                    "draft_index": index,
-                    "task_ids": [],
-                    "batch_ids": batch_ids,
-                    "publish_record_ids": [],
-                },
-                actor="system",
-                project=default_project,
-            )
-            save_item(item)
-            created.append(item)
-            linked_keys.add(key)
-
-    return created, skipped
-
-
-async def _import_from_history(
-    pixelle_video: Any, existing: list[ContentItem], default_project: str
-) -> tuple[list[ContentItem], int]:
-    """为无草稿关联、标题不重复的已完成历史任务建卡。幂等：用 task_id / 标题 去重。"""
-    history = getattr(pixelle_video, "history", None)
-    if history is None:
-        return [], 0
-
-    linked_task_ids: set[str] = set()
-    existing_titles: set[str] = set()
-    for item in existing:
-        existing_titles.add(item.title.strip())
-        for task_id in item.links.get("task_ids", []) or []:
-            linked_task_ids.add(task_id)
-
-    try:
-        listing = await history.get_task_list(page=1, page_size=1000, status="completed")
-    except Exception as error:  # noqa: BLE001 - 存量导入不应因历史读失败而中断
-        logger.warning(f"导入历史任务失败：{error}")
-        return [], 0
-
-    publish = getattr(pixelle_video, "publish", None)
-    created: list[ContentItem] = []
-    skipped = 0
-    for task in listing.get("tasks", []):
-        task_id = task.get("task_id")
-        if not task_id or task_id in linked_task_ids:
-            skipped += 1
-            continue
-        title = (task.get("title") or "").strip() or "未命名作品"
-        if title in existing_titles:
-            skipped += 1
-            continue
-
-        published = False
-        if publish is not None:
-            try:
-                record = await publish.load_publish_record(task_id)
-                published = bool(record)
-            except Exception:  # noqa: BLE001
-                published = False
-
-        status = "published" if published else "produced"
-        item = new_content_item(
-            title=title,
-            kind="text",
-            source="manual",
-            status=status,
-            links={
-                "draft_set_id": None,
-                "task_ids": [task_id],
-                "batch_ids": [],
-                "publish_record_ids": [task_id] if published else [],
-            },
-            actor="system",
-            project=default_project,
-        )
-        save_item(item)
-        created.append(item)
-        linked_task_ids.add(task_id)
-        existing_titles.add(title)
-
-    return created, skipped
-
-
-@router.post("/import-existing", response_model=ImportExistingResponse)
-async def import_existing_content_items(pixelle_video: PixelleVideoDep):
-    default_project = _default_project_id()
-    existing = list_items(limit=100000)
-    draft_created, draft_skipped = _import_from_draft_sets(existing, default_project)
-
-    # 历史导入需感知刚由草稿建出的条目（标题去重），合并后再算。
-    existing_after = existing + draft_created
-    task_created, task_skipped = await _import_from_history(
-        pixelle_video, existing_after, default_project
-    )
-
-    return ImportExistingResponse(
-        created=len(draft_created) + len(task_created),
-        skipped=draft_skipped + task_skipped,
-    )

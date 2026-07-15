@@ -11,7 +11,7 @@ for (const viewport of [
   { name: "desktop", width: 1440, height: 900 },
   { name: "mobile", width: 390, height: 844 },
 ]) {
-  test(`${viewport.name} 五项主导航为真实链接并标记当前路由`, async ({
+  test(`${viewport.name} 四项主导航为真实链接并标记当前路由`, async ({
     page,
   }) => {
     await page.setViewportSize({

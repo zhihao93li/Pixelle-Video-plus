@@ -16,8 +16,8 @@ import { readableError } from "@/lib/format"
 import { navigate } from "@/lib/router"
 import { settingsLink } from "@/lib/settingsLinks"
 import {
-  listScriptReviewTemplates,
-  type ScriptReviewPromptTemplate,
+  listPromptTemplates,
+  type PromptTemplate,
 } from "@/lib/generationApi"
 
 /**
@@ -35,7 +35,7 @@ export function PromptPeekSheet({
   kind: "script" | "split"
   name: string
 }) {
-  const [template, setTemplate] = useState<ScriptReviewPromptTemplate | null>(null)
+  const [template, setTemplate] = useState<PromptTemplate | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -54,13 +54,15 @@ export function PromptPeekSheet({
       return
     }
     let cancelled = false
-    void listScriptReviewTemplates()
+    void listPromptTemplates()
       .then((response) => {
         if (cancelled) {
           return
         }
         const pool =
-          kind === "script" ? response.script_templates : response.split_templates
+          kind === "script"
+            ? response.script_templates
+            : response.split_templates
         setTemplate(pool.find((item) => item.name === name) ?? null)
       })
       .catch((peekError) => {
@@ -105,7 +107,7 @@ export function PromptPeekSheet({
           )}
           {error && <InlineError title="读取失败" message={error} />}
           {!loading && !error && template && (
-            <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-5 text-muted-foreground">
+            <pre className="max-h-[60vh] overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
               {template.content}
             </pre>
           )}

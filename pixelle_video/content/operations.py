@@ -31,7 +31,6 @@ class ContentFlowOperation(BaseModel):
         "accepted"
     )
     status: Literal["running", "completed", "failed"] = "running"
-    draft_set_id: str | None = None
     batch_id: str | None = None
     task_ids: list[str] = Field(default_factory=list)
     result: dict[str, Any] | None = None
@@ -154,11 +153,7 @@ def recover_running_operations() -> None:
             fail_operation(record, "内容条目不存在，无法恢复。", layer="persistence")
             continue
         if record.operation == "draft":
-            if (
-                item.status == "pending_review"
-                and record.draft_set_id
-                and item.links.get("draft_set_id") == record.draft_set_id
-            ):
+            if item.status == "pending_review" and item.variants:
                 complete_operation(record, {"item_id": item.item_id, "status": item.status})
             else:
                 if item.status == "drafting":

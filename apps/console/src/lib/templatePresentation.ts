@@ -7,10 +7,13 @@ import type { ProductionTemplate } from "@/lib/generationApi"
 
 /** 管线归属 chip 文案：标准线 / 素材线 / Workflow 直跑。 */
 const PIPELINE_CHIP_LABELS: Record<string, string> = {
-  standard: "标准线",
+  topic_to_video: "主题到视频",
+  script_to_video: "文案到视频",
   codex_scene_video: "Agent 配图合成",
   asset_based: "素材线",
   image_post: "图文线",
+  topic_to_image_post: "主题图文线",
+  topic_to_long_form: "主题长文线",
   long_form: "长文线",
   i2v: "Workflow 直跑",
   action_transfer: "Workflow 直跑",
@@ -21,26 +24,29 @@ export function pipelineChipLabel(pipelineId: string): string {
   return PIPELINE_CHIP_LABELS[pipelineId] ?? "产线"
 }
 
-/** 面向用户的成品导向模板（骨架 + 用户自定义），排除专用流程入口。 */
+/** 面向用户的成品导向模板（骨架 + 用户自定义）。 */
 export function isProductTemplate(template: ProductionTemplate): boolean {
-  return template.product_entry === "generate"
+  return template.access_scope === "public"
 }
 
 export function isCodexOnlyTemplate(template: ProductionTemplate): boolean {
-  return template.access_scope === "agent" || template.access_scope === "codex"
+  return template.access_scope === "agent"
 }
 
-/** 专用流程入口（多语言审核出片；批量已改为生成页提交模式，不再是入口）。 */
-export function isDedicatedEntry(template: ProductionTemplate): boolean {
-  return template.product_entry !== "generate"
+/** 需要专用素材表单的生产路线。 */
+export function isSpecialPipelineTemplate(
+  template: ProductionTemplate
+): boolean {
+  return ["i2v", "action_transfer", "digital_human"].includes(
+    template.pipeline_id
+  )
 }
 
-/** 已退役的内置预设：只读、不可复活、归入「已退役」分组。 */
-export function isRetiredTemplate(template: ProductionTemplate): boolean {
-  return template.retired
-}
-
-/** 当前可用的成品模板（已启用、非退役、非专用入口）。 */
+/** 当前可用的成品模板（已启用、非专用入口）。 */
 export function isActiveProductTemplate(template: ProductionTemplate): boolean {
-  return template.enabled && !template.retired && isProductTemplate(template)
+  return (
+    template.enabled &&
+    isProductTemplate(template) &&
+    !isSpecialPipelineTemplate(template)
+  )
 }

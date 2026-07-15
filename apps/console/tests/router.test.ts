@@ -5,10 +5,9 @@ import { resolveRoute } from "../src/lib/router.ts"
 
 test("route manifest is the only page-width contract", () => {
   assert.equal(resolveRoute("/create").layout, "wide")
-  assert.equal(resolveRoute("/tasks").layout, "wide")
+  assert.equal(resolveRoute("/tasks").id, "not-found")
   assert.equal(resolveRoute("/library").layout, "wide")
   assert.equal(resolveRoute("/settings").layout, "standard")
-  assert.equal(resolveRoute("/create/script-review").layout, "narrow")
   assert.equal(
     resolveRoute("/create/generate/recipe-video").layout,
     "workspace"

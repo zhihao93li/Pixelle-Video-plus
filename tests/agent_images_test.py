@@ -68,7 +68,9 @@ def test_save_agent_image_is_validated_idempotent_and_replaceable(tmp_path):
     )
     assert replaced["replaced"] is True
     assert replaced["format"] == "WEBP"
-    assert not (tmp_path / "assets" / "exp-1" / "scene-1.png").exists()
+    assert (tmp_path / "assets" / "exp-1" / "scene-1.png").exists()
+    assert replaced["path"].endswith(".webp")
+    assert "scene-1-" in replaced["path"]
 
     sidecar = json.loads(
         (tmp_path / "assets" / "exp-1" / "scene-1.json").read_text(encoding="utf-8")
@@ -92,7 +94,7 @@ def test_save_agent_image_is_validated_idempotent_and_replaceable(tmp_path):
         asset_id=repaired["asset_id"],
         storage_root=tmp_path / "assets",
     )
-    assert resolved.endswith("scene-1.webp")
+    assert resolved.endswith(".webp")
 
 
 def test_save_agent_image_accepts_codex_data_url(tmp_path):

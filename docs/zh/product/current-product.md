@@ -4,23 +4,25 @@
 
 ## 产品定义
 
-Pixelle 是面向单人内容运营的 AI 内容生产工作台。核心循环是：
+Pixelle 是面向单人内容运营的 AI 内容生产工作台。核心关系是：
 
 ```text
-项目 → 选题 → 草稿 → 审核 → 生产 → 作品 → 发布
+项目 → 内容台账 → 生产任务 → 产物
+              └→ 确认 / 发布证据 / 指标
 ```
 
-一个项目承载自己的内容、语言、起草方式、生产默认和发布目标。人和自动化工具通过同一组 API 操作相同实体，不维护两套业务状态。
+一个项目承载品牌、渠道、受众、语言和素材背景，但不绑定唯一生产路线。人和 Agent 通过同一组用例接口建内容账和生产任务。
 
 ## 正式产品表面
 
-React 控制台位于 `apps/console`，包含五项主导航：
+React 控制台位于 `apps/console`，包含四项主导航：
 
-1. 工作台：按生命周期管理内容条目。
-2. 快速生产：选择产物与配方，进入普通或专用生成。
-3. 任务：查看一次提交及其子任务、取消和重试。
-4. 作品库：筛选、预览和发布生成结果。
-5. 设置：管理项目、AI、语音、生成引擎、存储和配方。
+1. 工作台：按确定事实查看“待你处理 / 进行中 / 异常 / 已产出”生产任务。
+2. 快速生产：选择产物与模板，进入普通或专用生成。
+3. 作品库：筛选、预览和发布生成结果，并可跳转快速生产再次制作。
+4. 设置：管理项目、AI、语音、生成引擎、存储和模板。
+
+React 只有「快速生产」可以创建新生产；工作台是监控和人工处理中心。任务详情仍然存在，但只从工作台卡片进入，不再占用独立主导航。
 
 产物只有三种产品类型：`video`、`image_set`、`text`。界面、任务、历史和发布资格都必须以该判别联合为基础。
 
@@ -32,7 +34,8 @@ flowchart LR
     Agent[Agent MCP Plugin] --> API
     API --> Content[Content and Projects]
     API --> Generation[Generation Registry and Service]
-    API --> Tasks[生成任务存储]
+    API --> Ledger[内容台账与稳定生产任务]
+    API --> Tasks[执行尝试与生成任务]
     Generation --> Pipelines[Production Pipelines]
     Pipelines --> Services[LLM / TTS / Image / Video / Storage]
     Tasks --> History[History and Artifacts]
@@ -43,56 +46,51 @@ flowchart LR
 | --- | --- | --- |
 | 产品界面 | `apps/console/src` | 路由、交互、ViewModel 展示 |
 | API | `api/routers`、`api/schemas` | HTTP 合同和权限边界 |
-| 正式生成任务 | `pixelle_video/generation` | 任务身份、持久状态、运行进度与重启语义 |
-| 内容与项目 | `pixelle_video/content` | 项目与内容条目；写稿 Prompt 和模型由生产配方管理 |
-| 生产注册与编译 | `pixelle_video/generation` | 配方解析、覆盖合并、运行与质量 |
+| 稳定生产任务 | `pixelle_video/content/production_tasks.py` | 从提交、人工确认、执行到产出的用户可见任务 |
+| 执行尝试 | `pixelle_video/generation` | 底层运行进度、失败证据、重启语义和产物 |
+| 内容与项目 | `pixelle_video/content` | 项目、内容台账、人工确认、发布证据与指标 |
+| 生产注册与编译 | `pixelle_video/generation` | 模板解析、覆盖合并、运行与质量 |
 | 生产管线 | `pixelle_video/pipelines` | 视频、素材、图集、长文和工作流管线 |
 | 媒体服务 | `pixelle_video/services` | LLM、TTS、图片、视频、存储和发布 |
 | 内容运营状态 | `pixelle_video/content` | 项目、内容条目、发布证据与可恢复用例操作 |
-| Agent 接口 | `agent_plugin` + `/api/agent/capabilities` | MCP 薄客户端与后端用例 API 共用业务规则；确认只能由人在控制台完成 |
-
-## Legacy Streamlit 边界
-
-`web/` 是冻结中的迁移期界面，不属于正式产品表面。新 Provider、新管线、设置和
-任务能力不得继续接入 Streamlit；默认本地、Docker、Dev Container 与 Windows
-入口只运行 React + FastAPI。`api/` 与 `pixelle_video/` 也不得反向导入 `web/`。
-
-旧界面只允许用于尚未完成的兼容性排查，并且不能与 React 控制台同时修改配置。
-待 Docker 与 Windows 发行形态完成真实验收后，删除旧界面及 Streamlit 依赖。
+| Agent 接口 | `agent_plugin` + `/api/agent/capabilities` | MCP 薄客户端与后端用例 API 共用业务规则；Agent 只能转交带版本与会话证据的用户明确确认 |
 
 ## 数据所有权
 
 - 项目与内容事实由后端持久化层拥有，前端本地状态不能充当业务真源。
-- 配方注册、有效参数和覆盖合并由 `pixelle_video/generation` 拥有。
+- 模板注册、有效参数和覆盖合并由 `pixelle_video/generation` 拥有。
 - 正式生成任务的身份、状态和恢复语义由 `pixelle_video/generation` 拥有。
 - 产物和历史由生成结果与历史服务拥有。
 - 发布资格和发布尝试由发布服务拥有。
 - UI 只保存草稿交互状态，例如未提交输入、展开状态和 URL 筛选。
 
-## 生成合同
+## 生产合同
 
-所有正式生成都从生产模板进入注册与编译层，再调用具体管线。页面不得绕过模板编译直接拼接内部请求。
+一条 Pipeline 只表达一种输入和一条完整路线。输入、必经步骤或必需产物不同时注册新 Pipeline，底层 Provider、配音、合成和保存步骤继续复用。新合同不包含 `entry / entries / default_entry`。
+
+模板只绑定一条 Pipeline，保存该路线的长期设置，不能增删步骤。所有正式生产在启动 Provider 前必须先创建或绑定内容台账，并建立稳定 `production_task_id`。旧的直接生成写接口已删除，不在 OpenAPI 中暴露；`/api/media/generate` 只是配置页资源预览，不产生正式作品。
 
 设置合并顺序：
 
 ```text
-项目默认 → 配方生效默认 → 本次覆盖
+项目默认 → 模板生效默认 → 本次覆盖
 ```
 
 前端只提交本次真正修改的覆盖项。后端负责校验、合并和生成最终运行参数。
 
-运行状态在进入 UI 前必须适配为统一状态：
+工作台只消费后端生产任务的确定状态：
 
 ```text
-idle → uploading → submitting → queued → running
-     → completed | failed | cancelling | cancelled | interrupted
+needs_user | in_progress | failed | produced | cancelled
 ```
 
-未知后端状态必须被标记为未知，不能被静默归类。
+只有执行成功且 Pipeline 的全部必需产物存在、可读时才是 `produced`。发布、指标和复盘不改变这个生产事实。前端不根据等待时长推测“疑似卡住”。
 
-任务状态持久化到后端数据目录。服务重启不会丢失终态；未完成任务会成为 `interrupted`，由用户明确重试。取消批次只取消尚未完成的子任务，已完成产物继续保留。
+任务状态持久化到后端数据目录。服务重启不会丢失终态；未完成任务会成为 `interrupted`，由用户明确重试。快速生产的多条提交会直接建立多条独立生产任务，不建立用户可见的批次状态、批次卡片或批次重试。
 
-内容条目的生产状态由后端读取正式生成任务后推进。前端不得为了刷新看板而反向修改生命周期。
+同一生产的原样重试追加 execution attempt，不覆盖旧错误。人工确认站中的直接编辑、系统重写、局部重做和整套重做继续使用原生产任务，并使旧确认失效；已经产出后再改文案、素材、模板或有效参数，则从快速生产或 Agent 发起新任务，旧任务与旧产物保留。
+
+正式内容路线包括主题/文案到视频、主题/文案到图集、主题/文案到长文，以及素材与专用视频路线。主题视频依次确认文案和分镜；主题图文依次确认图文文案和分页；文案视频与文案图文只确认系统新增的分镜或分页；长文产出前不增加中间确认。
 
 ## 代码约束
 

@@ -5,7 +5,13 @@ import type { ProductionTemplate } from "../src/lib/generationApi.ts"
 import {
   assetDraftForTemplate,
   assetOverridesToInput,
+  assetParamPatch,
+  assetSettingsToParams,
+  longFormParamPatch,
+  longFormSettingsToParams,
   standardDraftForTemplate,
+  standardParamPatch,
+  standardSettingsToParams,
   standardOverridesToInput,
 } from "../src/lib/productionDrafts.ts"
 import {
@@ -30,18 +36,12 @@ function template(patch: Partial<ProductionTemplate> = {}): ProductionTemplate {
     template_tags: [],
     input_requirements: ["script"],
     quality_tier: "basic",
-    pipeline_id: "standard",
-    entry: "script",
+    pipeline_id: "script_to_video",
     fixed_params: {},
     required_capabilities: [],
     user_selectable_runtime: false,
     user_selectable_providers: [],
     enabled: true,
-    retired: false,
-    migration_status: "ready",
-    product_entry: "generate",
-    streamlit_source: null,
-    migration_notes: "",
     allowed_user_params: [],
     passthrough_input_fields: [],
     ...patch,
@@ -52,7 +52,8 @@ test("standard draft starts from the recipe effective fixed params", () => {
   const draft = standardDraftForTemplate(
     template({
       fixed_params: {
-        split_mode: "line",
+        split_template_name: "Narrative Scene Planner",
+        split_model: "scene-model",
         frame_template: "1080x1440/custom.html",
         bgm_volume: 0.12,
         tts_voice: "recipe-voice",
@@ -66,7 +67,8 @@ test("standard draft starts from the recipe effective fixed params", () => {
   assert.deepEqual(draft.dirtyKeys, [])
   assert.deepEqual(
     {
-      splitMode: draft.defaults.splitMode,
+      splitTemplateName: draft.defaults.splitTemplateName,
+      splitModel: draft.defaults.splitModel,
       frameTemplate: draft.defaults.frameTemplate,
       bgmVolume: draft.defaults.bgmVolume,
       ttsVoice: draft.defaults.ttsVoice,
@@ -74,7 +76,8 @@ test("standard draft starts from the recipe effective fixed params", () => {
       templateParams: draft.defaults.templateParams,
     },
     {
-      splitMode: "line",
+      splitTemplateName: "Narrative Scene Planner",
+      splitModel: "scene-model",
       frameTemplate: "1080x1440/custom.html",
       bgmVolume: 0.12,
       ttsVoice: "recipe-voice",
@@ -86,8 +89,8 @@ test("standard draft starts from the recipe effective fixed params", () => {
 
 test("unchanged recipe defaults do not enter the standard task input", () => {
   const recipe = template({
-    fixed_params: { split_mode: "line", tts_speed: 1.15 },
-    allowed_user_params: ["split_mode", "tts_speed"],
+    fixed_params: { split_model: "scene-model", tts_speed: 1.15 },
+    allowed_user_params: ["split_model", "tts_speed"],
   })
   const draft = standardDraftForTemplate(recipe)
 
@@ -140,4 +143,52 @@ test("asset draft keeps recipe volume and does not invent voice or speed overrid
     ttsSpeed: 1,
   })
   assert.deepEqual(assetOverridesToInput(recipe, draft.overrides), {})
+})
+
+test("image provider and model flow through the standard snake-case adapter", () => {
+  const recipe = template({
+    fixed_params: {
+      image_provider: "comfy_workflow",
+      image_model: "",
+    },
+    allowed_user_params: ["image_provider", "image_model"],
+  })
+  const draft = standardDraftForTemplate(recipe)
+  const params = standardSettingsToParams(draft.defaults)
+  assert.equal(params.image_provider, "comfy_workflow")
+  assert.equal(params.image_model, "")
+  assert.deepEqual(standardParamPatch("image_provider", "aliyun_bailian"), {
+    imageProvider: "aliyun_bailian",
+  })
+
+  const changed = updateGenerationDraft(draft, {
+    imageProvider: "aliyun_bailian",
+    imageModel: "wanx2.1-t2i-turbo",
+  })
+  assert.deepEqual(standardOverridesToInput(recipe, changed.overrides), {
+    image_provider: "aliyun_bailian",
+    image_model: "wanx2.1-t2i-turbo",
+  })
+})
+
+test("asset and long-form adapters round-trip registered API keys", () => {
+  const assetSettings = {
+    bgmPath: "music/demo.mp3",
+    bgmVolume: 0.25,
+    bgmMode: "once" as const,
+    voiceId: "voice-a",
+    ttsSpeed: 1.2,
+  }
+  assert.equal(assetSettingsToParams(assetSettings).voice_id, "voice-a")
+  assert.deepEqual(assetParamPatch("bgm_volume", 0.4), { bgmVolume: 0.4 })
+
+  const longSettings = {
+    wordCount: 2400,
+    longFormPrompt: "{script}",
+    llmModel: "model-a",
+  }
+  assert.equal(longFormSettingsToParams(longSettings).word_count, 2400)
+  assert.deepEqual(longFormParamPatch("llm_model", "model-b"), {
+    llmModel: "model-b",
+  })
 })

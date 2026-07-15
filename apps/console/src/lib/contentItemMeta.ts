@@ -1,20 +1,6 @@
 import type { ContentItem, ContentVariantStatus } from "@/lib/generationApi"
 
-/** 内容工作台看板列定义：列名 → 包含的条目状态。archived 不在看板显示。 */
-export const BOARD_COLUMNS: Array<{
-  key: string
-  label: string
-  statuses: string[]
-}> = [
-  { key: "idea", label: "选题池", statuses: ["idea"] },
-  { key: "draft", label: "草稿", statuses: ["drafting", "draft_ready"] },
-  { key: "review", label: "待确认", statuses: ["pending_review", "confirmed"] },
-  { key: "producing", label: "生产中", statuses: ["producing"] },
-  { key: "ready", label: "待发布", statuses: ["produced", "scheduled"] },
-  { key: "published", label: "已发布", statuses: ["published", "measured"] },
-]
-
-export const STATUS_LABELS: Record<string, string> = {
+const STATUS_LABELS: Record<string, string> = {
   idea: "选题",
   drafting: "起草中",
   draft_ready: "草稿完成",
@@ -39,7 +25,7 @@ export const VARIANT_STATUS_LABELS: Record<ContentVariantStatus, string> = {
   rejected: "已打回",
 }
 
-export const EVENT_TYPE_LABELS: Record<string, string> = {
+const EVENT_TYPE_LABELS: Record<string, string> = {
   created: "创建",
   status_changed: "状态变更",
   draft_generated: "草稿生成",

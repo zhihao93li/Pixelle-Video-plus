@@ -15,6 +15,7 @@ Template utility functions for size parsing and template management
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple
 
@@ -30,8 +31,8 @@ def parse_template_size(template_path: str) -> Tuple[int, int]:
     Parse video size from template path
     
     Args:
-        template_path: Template path like "templates/1080x1920/default.html"
-                      or "1080x1920/default.html"
+        template_path: Template path like "templates/1080x1920/image_default.html"
+                      or "1080x1920/image_default.html"
     
     Returns:
         Tuple of (width, height) in pixels
@@ -40,7 +41,7 @@ def parse_template_size(template_path: str) -> Tuple[int, int]:
         ValueError: If template path format is invalid
     
     Examples:
-        >>> parse_template_size("templates/1080x1920/default.html")
+        >>> parse_template_size("templates/1080x1920/image_default.html")
         (1080, 1920)
         >>> parse_template_size("1920x1080/modern.html")
         (1920, 1080)
@@ -78,7 +79,7 @@ def parse_template_size(template_path: str) -> Tuple[int, int]:
     except ValueError as e:
         raise ValueError(
             f"Failed to parse size from path: {template_path}. "
-            f"Expected format: 'WIDTHxHEIGHT/template.html' (e.g., '1080x1920/default.html'). "
+            f"Expected format: 'WIDTHxHEIGHT/template.html' (e.g., '1080x1920/image_default.html'). "
             f"Error: {e}"
         )
 
@@ -121,11 +122,11 @@ def list_templates_for_size(size: str) -> List[str]:
         size: Size string like "1080x1920"
     
     Returns:
-        List of template filenames (without path) like ["default.html", "modern.html"]
+        List of template filenames (without path) like ["image_default.html", "image_modern.html"]
     
     Examples:
         >>> list_templates_for_size("1080x1920")
-        ['cartoon.html', 'default.html', 'elegant.html', 'modern.html', ...]
+        ['image_cartoon.html', 'image_default.html', 'image_elegant.html', ...]
     """
     # Use new resource API to merge default and custom templates
     all_files = list_resource_files("templates", size)
@@ -134,35 +135,6 @@ def list_templates_for_size(size: str) -> List[str]:
     templates = [f for f in all_files if f.endswith('.html')]
     
     return sorted(templates)
-
-
-def get_template_full_path(size: str, template_name: str) -> str:
-    """
-    Get full template path from size and template name (checks data/templates/ first, then templates/)
-    
-    Args:
-        size: Size string like "1080x1920"
-        template_name: Template filename like "default.html"
-    
-    Returns:
-        Full path like "templates/1080x1920/default.html" or "data/templates/1080x1920/default.html"
-    
-    Raises:
-        FileNotFoundError: If template file doesn't exist in either location
-    
-    Examples:
-        >>> get_template_full_path("1080x1920", "default.html")
-        'templates/1080x1920/default.html'
-    """
-    # Use new resource API to search custom first, then default
-    try:
-        return get_resource_path("templates", size, template_name)
-    except FileNotFoundError:
-        available_templates = list_templates_for_size(size)
-        raise FileNotFoundError(
-            f"Template not found: {size}/{template_name}\n"
-            f"Available templates for size {size}: {available_templates}"
-        )
 
 
 class TemplateDisplayInfo(BaseModel):
@@ -185,7 +157,7 @@ class TemplateDisplayInfo(BaseModel):
 class TemplateInfo(BaseModel):
     """Complete template information with path and display info"""
     
-    template_path: str = Field(..., description="Full template path like '1080x1920/default.html'")
+    template_path: str = Field(..., description="Full template path like '1080x1920/image_default.html'")
     display_info: TemplateDisplayInfo = Field(..., description="Display information")
 
 
@@ -196,16 +168,16 @@ def format_template_display_info(template_name: str, size: str) -> TemplateDispl
     Returns structured data for UI layer to handle display and i18n.
     
     Args:
-        template_name: Template filename like "default.html"
+        template_name: Template filename like "image_default.html"
         size: Size string like "1080x1920"
     
     Returns:
         TemplateDisplayInfo object with name, size, dimensions, orientation, and standard flag
     
     Examples:
-        >>> info = format_template_display_info("default.html", "1080x1920")
+        >>> info = format_template_display_info("image_default.html", "1080x1920")
         >>> info.name
-        'default'
+        'image_default'
         >>> info.is_standard
         True
         
@@ -272,42 +244,6 @@ def get_all_templates_with_info() -> List[TemplateInfo]:
     return result
 
 
-def get_templates_grouped_by_size() -> dict:
-    """
-    Get templates grouped by size
-    
-    Returns:
-        Dict with size as key, list of TemplateInfo as value
-        Ordered by orientation priority: portrait > landscape > square
-    
-    Example:
-        >>> grouped = get_templates_grouped_by_size()
-        >>> for size, templates in grouped.items():
-        ...     print(f"Size: {size}")
-        ...     for t in templates:
-        ...         print(f"  - {t.display_info.name}")
-    """
-    from collections import defaultdict
-    
-    templates = get_all_templates_with_info()
-    grouped = defaultdict(list)
-    
-    for t in templates:
-        grouped[t.display_info.size].append(t)
-    
-    # Sort groups by orientation priority: portrait > landscape > square
-    orientation_priority = {'portrait': 0, 'landscape': 1, 'square': 2}
-    
-    sorted_grouped = {}
-    for size in sorted(grouped.keys(), key=lambda s: (
-        orientation_priority.get(grouped[s][0].display_info.orientation, 3),
-        s
-    )):
-        sorted_grouped[size] = sorted(grouped[size], key=lambda t: t.display_info.name)
-    
-    return sorted_grouped
-
-
 def resolve_template_path(template_input: Optional[str]) -> str:
     """
     Resolve template input to full path with validation (checks data/templates/ first, then templates/)
@@ -317,8 +253,6 @@ def resolve_template_path(template_input: Optional[str]) -> str:
             - None: Use default "1080x1920/image_default.html"
             - "template.html": Use default size + this template
             - "1080x1920/template.html": Full relative path
-            - "templates/1080x1920/template.html": Absolute-ish path (legacy)
-            - "data/templates/1080x1920/template.html": Custom path (legacy)
     
     Returns:
         Resolved full path (custom if exists, otherwise default)
@@ -338,36 +272,20 @@ def resolve_template_path(template_input: Optional[str]) -> str:
     if template_input is None:
         template_input = "1080x1920/image_default.html"
     
-    # Parse input to extract size and template name
-    size = None
-    template_name = None
-    
-    # Handle different input formats
-    if template_input.startswith("templates/") or template_input.startswith("data/templates/"):
-        # Legacy full path format - extract size and name
-        parts = Path(template_input).parts
-        if len(parts) >= 3:
-            size = parts[-2]
-            template_name = parts[-1]
-    elif '/' in template_input and 'x' in template_input.split('/')[0]:
-        # "1080x1920/template.html" format
+    # Parse the public key format. Full filesystem-style paths are not accepted.
+    if "/" in template_input:
         size, template_name = template_input.split('/', 1)
     else:
-        # Just template name - use default size
         size = "1080x1920"
         template_name = template_input
-    
-    # Backward compatibility: migrate "default.html" to "image_default.html"
-    if template_name == "default.html":
-        migrated_name = "image_default.html"
-        try:
-            # Try migrated name first
-            path = get_resource_path("templates", size, migrated_name)
-            logger.info(f"Backward compatibility: migrated '{template_input}' to '{size}/{migrated_name}'")
-            return path
-        except FileNotFoundError:
-            # Fall through to try original name
-            logger.warning(f"Migrated template '{size}/{migrated_name}' not found, trying original name")
+
+    if not re.fullmatch(r"\d+x\d+", size) or not re.fullmatch(
+        r"[A-Za-z0-9_.-]+\.html", template_name
+    ):
+        raise ValueError(
+            "Template key must use 'WIDTHxHEIGHT/template.html' or a plain template filename"
+        )
+    parse_template_size(f"{size}/{template_name}")
     
     # Use resource API to resolve path (custom > default)
     try:
@@ -413,7 +331,7 @@ def get_template_type(template_name: str) -> Literal['static', 'image', 'video']
     elif name.startswith("image_"):
         return "image"
     else:
-        # Fallback: try to detect from legacy names
+        # Unprefixed custom templates default to the image rendering path.
         logger.warning(
             f"Template '{template_name}' doesn't follow naming convention (static_/image_/video_). "
             f"Defaulting to 'image' type."
@@ -493,4 +411,3 @@ def get_templates_grouped_by_size_and_type(
         sorted_grouped[size] = sorted(grouped[size], key=lambda t: t.display_info.name)
     
     return sorted_grouped
-

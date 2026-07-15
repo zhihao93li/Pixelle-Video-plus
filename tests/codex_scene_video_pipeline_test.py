@@ -113,7 +113,6 @@ async def test_generation_service_blocks_codex_pipeline_on_public_surface(tmp_pa
         service.submit(
             GenerationRequest(
                 pipeline_id="codex_scene_video",
-                entry="scenes",
                 input={"scenes": _scenes(tmp_path, 1)},
             )
         )

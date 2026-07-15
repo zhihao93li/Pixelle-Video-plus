@@ -4,7 +4,6 @@ import {
   Bot,
   FileText,
   Image,
-  Loader2,
   Plus,
   Sparkles,
   X,
@@ -36,20 +35,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/toast"
 import { InlineError, TechDetails } from "@/components/shared/feedback"
-import { ProductionSubmitPanel } from "@/components/shared/ProductionSubmitPanel"
-import type { ProductionOverrides } from "@/components/shared/ProductionSubmitPanel"
-import { draftSetProvenance, formatDate, readableError } from "@/lib/format"
+import { formatDate, readableError } from "@/lib/format"
 import { languageLabel } from "@/lib/languages"
 import {
   ACTOR_LABELS,
@@ -57,41 +47,31 @@ import {
   eventTypeLabel,
   VARIANT_STATUS_LABELS,
 } from "@/lib/contentItemMeta"
-import { generateDraftsForItems } from "@/lib/contentDrafting"
-import {
-  buildProduceSubmissions,
-  isProducibleItem,
-  submitContentProduction,
-} from "@/lib/produceContent"
 import { ImageSetView } from "@/components/shared/ImageSetView"
 import { TextArticleView } from "@/components/shared/TextArticleView"
 import { imageSetLabel } from "@/lib/imageSet"
 import { routeHref } from "@/lib/router"
 import { cn } from "@/lib/utils"
-import { useCurrentProject } from "@/lib/currentProject"
-import { useTaskCenter } from "@/lib/taskCenter"
 import {
   artifactFileUrl,
   confirmContentItem,
   contentSceneImageUrl,
-  createContentTopics,
   getContentItem,
-  getScriptReviewDraftSet,
   getTaskResult,
   markContentPublished,
   patchContentItem,
   recordContentMetrics,
+  reviseContentReview,
   transitionContentItem,
-  updateScriptReviewDraftSet,
   type ContentItem,
   type GenerationResult,
-  type ScriptReviewDraft,
+  type SceneDraft,
 } from "@/lib/generationApi"
 
 /**
  * 内容详情页（/board/item/:id）：抽屉的继任者（DESIGN.md §2.5：分钟级多分区
  * 工作必须页面）。左=多语言文案与分镜编辑，右=状态/溯源/产物/发布/数据/动态。
- * 出片走共享提交管线（lib/produceContent），与看板多选出片行为一致。
+ * 确认属于原生产任务的中间站点；本页不创建新的生产任务。
  */
 
 type VariantDraft = { title: string; script: string; narrations: string[] }
@@ -113,8 +93,6 @@ function scrollToSection(id: string) {
 
 export function ContentItemDetailPage({ itemId }: { itemId: string }) {
   const toast = useToast()
-  const taskCenter = useTaskCenter()
-  const { projectId } = useCurrentProject()
   const [item, setItem] = useState<ContentItem | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -126,7 +104,6 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
   const [results, setResults] = useState<
     Record<string, GenerationResult | null>
   >({})
-  const [provenance, setProvenance] = useState<string | null>(null)
   const [metricsDraft, setMetricsDraft] = useState({
     likes: "",
     favorites: "",
@@ -140,15 +117,10 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
     url: "",
     note: "",
   })
-  const [derivedText, setDerivedText] = useState("")
-  const [derivedOpen, setDerivedOpen] = useState(false)
   const [eventsExpanded, setEventsExpanded] = useState(false)
-  const [produceOpen, setProduceOpen] = useState(false)
-  const [produceTemplateId, setProduceTemplateId] = useState("")
-  const [produceOverrides, setProduceOverrides] = useState<ProductionOverrides>(
-    {}
-  )
-  const [producing, setProducing] = useState(false)
+  const [sceneDrafts, setSceneDrafts] = useState<SceneDraft[]>([])
+  const [selectedSceneIds, setSelectedSceneIds] = useState<string[]>([])
+  const [revisionInstruction, setRevisionInstruction] = useState("")
   const [reloadToken, setReloadToken] = useState(0)
 
   const refresh = useCallback(() => setReloadToken((token) => token + 1), [])
@@ -209,7 +181,9 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
       current && languages.includes(current) ? current : (languages[0] ?? null)
     )
     setError(null)
-    setDerivedText(`${item.title} 的后续`)
+    setSceneDrafts(item.scene_manifest?.scenes ?? [])
+    setSelectedSceneIds([])
+    setRevisionInstruction("")
     setMetricsDraft({
       likes: item.metrics.likes != null ? String(item.metrics.likes) : "",
       favorites:
@@ -248,27 +222,6 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
       cancelled = true
     }
   }, [item?.links.task_ids])
-
-  // 溯源
-  useEffect(() => {
-    const draftSetId = item?.links.draft_set_id
-    if (!draftSetId) {
-      return
-    }
-    let cancelled = false
-    void getScriptReviewDraftSet(String(draftSetId))
-      .then((draftSet) => {
-        if (!cancelled) {
-          setProvenance(draftSetProvenance(draftSet))
-        }
-      })
-      .catch(() => {
-        // 拿不到不显示
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [item?.links.draft_set_id])
 
   const run = useCallback(
     async (action: () => Promise<void>) => {
@@ -331,6 +284,11 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
   )
   const manifestPending =
     item.status === "pending_review" && Boolean(item.scene_manifest)
+  const isAgentImageManifest =
+    item.scene_manifest?.review_kind === "agent_image_scenes"
+  const isImagePagesManifest = item.scene_manifest?.review_kind === "image_pages"
+  const canEditScenes =
+    item.status === "pending_review" && !item.scene_manifest?.confirmed
   const isReviewing = item.status === "pending_review" && !item.scene_manifest
   const productionFailure = contentProductionFailure(item)
   const allConfirmed =
@@ -348,9 +306,6 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
     "video"
   const isNonVideoPublish = publishArtifactType !== "video"
   const nonVideoPublishNoun = publishArtifactType === "text" ? "长文" : "图集"
-  const canProduce =
-    isProducibleItem(item) && item.status !== "idea" && !item.scene_manifest
-  const produceSubmissions = buildProduceSubmissions([item])
   const currentLanguage = activeLanguage ?? languages[0] ?? null
   const currentDraft: VariantDraft = (currentLanguage &&
     variantDrafts[currentLanguage]) || {
@@ -376,30 +331,6 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
     return values.map((line) => line.trim()).filter(Boolean)
   }
 
-  async function syncDraftSet() {
-    const draftSetId = item!.links.draft_set_id
-    const draftIndex = item!.links.draft_index
-    if (!draftSetId || draftIndex == null) {
-      return
-    }
-    const draftSet = await getScriptReviewDraftSet(String(draftSetId))
-    const drafts: ScriptReviewDraft[] = draftSet.drafts.map((draft) => {
-      if (draft.index !== draftIndex) {
-        return draft
-      }
-      const languageDrafts = { ...(draft.language_drafts ?? {}) }
-      for (const [language, edited] of Object.entries(variantDrafts)) {
-        languageDrafts[language] = {
-          title: edited.title,
-          script: edited.script,
-          narrations: cleanNarrations(edited.narrations),
-        }
-      }
-      return { ...draft, language_drafts: languageDrafts }
-    })
-    await updateScriptReviewDraftSet(String(draftSetId), { drafts })
-  }
-
   async function confirmVariant(language: string) {
     const draft = variantDrafts[language]
     await patchContentItem(item!.item_id, {
@@ -412,7 +343,6 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
         },
       },
     })
-    await syncDraftSet()
   }
 
   async function rejectVariant(language: string) {
@@ -426,7 +356,6 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
         },
       },
     })
-    await syncDraftSet()
     if (item!.status === "pending_review") {
       await transitionContentItem(item!.item_id, "draft_ready", {
         reason: "打回重写",
@@ -463,32 +392,42 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
     )
   }
 
-  async function submitProduce() {
-    if (!produceTemplateId || produceSubmissions.length === 0) {
-      return
-    }
-    setProducing(true)
-    try {
-      await submitContentProduction({
-        submissions: produceSubmissions,
-        templateId: produceTemplateId,
-        overrides: produceOverrides,
-        projectId: projectId ?? undefined,
-        allItems: [item!],
-        trackTask: taskCenter.trackTask,
-      })
-      toast({ title: "出片已提交", variant: "success" })
-      setProduceOpen(false)
-      refresh()
-    } catch (produceError) {
-      toast({
-        title: "出片失败",
-        description: readableError(produceError),
-        variant: "error",
-      })
-    } finally {
-      setProducing(false)
-    }
+  async function saveSceneManifest() {
+    if (!item!.scene_manifest) return
+    await reviseContentReview({
+      itemId: item!.item_id,
+      action: "direct_edit",
+      contentVersion: item!.updated_at,
+      sceneManifest: {
+        ...item!.scene_manifest,
+        confirmed: false,
+        scenes: sceneDrafts,
+      },
+    })
+    toast({ title: "分镜已保存，等待重新确认", variant: "success" })
+    refresh()
+  }
+
+  async function reviseCurrentReview(
+    action: "rewrite_script" | "regenerate_selected" | "regenerate_all"
+  ) {
+    await reviseContentReview({
+      itemId: item!.item_id,
+      action,
+      contentVersion: item!.updated_at,
+      selectedSceneIds,
+      instruction: revisionInstruction,
+    })
+    toast({
+      title:
+        action === "rewrite_script"
+          ? "文案已重写，等待确认"
+          : action === "regenerate_all"
+            ? "整套内容已重新生成"
+            : "选中内容已重新生成",
+      variant: "success",
+    })
+    refresh()
   }
 
   async function saveMetrics() {
@@ -519,7 +458,7 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
   const events = [...item.events].reverse()
   const visibleEvents = eventsExpanded ? events : events.slice(0, 3)
 
-  // 右栏速览定义行：溯源 + 零散元数据合并，缺值不渲染（无「未返回」占位）
+  // 右栏速览定义行：缺值不渲染（无「未返回」占位）
   const overviewItems: Array<{ label: string; value: string }> = [
     {
       label: "创建时间",
@@ -529,7 +468,6 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
       label: "语言",
       value: languages.length > 0 ? `${languages.length} 种` : "",
     },
-    { label: "溯源", value: provenance || "" },
     {
       label: "关联任务",
       value: taskIds.length > 0 ? `${taskIds.length} 个` : "",
@@ -568,23 +506,10 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
 
   switch (item.status) {
     case "idea":
-      if (item.kind === "text") {
-        lifecycleGuidance = "先生成草稿，再逐个审核语言版本。"
-        lifecycleAction = {
-          label: "生成草稿",
-          loading: busy,
-          onClick: () => {
-            void run(async () => {
-              await generateDraftsForItems([item], toast, refresh)
-            })
-          },
-        }
-      } else {
-        lifecycleGuidance = "素材内容需要从快速生产入口选择生成方式。"
-        lifecycleAction = {
-          href: routeHref("/create"),
-          label: "前往快速生产",
-        }
+      lifecycleGuidance = "这是一条未发起生产的历史内容；新生产统一从快速生产开始。"
+      lifecycleAction = {
+        href: routeHref("/create"),
+        label: "前往快速生产",
       }
       break
     case "drafting":
@@ -597,9 +522,13 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
       break
     case "pending_review":
       if (manifestPending) {
-        lifecycleGuidance = "确认完整分镜文案和图片提示词后，Agent 才会开始生成图片。"
+        lifecycleGuidance = isAgentImageManifest
+          ? "确认完整分镜文案和图片提示词后，Agent 才会开始生成图片。"
+          : isImagePagesManifest
+            ? "确认分页后，原生产任务将自动继续生成配图和图集。"
+            : "确认分镜后，原生产任务将自动继续生成画面、配音和视频。"
         lifecycleAction = {
-          label: "确认完整分镜",
+          label: isImagePagesManifest ? "确认分页" : "确认完整分镜",
           loading: busy,
           onClick: () => void run(confirmItem),
         }
@@ -634,33 +563,26 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
         ).length
         lifecycleGuidance =
           missingImages > 0
-            ? `分镜已确认，等待 Agent 上传 ${missingImages} 张配图并发起制作。`
-            : "配图已齐，等待 Agent 发起制作。"
+            ? `分镜已确认，等待 Agent 上传 ${missingImages} 张配图。`
+            : "配图已齐，原生产任务将自动继续。"
         lifecycleAction = { label: "刷新状态", onClick: refresh }
-      } else if (canProduce) {
-        lifecycleGuidance = "审核已完成，选择生产模板并提交出片。"
-        lifecycleAction = {
-          disabled: produceSubmissions.length === 0,
-          helper:
-            produceSubmissions.length === 0
-              ? "请先确认至少一个语言版本。"
-              : undefined,
-          label: "开始出片",
-          onClick: () => setProduceOpen(true),
-        }
       } else {
-        lifecycleGuidance = "这类素材需要从快速生产入口继续。"
+        lifecycleGuidance = "已确认，原生产任务将继续执行。"
         lifecycleAction = {
-          href: routeHref("/create"),
-          label: "前往快速生产",
+          href: taskIds[0]
+            ? routeHref(`/board/tasks/${taskIds[0]}`)
+            : routeHref("/board"),
+          label: taskIds[0] ? "查看生产任务" : "返回工作台",
         }
       }
       break
     case "producing":
       lifecycleGuidance = "生产任务正在运行，完成后页面会自动刷新。"
       lifecycleAction = {
-        href: routeHref("/tasks"),
-        label: "查看任务",
+        href: taskIds[0]
+          ? routeHref(`/board/tasks/${taskIds[0]}`)
+          : routeHref("/board"),
+        label: taskIds[0] ? "查看生产任务" : "返回工作台",
       }
       break
     case "produced":
@@ -787,38 +709,107 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
             <div className="flex flex-col gap-3 rounded-lg border bg-muted/10 p-3">
               <div>
                 <div className="text-sm font-medium">
-                  Agent 分镜 · {item.scene_manifest.scenes.length} 镜
+                  {isAgentImageManifest
+                    ? "Agent 配图分镜"
+                    : isImagePagesManifest
+                      ? "图文分页"
+                      : "视频分镜"}{" "}
+                  ·{" "}
+                  {item.scene_manifest.scenes.length} 镜
                 </div>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   {item.scene_manifest.confirmed
-                    ? "分镜文案和图片提示词已锁定。"
-                    : "请确认每镜口播和画面提示词；确认后 Agent 才会生成图片。"}
+                    ? isAgentImageManifest
+                      ? "分镜文案和图片提示词已确认。"
+                      : isImagePagesManifest
+                        ? "图文分页已确认。"
+                        : "视频分镜已确认。"
+                    : isAgentImageManifest
+                      ? "请确认每镜口播和画面提示词；确认后 Agent 才会生成图片。"
+                      : isImagePagesManifest
+                        ? "请确认每页内容；确认后原生产任务会自动继续。"
+                        : "请确认每镜内容；确认后原生产任务会自动继续。"}
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                {item.scene_manifest.scenes.map((scene) => (
+                {sceneDrafts.map((scene, sceneIndex) => (
                   <article
                     className="overflow-hidden rounded-lg border bg-background"
                     key={scene.scene_id}
                   >
-                    {scene.asset_id ? (
+                    {isAgentImageManifest && scene.asset_id ? (
                       <img
                         alt={`第 ${scene.order} 镜`}
                         className="aspect-video w-full object-cover"
                         loading="lazy"
                         src={contentSceneImageUrl(item.item_id, scene.scene_id)}
                       />
-                    ) : (
+                    ) : isAgentImageManifest ? (
                       <div className="flex aspect-video items-center justify-center bg-muted text-xs text-muted-foreground">
                         确认后等待 Agent 配图
                       </div>
-                    )}
+                    ) : null}
                     <div className="space-y-2 p-3">
-                      <div className="text-xs font-medium">第 {scene.order} 镜</div>
-                      <p className="text-sm leading-6">{scene.narration}</p>
-                      <p className="border-t pt-2 text-xs leading-5 text-muted-foreground">
-                        画面：{scene.image_prompt}
-                      </p>
+                      <div className="flex items-center justify-between gap-2 text-xs font-medium">
+                        <span>
+                          第 {scene.order} {isImagePagesManifest ? "页" : "镜"}
+                        </span>
+                        {canEditScenes ? (
+                          <label className="inline-flex cursor-pointer items-center gap-1.5 text-muted-foreground">
+                            <input
+                              checked={selectedSceneIds.includes(scene.scene_id)}
+                              className="size-4 accent-primary"
+                              onChange={(event) =>
+                                setSelectedSceneIds((current) =>
+                                  event.target.checked
+                                    ? [...current, scene.scene_id]
+                                    : current.filter((id) => id !== scene.scene_id)
+                                )
+                              }
+                              type="checkbox"
+                            />
+                            选择
+                          </label>
+                        ) : null}
+                      </div>
+                      {canEditScenes ? (
+                        <Textarea
+                          aria-label={`第 ${scene.order} 镜文案`}
+                          className="min-h-24 resize-y text-sm leading-6"
+                          onChange={(event) =>
+                            setSceneDrafts((current) =>
+                              current.map((candidate, index) =>
+                                index === sceneIndex
+                                  ? { ...candidate, narration: event.target.value }
+                                  : candidate
+                              )
+                            )
+                          }
+                          value={scene.narration}
+                        />
+                      ) : (
+                        <p className="text-sm leading-6">{scene.narration}</p>
+                      )}
+                      {isAgentImageManifest && canEditScenes ? (
+                        <Textarea
+                          aria-label={`第 ${scene.order} 镜画面提示词`}
+                          className="min-h-20 resize-y text-xs leading-5"
+                          onChange={(event) =>
+                            setSceneDrafts((current) =>
+                              current.map((candidate, index) =>
+                                index === sceneIndex
+                                  ? { ...candidate, image_prompt: event.target.value }
+                                  : candidate
+                              )
+                            )
+                          }
+                          value={scene.image_prompt}
+                        />
+                      ) : isAgentImageManifest ? (
+                        <p className="border-t pt-2 text-xs leading-5 text-muted-foreground">
+                          画面：{scene.image_prompt}
+                        </p>
+                      ) : null}
                       {scene.duration ? (
                         <p className="text-xs text-muted-foreground">
                           预计 {scene.duration} 秒
@@ -828,6 +819,47 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
                   </article>
                 ))}
               </div>
+              {canEditScenes ? (
+                <div className="space-y-3 border-t pt-3">
+                  <Textarea
+                    aria-label="重新生成修改意见"
+                    className="min-h-20 resize-y"
+                    onChange={(event) => setRevisionInstruction(event.target.value)}
+                    placeholder="修改方向（选填）"
+                    value={revisionInstruction}
+                  />
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button
+                      disabled={busy || selectedSceneIds.length === 0}
+                      onClick={() =>
+                        void run(() => reviseCurrentReview("regenerate_selected"))
+                      }
+                      size="sm"
+                      variant="ghost"
+                    >
+                      重新生成选中项
+                    </Button>
+                    <Button
+                      disabled={busy}
+                      onClick={() =>
+                        void run(() => reviseCurrentReview("regenerate_all"))
+                      }
+                      size="sm"
+                      variant="ghost"
+                    >
+                      整套重新生成
+                    </Button>
+                    <Button
+                      disabled={busy || sceneDrafts.some((scene) => !scene.narration.trim())}
+                      onClick={() => void run(saveSceneManifest)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      保存直接修改
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -972,6 +1004,16 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
                     </FieldSet>
 
                     <div className="flex justify-end gap-2 border-t pt-3">
+                      <Button
+                        className="h-11 sm:h-8"
+                        disabled={busy}
+                        onClick={() =>
+                          void run(() => reviseCurrentReview("rewrite_script"))
+                        }
+                        variant="ghost"
+                      >
+                        让系统重写
+                      </Button>
                       <Button
                         className="h-11 sm:h-8"
                         disabled={busy}
@@ -1154,17 +1196,20 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
             </WorkspacePanel>
           )}
 
-          {(["produced", "scheduled", "published", "measured"].includes(
+          {["produced", "scheduled", "published", "measured"].includes(
             item.status
-          )) && (
+          ) && (
             <WorkspacePanel padding="compact" title="发布记录">
               {item.publications.length > 0 ? (
                 <div className="mb-3 divide-y border-y text-xs">
                   {item.publications.map((publication) => (
                     <div className="py-2" key={publication.publication_id}>
-                      <span className="font-medium">{publication.platform}</span>
+                      <span className="font-medium">
+                        {publication.platform}
+                      </span>
                       <span className="ml-2 text-muted-foreground">
-                        {formatDate(publication.published_at)} · {publication.evidence_value}
+                        {formatDate(publication.published_at)} ·{" "}
+                        {publication.evidence_value}
                       </span>
                     </div>
                   ))}
@@ -1182,11 +1227,16 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
                   <FieldLabel>平台</FieldLabel>
                   <Select
                     onValueChange={(platform) =>
-                      setPublicationDraft((current) => ({ ...current, platform }))
+                      setPublicationDraft((current) => ({
+                        ...current,
+                        platform,
+                      }))
                     }
                     value={publicationDraft.platform}
                   >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="xiaohongshu">小红书</SelectItem>
                       <SelectItem value="youtube">YouTube</SelectItem>
@@ -1224,7 +1274,9 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="publish-evidence">人工证据备注</FieldLabel>
+                  <FieldLabel htmlFor="publish-evidence">
+                    人工证据备注
+                  </FieldLabel>
                   <Input
                     id="publish-evidence"
                     onChange={(event) =>
@@ -1258,7 +1310,8 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
                   className="h-11 sm:h-7"
                   disabled={
                     busy ||
-                    (!publicationDraft.url.trim() && !publicationDraft.note.trim())
+                    (!publicationDraft.url.trim() &&
+                      !publicationDraft.note.trim())
                   }
                   onClick={() => void run(markPublished)}
                   size="sm"
@@ -1284,14 +1337,17 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
                     }
                     value={metricsDraft.publicationId}
                   >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       {item.publications.map((publication) => (
                         <SelectItem
                           key={publication.publication_id}
                           value={publication.publication_id}
                         >
-                          {publication.platform} · {formatDate(publication.published_at)}
+                          {publication.platform} ·{" "}
+                          {formatDate(publication.published_at)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1346,61 +1402,6 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
                   使用上方生命周期栏的唯一下一步保存本轮数据。
                 </FieldDescription>
               </Field>
-              <div className="mt-3 border-t pt-2">
-                <Button
-                  aria-expanded={derivedOpen}
-                  className="h-11 px-0 sm:h-7"
-                  onClick={() => setDerivedOpen((value) => !value)}
-                  size="sm"
-                  variant="ghost"
-                >
-                  {derivedOpen ? "收起衍生选题" : "衍生新选题"}
-                </Button>
-                {derivedOpen && (
-                  <div className="mt-2 flex flex-col gap-2">
-                    <Field>
-                      <FieldLabel htmlFor="derived-topics">衍生选题</FieldLabel>
-                      <Textarea
-                        autoComplete="off"
-                        id="derived-topics"
-                        name="derived-topics"
-                        onChange={(event) => setDerivedText(event.target.value)}
-                        placeholder="每行输入一个选题…"
-                        rows={3}
-                        value={derivedText}
-                      />
-                    </Field>
-                    <Button
-                      className="h-11 self-end sm:h-7"
-                      disabled={busy || !derivedText.trim()}
-                      onClick={() =>
-                        void run(async () => {
-                          const titles = derivedText
-                            .split("\n")
-                            .map((line) => line.trim())
-                            .filter(Boolean)
-                          if (titles.length > 0) {
-                            await createContentTopics({
-                              titles,
-                              source: "derived",
-                              projectId: item!.project,
-                            })
-                            toast({
-                              title: `已加入 ${titles.length} 个衍生选题`,
-                              variant: "success",
-                            })
-                          }
-                          setDerivedOpen(false)
-                        })
-                      }
-                      size="sm"
-                      variant="outline"
-                    >
-                      加入选题池
-                    </Button>
-                  </div>
-                )}
-              </div>
             </WorkspacePanel>
           )}
 
@@ -1449,12 +1450,6 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
               { label: "项目", value: item.project },
               { label: "条目 ID", value: item.item_id },
               {
-                label: "草稿集 ID",
-                value: item.links.draft_set_id
-                  ? String(item.links.draft_set_id)
-                  : null,
-              },
-              {
                 label: "任务 ID",
                 value: taskIds.length ? taskIds.join(", ") : null,
               },
@@ -1463,42 +1458,6 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
         </aside>
       </div>
 
-      {/* 出片确认（短任务，Sheet 合规） */}
-      <Sheet onOpenChange={setProduceOpen} open={produceOpen}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle>出片</SheetTitle>
-            <SheetDescription className="text-left">
-              为「{item.title}」的 {produceSubmissions.length}{" "}
-              个已确认语言版本选择生产模板。
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex flex-col gap-4 px-4 pb-4">
-            <ProductionSubmitPanel
-              onOverridesChange={setProduceOverrides}
-              onTemplateChange={setProduceTemplateId}
-              overrides={produceOverrides}
-              projectId={projectId ?? undefined}
-              requiredInput="script"
-              templateId={produceTemplateId}
-            />
-            <Button
-              className="h-11 sm:h-8"
-              disabled={
-                producing ||
-                !produceTemplateId ||
-                produceSubmissions.length === 0
-              }
-              onClick={() => void submitProduce()}
-            >
-              {producing && (
-                <Loader2 className="animate-spin" data-icon="inline-start" />
-              )}
-              开始出片（{produceSubmissions.length}）
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
     </PageFrame>
   )
 }

@@ -157,46 +157,6 @@ def get_output_path(*paths: str) -> str:
     return output_path
 
 
-def save_bytes_to_file(data: bytes, file_path: str) -> str:
-    """
-    Save bytes data to file
-    
-    Creates parent directories if they don't exist.
-    
-    Args:
-        data: Binary data to save
-        file_path: Target file path
-    
-    Returns:
-        Absolute path of saved file
-    
-    Example:
-        save_bytes_to_file(audio_data, get_temp_path("audio.mp3"))
-    """
-    # Ensure parent directory exists
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    
-    # Write binary data
-    with open(file_path, "wb") as f:
-        f.write(data)
-    
-    return os.path.abspath(file_path)
-
-
-def ensure_dir(path: str) -> str:
-    """
-    Ensure directory exists, create if not
-    
-    Args:
-        path: Directory path
-    
-    Returns:
-        Absolute path of directory
-    """
-    os.makedirs(path, exist_ok=True)
-    return os.path.abspath(path)
-
-
 # ========== Task Directory Management ==========
 
 def create_task_id() -> str:
@@ -349,8 +309,8 @@ def get_resource_path(resource_type: Literal["bgm", "templates", "workflows"], *
         >>> get_resource_path("bgm", "happy.mp3")
         # Returns: "data/bgm/happy.mp3" (if exists) or "bgm/happy.mp3"
         
-        >>> get_resource_path("templates", "1080x1920", "default.html")
-        # Returns: "data/templates/1080x1920/default.html" or "templates/1080x1920/default.html"
+        >>> get_resource_path("templates", "1080x1920", "image_default.html")
+        # Returns: "data/templates/1080x1920/image_default.html" or "templates/1080x1920/image_default.html"
         
         >>> get_resource_path("workflows", "selfhost", "image_flux.json")
         # Returns: "data/workflows/selfhost/image_flux.json" or "workflows/selfhost/image_flux.json"
@@ -402,7 +362,7 @@ def list_resource_files(
         # (merged from bgm/ and data/bgm/)
         
         >>> list_resource_files("templates", "1080x1920")
-        # Returns: ["custom.html", "default.html", "modern.html"]
+        # Returns: ["custom.html", "image_default.html", "image_modern.html"]
         # (merged from templates/1080x1920/ and data/templates/1080x1920/)
     """
     files = {}  # Use dict to track source priority: {filename: path}
@@ -483,11 +443,10 @@ def resource_exists(resource_type: Literal["bgm", "templates", "workflows"], *pa
         >>> resource_exists("bgm", "happy.mp3")
         True
         
-        >>> resource_exists("templates", "1080x1920", "default.html")
+        >>> resource_exists("templates", "1080x1920", "image_default.html")
         True
     """
     custom_path = get_data_path(resource_type, *paths)
     default_path = get_root_path(resource_type, *paths)
     
     return os.path.exists(custom_path) or os.path.exists(default_path)
-

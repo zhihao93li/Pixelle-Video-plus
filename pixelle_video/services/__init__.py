@@ -35,18 +35,13 @@ from pixelle_video.services.persistence import PersistenceService
 from pixelle_video.services.tts_service import TTSService
 from pixelle_video.services.video import VideoService
 
-# Backward compatibility alias
-ImageService = MediaService
-
 __all__ = [
     "ComfyBaseService",
     "LLMService",
     "TTSService",
     "MediaService",
-    "ImageService",  # Backward compatibility
     "VideoService",
     "FrameProcessor",
     "PersistenceService",
     "HistoryManager",
 ]
-

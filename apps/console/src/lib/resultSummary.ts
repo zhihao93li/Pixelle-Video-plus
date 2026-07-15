@@ -142,7 +142,9 @@ export function buildProgressRuntimeItems(
 function checkMessages(qualityReview: QualityReviewInput, status: string) {
   return (qualityReview.checks || [])
     .filter((check) => check.status === status)
-    .map((check) => check.message || check.id || "Quality check needs attention.")
+    .map(
+      (check) => check.message || check.id || "Quality check needs attention."
+    )
 }
 
 function assetStatusLabel(asset: Asset): AssetItem["statusLabel"] {
@@ -163,7 +165,11 @@ function readNumber(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value
   }
-  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+  if (
+    typeof value === "string" &&
+    value.trim() &&
+    Number.isFinite(Number(value))
+  ) {
     return Number(value)
   }
   return null

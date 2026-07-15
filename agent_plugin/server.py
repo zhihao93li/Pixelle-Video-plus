@@ -1,8 +1,4 @@
-"""Pixelle MCP tools.
-
-Intentionally absent: confirm_item, submit_batch, recipe/project/settings
-mutation, direct publishing, deletion, and raw generation submission.
-"""
+"""Pixelle MCP tools for complete production routes and their continuations."""
 
 from __future__ import annotations
 
@@ -86,6 +82,102 @@ async def get_content_item(item_id: str) -> Any:
 
 
 @mcp.tool
+async def confirm_pending_item(
+    item_id: str,
+    content_version: str,
+    explicit_user_confirmation: bool,
+    request_id: str | None = None,
+) -> Any:
+    """Relay a user's explicit approval of the exact content version previously displayed.
+
+    Never call this from inferred sentiment. ``content_version`` must be the
+    ``updated_at`` value returned with the full pending item, and
+    ``explicit_user_confirmation`` must only be true after an unambiguous user reply.
+    """
+    return await _call(
+        lambda: _client.request(
+            "POST",
+            f"/content-items/{item_id}/confirm",
+            json={
+                "content_version": content_version,
+                "explicit_user_confirmation": explicit_user_confirmation,
+                **_trace(request_id),
+            },
+        )
+    )
+
+
+@mcp.tool
+async def edit_pending_review(
+    item_id: str,
+    content_version: str,
+    variants: dict[str, dict[str, Any]] | None = None,
+    scenes: list[dict[str, Any]] | None = None,
+    review_kind: str | None = None,
+    request_id: str | None = None,
+) -> Any:
+    """Save the user's direct edits to the exact pending version without creating a new task."""
+    scene_manifest = None
+    if scenes is not None:
+        scene_manifest = {
+            "review_kind": review_kind or "video_scenes",
+            "scenes": scenes,
+            "confirmed": False,
+        }
+    return await _call(
+        lambda: _client.request(
+            "POST",
+            f"/content-items/{item_id}/revise-review",
+            json={
+                "action": "direct_edit",
+                "content_version": content_version,
+                "variants": variants,
+                "scene_manifest": scene_manifest,
+                **_trace(request_id),
+            },
+        )
+    )
+
+
+@mcp.tool
+async def regenerate_pending_review(
+    item_id: str,
+    content_version: str,
+    action: str,
+    selected_scene_ids: list[str] | None = None,
+    instruction: str | None = None,
+    request_id: str | None = None,
+) -> Any:
+    """Rewrite a pending script, selected scenes/pages, or the complete scene/page plan.
+
+    ``action`` must be ``rewrite_script``, ``regenerate_selected``, or
+    ``regenerate_all``. The optional instruction is the user's direction, not
+    an approval, and the existing production task remains stable.
+    """
+    if action not in {"rewrite_script", "regenerate_selected", "regenerate_all"}:
+        return {
+            "status": "error",
+            "error": {
+                "code": 422,
+                "message": "action 必须是 rewrite_script、regenerate_selected 或 regenerate_all。",
+            },
+        }
+    return await _call(
+        lambda: _client.request(
+            "POST",
+            f"/content-items/{item_id}/revise-review",
+            json={
+                "action": action,
+                "content_version": content_version,
+                "selected_scene_ids": selected_scene_ids or [],
+                "instruction": instruction,
+                **_trace(request_id),
+            },
+        )
+    )
+
+
+@mcp.tool
 async def list_recipes() -> Any:
     """List public and Agent recipes, including live requirements."""
 
@@ -95,7 +187,7 @@ async def list_recipes() -> Any:
         capability_by_id = {recipe["id"]: recipe for recipe in capabilities.get("recipes", [])}
         recipes = [
             *response.get("templates", []),
-            *(response.get("agent_templates") or response.get("codex_templates") or []),
+            *(response.get("agent_templates") or []),
         ]
         for recipe in recipes:
             capability = capability_by_id.get(recipe.get("id"), {})
@@ -129,56 +221,9 @@ async def get_task(task_id: str) -> Any:
 
 
 @mcp.tool
-async def list_batches(limit: int = 50) -> Any:
-    """List persisted generation batches."""
-    return await _call(
-        lambda: _client.request(
-            "GET", "/generation/batches", params={"limit": min(max(limit, 1), 50)}
-        )
-    )
-
-
-@mcp.tool
-async def get_batch(batch_id: str) -> Any:
-    """Read one persisted generation batch."""
-    return await _call(lambda: _client.request("GET", f"/generation/batches/{batch_id}"))
-
-
-@mcp.tool
 async def get_operation(operation_id: str) -> Any:
     """Poll one asynchronous content-flow operation."""
     return await _call(lambda: _client.request("GET", f"/agent/operations/{operation_id}"))
-
-
-@mcp.tool
-async def add_topics(
-    titles: list[str], project_id: str | None = None, request_id: str | None = None
-) -> Any:
-    """Add topics to the shared content board with Agent provenance."""
-    payload: dict[str, Any] = {"titles": titles, **_trace(request_id)}
-    if project_id:
-        payload["project_id"] = project_id
-    return await _call(lambda: _client.request("POST", "/content-items/topics", json=payload))
-
-
-@mcp.tool
-async def draft_items(item_ids: list[str], request_id: str | None = None) -> Any:
-    """Start asynchronous drafting for content items and return operation ids."""
-    base_id = request_id or uuid.uuid4().hex
-
-    async def action():
-        results = []
-        for item_id in item_ids[:50]:
-            results.append(
-                await _client.request(
-                    "POST",
-                    f"/content-items/{item_id}/draft",
-                    json=_trace(f"{base_id}:{item_id}"),
-                )
-            )
-        return {"operations": results}
-
-    return await _call(action)
 
 
 @mcp.tool
@@ -229,21 +274,43 @@ async def upload_scene_images(
 
 
 @mcp.tool
-async def produce_item(
-    item_id: str,
-    recipe_id: str | None = None,
-    language: str | None = None,
+async def start_production(
+    project_id: str,
+    pipeline_id: str,
+    recipe_id: str,
+    input: dict[str, Any],
+    overrides: dict[str, Any] | None = None,
+    content_item_id: str | None = None,
     request_id: str | None = None,
 ) -> Any:
-    """Produce a human-confirmed item with its project default or selected recipe."""
-    payload: dict[str, Any] = _trace(request_id)
-    if recipe_id:
-        payload["recipe_id"] = recipe_id
-    if language:
-        payload["language"] = language
-    return await _call(
-        lambda: _client.request("POST", f"/content-items/{item_id}/produce", json=payload)
-    )
+    """Start one declared Agent-capable route and create its ledger task atomically."""
+    trace = _trace(request_id)
+    trace.pop("source", None)  # HTTP identity, not caller input, owns Agent provenance.
+    payload = {
+        "project_id": project_id,
+        "pipeline_id": pipeline_id,
+        "recipe_id": recipe_id,
+        "input": input,
+        "overrides": overrides or {},
+        "content_item_id": content_item_id,
+        **trace,
+    }
+    return await _call(lambda: _client.request("POST", "/production-tasks", json=payload))
+
+
+@mcp.tool
+async def list_production_tasks(
+    project_id: str | None = None,
+    state: str | None = None,
+    limit: int = 50,
+) -> Any:
+    """Read the unified workbench task cards without mutating state."""
+    params: dict[str, Any] = {"limit": min(max(limit, 1), 50)}
+    if project_id:
+        params["project_id"] = project_id
+    if state:
+        params["state"] = state
+    return await _call(lambda: _client.request("GET", "/production-tasks", params=params))
 
 
 @mcp.tool

@@ -1,10 +1,6 @@
 import { expect, test } from "playwright/test"
 
-import {
-  preparePage,
-  trackedTaskForState,
-  type SeededRunState,
-} from "./fixtures/app"
+import { preparePage } from "./fixtures/app"
 import { fixtureIds, installApiFixtures } from "./fixtures/api"
 
 test.describe("项目边界与页面异步状态", () => {
@@ -58,10 +54,10 @@ test.describe("项目边界与页面异步状态", () => {
       waitUntil: "domcontentloaded",
     })
 
-    await expect(page.getByText("正在读取可用配方")).toBeVisible()
+    await expect(page.getByText("正在读取可用模板")).toBeVisible()
   })
 
-  test("Production empty 显示无可用配方并给出恢复动作", async ({ page }) => {
+  test("Production empty 显示无可用模板并给出恢复动作", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       productionState: "empty",
     })
@@ -70,10 +66,10 @@ test.describe("项目边界与页面异步状态", () => {
       waitUntil: "networkidle",
     })
 
-    await expect(page.getByText("配方读取失败")).toBeVisible()
+    await expect(page.getByText("模板读取失败")).toBeVisible()
     await expect(
       page.getByText(
-        "指定配方不存在或当前项目无权使用，请返回快速生产重新选择。"
+        "指定模板不存在或当前项目无权使用，请返回快速生产重新选择。"
       )
     ).toBeVisible()
     await expect(page.getByRole("button", { name: "重试" })).toBeVisible()
@@ -89,21 +85,25 @@ test.describe("项目边界与页面异步状态", () => {
       waitUntil: "networkidle",
     })
 
-    await expect(page.getByText("配方读取失败")).toBeVisible()
-    await expect(page.getByText("配方服务暂时不可用。")).toBeVisible()
+    await expect(page.getByText("模板读取失败")).toBeVisible()
+    await expect(page.getByText("模板服务暂时不可用。")).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 
-  test("Production 无效显式配方不回落到默认配方", async ({ page }) => {
+  test("Production 无效显式模板不回落到默认模板", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page)
     await preparePage(page)
     await page.goto("/#/create/generate/no-such-template", {
       waitUntil: "networkidle",
     })
 
-    await expect(page.getByText("配方读取失败")).toBeVisible()
-    await expect(page.getByText(/指定配方不存在或当前项目无权使用/)).toBeVisible()
-    await expect(page.getByRole("button", { name: "返回快速生产" })).toBeVisible()
+    await expect(page.getByText("模板读取失败")).toBeVisible()
+    await expect(
+      page.getByText(/指定模板不存在或当前项目无权使用/)
+    ).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "返回快速生产" })
+    ).toBeVisible()
     await expect(page.getByLabel("视频文案", { exact: true })).toHaveCount(0)
     expect(unhandledApi).toEqual([])
   })
@@ -118,18 +118,18 @@ test.describe("项目边界与页面异步状态", () => {
     })
 
     await expect(page.getByLabel("视频文案", { exact: true })).toBeVisible()
-    await expect(page.getByText("资源读取失败").first()).toBeVisible()
+    await expect(page.getByText("部分资源未同步")).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 
-  test("CreateGallery 配方默认值失败不伪装成出厂设置", async ({ page }) => {
+  test("CreateGallery 模板默认值失败不伪装成出厂设置", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       configState: "error",
     })
     await preparePage(page)
     await page.goto("/#/create", { waitUntil: "networkidle" })
 
-    await expect(page.getByText("无法读取配方默认设置")).toBeVisible()
+    await expect(page.getByText("无法读取模板默认设置")).toBeVisible()
     await expect(
       page.getByText("默认设置暂时无法读取", { exact: true }).first()
     ).toBeVisible()
@@ -190,21 +190,6 @@ test.describe("项目边界与页面异步状态", () => {
     })
     expect(unhandledApi).toEqual([])
   })
-
-  test("Script Review 语音默认值失败可见，但不阻断起草流程", async ({
-    page,
-  }) => {
-    const unhandledApi = await installApiFixtures(page, {
-      settingsState: "error",
-    })
-    await preparePage(page)
-    await page.goto("/#/create/script-review", { waitUntil: "networkidle" })
-
-    await expect(page.getByText("全局语音默认值暂未同步")).toBeVisible()
-    await page.getByLabel("选题", { exact: true }).fill("猫咪夏天饮水少怎么办")
-    await expect(page.getByRole("button", { name: "生成审核草稿" })).toBeEnabled()
-    expect(unhandledApi).toEqual([])
-  })
 })
 
 test.describe("内容工作台异步状态", () => {
@@ -216,7 +201,7 @@ test.describe("内容工作台异步状态", () => {
     await preparePage(page)
     await page.goto("/#/board", { waitUntil: "domcontentloaded" })
 
-    await expect(page.getByText("正在读取内容…")).toBeVisible()
+    await expect(page.getByText("正在读取任务…")).toBeVisible()
   })
 
   test("工作台 empty", async ({ page }) => {
@@ -226,8 +211,8 @@ test.describe("内容工作台异步状态", () => {
     await preparePage(page)
     await page.goto("/#/board", { waitUntil: "networkidle" })
 
-    await expect(page.getByText("工作台还没有内容")).toBeVisible()
-    await expect(page.getByRole("button", { name: "添加第一条内容" })).toBeVisible()
+    await expect(page.getByText("还没有生产任务")).toBeVisible()
+    await expect(page.getByRole("link", { name: "去快速生产" })).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 
@@ -238,7 +223,7 @@ test.describe("内容工作台异步状态", () => {
     await preparePage(page)
     await page.goto("/#/board", { waitUntil: "networkidle" })
 
-    await expect(page.getByText("内容读取失败")).toBeVisible()
+    await expect(page.getByText("任务读取失败")).toBeVisible()
     await expect(page.getByRole("button", { name: "重新读取" })).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
@@ -250,10 +235,10 @@ test.describe("内容工作台异步状态", () => {
     await preparePage(page)
     await page.goto("/#/board", { waitUntil: "networkidle" })
 
-    await expect(page.getByText("猫咪为什么喜欢猫薄荷")).toBeVisible()
+    await expect(page.getByText("猫咪为什么喜欢猫薄荷").last()).toBeVisible()
     await page.getByRole("button", { name: "刷新" }).click()
-    await expect(page.getByText("内容可能已过期")).toBeVisible()
-    await expect(page.getByText("猫咪为什么喜欢猫薄荷")).toBeVisible()
+    await expect(page.getByText("任务状态可能已过期")).toBeVisible()
+    await expect(page.getByText("猫咪为什么喜欢猫薄荷").last()).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 
@@ -283,9 +268,7 @@ test.describe("内容工作台异步状态", () => {
     expect(unhandledApi).toEqual([])
   })
 
-  test("内容详情 stale 保留当前阶段和唯一下一步", async ({
-    page,
-  }) => {
+  test("内容详情 stale 保留当前阶段和唯一下一步", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       contentDetailState: "stale",
       contentItemStatus: "drafting",
@@ -303,75 +286,14 @@ test.describe("内容工作台异步状态", () => {
     await expect(lifecycle.getByText("起草中", { exact: true })).toBeVisible()
     await lifecycle.getByRole("button", { name: "刷新状态" }).click()
     await expect(page.getByText("内容可能已过期")).toBeVisible()
-    await expect(lifecycle.getByRole("button", { name: "刷新状态" })).toHaveCount(1)
+    await expect(
+      lifecycle.getByRole("button", { name: "刷新状态" })
+    ).toHaveCount(1)
     expect(unhandledApi).toEqual([])
   })
 })
 
-test.describe("任务与作品异步状态", () => {
-  for (const scenario of [
-    {
-      state: "empty" as const,
-      path: "/tasks",
-      title: "还没有生产运行",
-    },
-    {
-      state: "error" as const,
-      path: "/tasks",
-      title: "无法读取生产运行",
-    },
-  ]) {
-    test(`任务 ${scenario.state}`, async ({ page }) => {
-      const unhandledApi = await installApiFixtures(page, {
-        taskState: scenario.state,
-      })
-      await preparePage(page)
-      await page.goto(`/#${scenario.path}`, { waitUntil: "networkidle" })
-      await expect(page.getByText(scenario.title)).toBeVisible()
-      expect(unhandledApi).toEqual([])
-    })
-  }
-
-  test("任务 loading", async ({ page }) => {
-    await installApiFixtures(page, { taskState: "loading", delayMs: 5_000 })
-    await preparePage(page)
-    await page.goto("/#/tasks", { waitUntil: "domcontentloaded" })
-    await expect(page.getByText("正在读取生产运行")).toBeVisible()
-  })
-
-  test("任务 stale 保留可操作运行", async ({ page }) => {
-    const unhandledApi = await installApiFixtures(page, { taskState: "stale" })
-    await preparePage(page)
-    await page.goto("/#/tasks", { waitUntil: "networkidle" })
-
-    const selectedRunHeading = page.getByRole("heading", {
-      name: "图文口播视频 ×3",
-      exact: true,
-    })
-    await expect(selectedRunHeading).toBeVisible()
-    await page.getByRole("button", { name: "刷新生产运行" }).click()
-    await expect(page.getByText("运行列表可能不是最新状态")).toBeVisible()
-    await expect(selectedRunHeading).toBeVisible()
-    await expect(
-      page.getByRole("link", { name: "查看产物", exact: true })
-    ).toHaveCount(2)
-    expect(unhandledApi).toEqual([])
-  })
-
-  test("配方名称失败不阻断生产运行", async ({ page }) => {
-    const unhandledApi = await installApiFixtures(page, {
-      productionState: "error",
-    })
-    await preparePage(page)
-    await page.goto("/#/tasks", { waitUntil: "networkidle" })
-
-    await expect(page.getByText("运行列表可能不是最新状态")).toBeVisible()
-    await expect(
-      page.getByRole("heading", { name: "批量生产 ×3", exact: true })
-    ).toBeVisible()
-    expect(unhandledApi).toEqual([])
-  })
-
+test.describe("作品异步状态", () => {
   for (const scenario of [
     { state: "empty" as const, title: "还没有作品" },
     { state: "error" as const, title: "无法读取作品库" },
@@ -442,71 +364,6 @@ test.describe("任务与作品异步状态", () => {
         await expect(
           page.getByRole("button", { name: "重试失败发布" })
         ).toBeVisible()
-      }
-      expect(unhandledApi).toEqual([])
-    })
-  }
-})
-
-const RUN_STATES: ReadonlyArray<{
-  state: SeededRunState
-  label: string
-  canCancel?: boolean
-}> = [
-  { state: "idle", label: "未开始" },
-  { state: "uploading", label: "上传中", canCancel: true },
-  { state: "submitting", label: "提交中", canCancel: true },
-  { state: "queued", label: "排队中", canCancel: true },
-  { state: "running", label: "生成中", canCancel: true },
-  { state: "completed", label: "已完成" },
-  { state: "failed", label: "失败" },
-  { state: "cancelling", label: "取消中" },
-  { state: "cancelled", label: "已取消" },
-  { state: "interrupted", label: "已中断" },
-]
-
-test.describe("共享 Task UI 的 RunState 矩阵", () => {
-  for (const scenario of RUN_STATES) {
-    test(`${scenario.state} 渲染用户状态与恢复动作`, async ({ page }) => {
-      const unhandledApi = await installApiFixtures(page, {
-        includeBatch: false,
-      })
-      await preparePage(page, "light", {
-        trackedTasks: [trackedTaskForState(scenario.state)],
-      })
-      await page.goto("/#/tasks", { waitUntil: "networkidle" })
-
-      const detail = page.locator(
-        'section[aria-labelledby="selected-run-heading"]'
-      )
-      await expect(
-        detail.getByRole("heading", {
-          name: `状态验收·${scenario.state}`,
-          exact: true,
-        })
-      ).toBeVisible()
-      await expect(
-        detail.getByText(scenario.label, { exact: true })
-      ).toBeVisible()
-      await expect(
-        detail.getByRole("button", { name: "取消运行" })
-      ).toHaveCount(scenario.canCancel ? 1 : 0)
-
-      if (scenario.state === "completed") {
-        await expect(
-          detail.getByRole("link", { name: "查看产物" })
-        ).toBeVisible()
-      }
-      if (scenario.state === "failed" || scenario.state === "interrupted") {
-        await expect(detail.getByText("本次运行未完成")).toBeVisible()
-      }
-      if (scenario.state === "running") {
-        await expect(page).toHaveScreenshot("desktop-tasks-running.png", {
-          animations: "disabled",
-          caret: "hide",
-          fullPage: false,
-          scale: "css",
-        })
       }
       expect(unhandledApi).toEqual([])
     })

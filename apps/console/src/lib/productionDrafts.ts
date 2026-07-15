@@ -8,11 +8,20 @@ export type TemplateParamValue = string | number | boolean
 
 export type StandardGenerationSettings = {
   title: string
-  nScenes: number
-  splitMode: "paragraph" | "line" | "sentence"
+  scriptTemplateName: string
+  scriptPrompt: string
+  scriptProviderId: string
+  scriptModel: string
+  languageScriptModels: Record<string, { provider_id: string; model: string }>
+  splitTemplateName: string
+  splitPrompt: string
+  splitProviderId: string
+  splitModel: string
   frameTemplate: string
   templateParams: Record<string, TemplateParamValue>
   mediaWorkflow: string
+  imageProvider: string
+  imageModel: string
   mediaWidth: number
   mediaHeight: number
   mediaDuration: number
@@ -43,15 +52,25 @@ export type LongFormGenerationSettings = {
   wordCount: number
   longFormPrompt: string
   llmModel: string
+  llmProviderId: string
 }
 
 export const fallbackStandardSettings: StandardGenerationSettings = {
   title: "",
-  nScenes: 5,
-  splitMode: "paragraph",
+  scriptTemplateName: "Short Oral Script",
+  scriptPrompt: "",
+  scriptProviderId: "",
+  scriptModel: "",
+  languageScriptModels: {},
+  splitTemplateName: "Copy-Safe Scene Split",
+  splitPrompt: "",
+  splitProviderId: "",
+  splitModel: "",
   frameTemplate: "1080x1920/image_default.html",
   templateParams: {},
   mediaWorkflow: "",
+  imageProvider: "comfy_workflow",
+  imageModel: "",
   mediaWidth: 1080,
   mediaHeight: 1440,
   mediaDuration: 4,
@@ -82,11 +101,12 @@ export const fallbackLongFormSettings: LongFormGenerationSettings = {
   wordCount: 1800,
   longFormPrompt: "",
   llmModel: "",
+  llmProviderId: "",
 }
 
 /**
- * `listTemplates()` 返回的 fixed_params 已合并持久化配方覆盖。这里把后端
- * snake_case 合同一次性适配成页面草稿，页面不再拿硬编码默认值冒充配方值。
+ * `listTemplates()` 返回的 fixed_params 已合并持久化模板覆盖。这里把后端
+ * snake_case 合同一次性适配成页面草稿，页面不再拿硬编码默认值冒充模板值。
  */
 export function standardDraftForTemplate(
   template: ProductionTemplate
@@ -99,16 +119,50 @@ export function standardDraftForTemplate(
   )
   return createGenerationDraft({
     title: stringParam(params, "title", fallbackStandardSettings.title),
-    nScenes: positiveNumberParam(
+    scriptTemplateName: stringParam(
       params,
-      "n_scenes",
-      fallbackStandardSettings.nScenes
+      "script_template_name",
+      fallbackStandardSettings.scriptTemplateName
     ),
-    splitMode: enumParam(
+    scriptPrompt: stringParam(
       params,
-      "split_mode",
-      ["paragraph", "line", "sentence"] as const,
-      fallbackStandardSettings.splitMode
+      "script_prompt",
+      fallbackStandardSettings.scriptPrompt
+    ),
+    scriptProviderId: stringParam(
+      params,
+      "script_provider_id",
+      fallbackStandardSettings.scriptProviderId
+    ),
+    scriptModel: stringParam(
+      params,
+      "script_model",
+      fallbackStandardSettings.scriptModel
+    ),
+    languageScriptModels: recordParam(
+      params,
+      "language_script_models",
+      fallbackStandardSettings.languageScriptModels
+    ),
+    splitTemplateName: stringParam(
+      params,
+      "split_template_name",
+      fallbackStandardSettings.splitTemplateName
+    ),
+    splitPrompt: stringParam(
+      params,
+      "split_prompt",
+      fallbackStandardSettings.splitPrompt
+    ),
+    splitProviderId: stringParam(
+      params,
+      "split_provider_id",
+      fallbackStandardSettings.splitProviderId
+    ),
+    splitModel: stringParam(
+      params,
+      "split_model",
+      fallbackStandardSettings.splitModel
     ),
     frameTemplate: stringParam(
       params,
@@ -124,6 +178,16 @@ export function standardDraftForTemplate(
       params,
       "media_workflow",
       fallbackStandardSettings.mediaWorkflow
+    ),
+    imageProvider: stringParam(
+      params,
+      "image_provider",
+      fallbackStandardSettings.imageProvider
+    ),
+    imageModel: stringParam(
+      params,
+      "image_model",
+      fallbackStandardSettings.imageModel
     ),
     mediaWidth: positiveNumberParam(
       params,
@@ -240,6 +304,11 @@ export function longFormDraftForTemplate(
       "llm_model",
       fallbackLongFormSettings.llmModel
     ),
+    llmProviderId: stringParam(
+      params,
+      "llm_provider_id",
+      fallbackLongFormSettings.llmProviderId
+    ),
   })
 }
 
@@ -247,11 +316,20 @@ const STANDARD_API_KEYS: Partial<
   Record<keyof StandardGenerationSettings, string>
 > = {
   title: "title",
-  nScenes: "n_scenes",
-  splitMode: "split_mode",
+  scriptTemplateName: "script_template_name",
+  scriptPrompt: "script_prompt",
+  scriptProviderId: "script_provider_id",
+  scriptModel: "script_model",
+  languageScriptModels: "language_script_models",
+  splitTemplateName: "split_template_name",
+  splitPrompt: "split_prompt",
+  splitProviderId: "split_provider_id",
+  splitModel: "split_model",
   frameTemplate: "frame_template",
   templateParams: "template_params",
   mediaWorkflow: "media_workflow",
+  imageProvider: "image_provider",
+  imageModel: "image_model",
   mediaWidth: "media_width",
   mediaHeight: "media_height",
   promptPrefix: "prompt_prefix",
@@ -279,6 +357,7 @@ const LONG_FORM_API_KEYS: Record<keyof LongFormGenerationSettings, string> = {
   wordCount: "word_count",
   longFormPrompt: "long_form_prompt",
   llmModel: "llm_model",
+  llmProviderId: "llm_provider_id",
 }
 
 export function standardOverridesToInput(
@@ -300,6 +379,95 @@ export function longFormOverridesToInput(
   overrides: Partial<LongFormGenerationSettings>
 ) {
   return mapAllowedOverrides(template, overrides, LONG_FORM_API_KEYS)
+}
+
+export function standardSettingsToParams(
+  settings: StandardGenerationSettings
+): Record<string, unknown> {
+  return settingsToParams(settings, STANDARD_API_KEYS)
+}
+
+export function standardParamPatch(
+  key: string,
+  value: unknown
+): Partial<StandardGenerationSettings> {
+  return paramPatch<StandardGenerationSettings>(key, value, STANDARD_API_KEYS)
+}
+
+export function standardDirtyParamKeys(
+  keys: Array<keyof StandardGenerationSettings>
+): string[] {
+  return settingKeysToParamKeys(keys, STANDARD_API_KEYS)
+}
+
+export function assetSettingsToParams(
+  settings: AssetGenerationSettings
+): Record<string, unknown> {
+  return settingsToParams(settings, ASSET_API_KEYS)
+}
+
+export function assetParamPatch(
+  key: string,
+  value: unknown
+): Partial<AssetGenerationSettings> {
+  return paramPatch<AssetGenerationSettings>(key, value, ASSET_API_KEYS)
+}
+
+export function assetDirtyParamKeys(
+  keys: Array<keyof AssetGenerationSettings>
+): string[] {
+  return settingKeysToParamKeys(keys, ASSET_API_KEYS)
+}
+
+export function longFormSettingsToParams(
+  settings: LongFormGenerationSettings
+): Record<string, unknown> {
+  return settingsToParams(settings, LONG_FORM_API_KEYS)
+}
+
+export function longFormParamPatch(
+  key: string,
+  value: unknown
+): Partial<LongFormGenerationSettings> {
+  return paramPatch<LongFormGenerationSettings>(key, value, LONG_FORM_API_KEYS)
+}
+
+export function longFormDirtyParamKeys(
+  keys: Array<keyof LongFormGenerationSettings>
+): string[] {
+  return settingKeysToParamKeys(keys, LONG_FORM_API_KEYS)
+}
+
+function settingsToParams<T extends Record<string, unknown>>(
+  settings: T,
+  apiKeys: Partial<Record<keyof T, string>>
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {}
+  for (const [rawKey, value] of Object.entries(settings)) {
+    const apiKey = apiKeys[rawKey as keyof T]
+    if (apiKey) params[apiKey] = value
+  }
+  return params
+}
+
+function paramPatch<T extends Record<string, unknown>>(
+  apiKey: string,
+  value: unknown,
+  apiKeys: Partial<Record<keyof T, string>>
+): Partial<T> {
+  const entry = Object.entries(apiKeys).find(([, key]) => key === apiKey)
+  if (!entry) return {}
+  return { [entry[0]]: value } as Partial<T>
+}
+
+function settingKeysToParamKeys<T extends Record<string, unknown>>(
+  keys: Array<keyof T>,
+  apiKeys: Partial<Record<keyof T, string>>
+): string[] {
+  return keys.flatMap((key) => {
+    const apiKey = apiKeys[key]
+    return apiKey ? [apiKey] : []
+  })
 }
 
 function mapAllowedOverrides<T extends Record<string, unknown>>(
@@ -366,7 +534,7 @@ function enumParam<const T extends readonly string[]>(
     : fallback
 }
 
-function recordParam<T extends Record<string, TemplateParamValue>>(
+function recordParam<T extends Record<string, unknown>>(
   params: Record<string, unknown>,
   key: string,
   fallback: T

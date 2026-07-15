@@ -1,4 +1,4 @@
-import { ApiError, type DraftSetSettings } from "@/lib/generationApi"
+import { ApiError } from "@/lib/generationApi"
 
 /** 把任意错误转成可展示的中文消息。唯一来源，勿在组件内重复实现。 */
 export function readableError(error: unknown) {
@@ -31,21 +31,6 @@ export function formatBytes(value: number | null | undefined) {
     return `${(value / 1024).toFixed(1)} KB`
   }
   return `${(value / 1024 / 1024).toFixed(1)} MB`
-}
-
-/** 草稿溯源短句：`配方名 · <模型或"默认模型">`；无溯源信息时返回 null。 */
-export function draftSetProvenance(draftSet: {
-  draft_settings?: Record<string, unknown>
-}): string | null {
-  const settings = draftSet.draft_settings as DraftSetSettings | undefined
-  if (!settings?.production_template_name && !settings?.script_model) {
-    return null
-  }
-  const model =
-    settings?.script_model && settings.script_model.trim()
-      ? settings.script_model
-      : "默认模型"
-  return `${settings.production_template_name ?? "生产配方"} · ${model}`
 }
 
 /** 参数生值 → 人话（面向用户禁止 fixed/local 等内部 key 裸奔）。查不到返回原值。 */

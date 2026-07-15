@@ -6,11 +6,11 @@ Production capabilities are exposed through FastAPI. After starting the server, 
 
 1. Read projects with `GET /api/projects`.
 2. Read available recipes with `GET /api/generation/templates?project=<project_id>`.
-3. Submit a single task or batch through a recipe.
-4. Poll the canonical generation task or batch state.
+3. Submit one production through `POST /api/production-tasks`, or a batch through `/api/generation/batches`.
+4. Poll the stable production task, execution attempt, or batch state.
 5. Read artifacts from the task result, then use library and publishing APIs.
 
-Every production request must carry a real project identity and pass through recipe compilation. Clients must not assemble internal pipeline parameters directly.
+Every formal production request must carry a real project identity, pipeline, recipe, and stable `request_id`, then pass through recipe compilation. The removed raw-generation write endpoints are not part of the API contract.
 
 ## State Handling
 

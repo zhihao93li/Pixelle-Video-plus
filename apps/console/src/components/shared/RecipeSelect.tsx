@@ -9,8 +9,8 @@ import { artifactKindLabel, templateArtifactType } from "@/lib/artifactKind"
 import type { ProductionTemplate } from "@/lib/generationApi"
 
 /**
- * 全站统一的「在生产点选配方」下拉：配方名 + 形态徽标（视频/图集/长文）。
- * 调用方负责过滤可选项（只传启用、非退役、对应入口的配方）——组件只管「选」。
+ * 全站统一的「在生产点选模板」下拉：模板名 + 形态徽标（视频/图集/长文）。
+ * 调用方负责过滤可选项（只传启用、非退役、对应入口的模板）——组件只管「选」。
  * 出片面板与生成页页头共用，样式/行为改一处两处生效。
  */
 export function RecipeSelect({
@@ -18,7 +18,7 @@ export function RecipeSelect({
   value,
   onChange,
   triggerClassName,
-  placeholder = "选择生产配方",
+  placeholder = "选择生产模板",
   disabled = false,
 }: {
   templates: ProductionTemplate[]

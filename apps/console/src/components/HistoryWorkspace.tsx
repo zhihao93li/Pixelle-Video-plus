@@ -368,7 +368,7 @@ export function HistoryWorkspace({
         }
       })
       .catch(() => {
-        // 仅影响配方快捷链接，不改变作品详情或生产数据。
+        // 仅影响模板快捷链接，不改变作品详情或生产数据。
       })
     return () => {
       cancelled = true
@@ -980,6 +980,23 @@ function DetailPanel({
     runState.kind === "unknown" ? failureMessage : null
   const storyboardFrames = readArray(readRecord(detail?.storyboard)?.frames)
   const templateId = readString(templateInfo?.id)
+  const finalDraftRecipeByTopicRoute: Record<string, string> = {
+    topic_to_video: "pipeline_standard_base_v1",
+    topic_to_image_post: "pipeline_image_post_base_v1",
+    topic_to_long_form: "pipeline_long_form_base_v1",
+  }
+  const sourcePipelineId =
+    readString(templateInfo?.pipeline_id) ||
+    ({
+      pipeline_topic_to_video_base_v1: "topic_to_video",
+      pipeline_topic_to_image_post_base_v1: "topic_to_image_post",
+      pipeline_topic_to_long_form_base_v1: "topic_to_long_form",
+    }[templateId] ?? "")
+  const remakeTemplateCandidate =
+    finalDraftRecipeByTopicRoute[sourcePipelineId] ?? templateId
+  const remakeTemplateId = templateIds.has(remakeTemplateCandidate)
+    ? remakeTemplateCandidate
+    : templateId
   const templateName = readString(templateInfo?.name)
   const spec = artifactSpecification(artifactKind, result)
   const fileSize = readNumber(result?.file_size)
@@ -1014,7 +1031,7 @@ function DetailPanel({
       value: artifactKind === "video" ? voiceValue : "",
     },
     {
-      label: "配方",
+      label: "模板",
       value: templateName,
       to:
         templateId && templateIds.has(templateId)
@@ -1058,6 +1075,17 @@ function DetailPanel({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {statusIs(runState, "completed") && remakeTemplateId ? (
+            <Button asChild size="sm" variant="outline">
+              <a
+                href={routeHref(
+                  `/create/generate/${remakeTemplateId}?remake=${selectedTask.task_id}`
+                )}
+              >
+                基于此作品再次制作
+              </a>
+            </Button>
+          ) : null}
           {canPublish ? (
             <Button onClick={onOpenPublish} size="sm">
               <Send data-icon="inline-start" />

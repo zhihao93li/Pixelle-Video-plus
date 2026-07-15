@@ -1,5 +1,4 @@
 """Use-case API shared by the React console and trusted Agent clients."""
-
 from __future__ import annotations
 
 import json
@@ -11,15 +10,15 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from api.dependencies import GenerationServiceDep, PixelleVideoDep
 from api.security import (
     RequestIdentity,
     get_request_identity,
-    reject_agent_confirmation,
     require_agent,
 )
+from pixelle_video.content.drafting import split_confirmed_script
 from pixelle_video.content.models import (
     ContentItem,
     ContentVariant,
@@ -38,10 +37,11 @@ from pixelle_video.content.operations import (
     request_hash,
     save_operation,
 )
-from pixelle_video.content.projects import get_default_project, get_project
+from pixelle_video.content.projects import get_project
 from pixelle_video.content.store import load_item, save_item
 from pixelle_video.generation import (
     ProductionTemplateError,
+    build_default_pipeline_registry,
     build_default_production_template_registry,
     detect_available_generation_capabilities,
 )
@@ -50,6 +50,7 @@ from pixelle_video.generation.agent_images import (
     resolve_agent_image_path,
     save_agent_image,
 )
+from pixelle_video.generation.schemas import GenerationError
 from pixelle_video.utils.os_util import get_data_path
 
 router = APIRouter(prefix="/content-items", tags=["Content Flows"])
@@ -57,6 +58,8 @@ IdentityDep = Annotated[RequestIdentity, Depends(get_request_identity)]
 
 
 class TraceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     request_id: str = Field(min_length=1, max_length=200)
     client_name: str | None = Field(default=None, max_length=120)
     agent_session_id: str | None = Field(default=None, max_length=200)
@@ -65,17 +68,31 @@ class TraceRequest(BaseModel):
 
 class TopicsRequest(TraceRequest):
     titles: list[str] = Field(min_length=1, max_length=50)
-    project_id: str | None = None
+    project_id: str = Field(min_length=1)
     languages: list[str] | None = None
     content_source: Literal["manual", "derived"] = "manual"
 
 
 class DraftRequest(TraceRequest):
-    template_id: str | None = None
+    recipe_id: str = Field(min_length=1)
+    overrides: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConfirmRequest(TraceRequest):
     variants: dict[str, ContentVariant] | None = None
+    content_version: str | None = None
+    explicit_user_confirmation: bool = False
+
+
+class ReviseReviewRequest(TraceRequest):
+    action: Literal[
+        "direct_edit", "rewrite_script", "regenerate_selected", "regenerate_all"
+    ]
+    content_version: str = Field(min_length=1)
+    selected_scene_ids: list[str] = Field(default_factory=list, max_length=20)
+    instruction: str | None = Field(default=None, max_length=2000)
+    variants: dict[str, ContentVariant] | None = None
+    scene_manifest: SceneManifest | None = None
 
 
 class SceneManifestRequest(TraceRequest):
@@ -90,6 +107,8 @@ class SceneManifestRequest(TraceRequest):
 
 
 class SceneImageInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     scene_id: str = Field(min_length=1, max_length=120)
     image_data_url: str = Field(min_length=1)
     replace: bool = False
@@ -100,7 +119,7 @@ class SceneImagesRequest(TraceRequest):
 
 
 class ProduceRequest(TraceRequest):
-    recipe_id: str | None = None
+    recipe_id: str = Field(min_length=1)
     language: str | None = None
     overrides: dict[str, Any] = Field(default_factory=dict)
 
@@ -170,6 +189,237 @@ def _item_or_404(item_id: str) -> ContentItem:
     return item
 
 
+async def plan_video_scenes(
+    *,
+    item: ContentItem,
+    production_task,
+    pixelle_video,
+    actor: str = "system",
+    review_kind: Literal["video_scenes", "image_pages"] = "video_scenes",
+) -> ContentItem:
+    """Create the reviewable scene plan before any media provider is called."""
+
+    confirmed_variant = next(
+        (
+            variant
+            for variant in item.variants.values()
+            if variant.status == "confirmed" and variant.script.strip()
+        ),
+        None,
+    )
+    if confirmed_variant is None:
+        raise ValueError("没有可用于规划分镜的已确认文案。")
+    if pixelle_video.llm is None:
+        raise RuntimeError("写稿模型服务尚未初始化。")
+    narrations = await split_confirmed_script(
+        llm_service=pixelle_video.llm,
+        script=confirmed_variant.script,
+        settings=dict(production_task.effective_params),
+        language=confirmed_variant.language,
+        topic=item.title,
+    )
+    item.scene_manifest = SceneManifest(
+        review_kind=review_kind,
+        scenes=[
+            SceneDraft(
+                scene_id=f"scene-{index}",
+                order=index,
+                narration=narration,
+                # Standard video generates the visual prompt only after scene approval.
+                image_prompt=narration,
+            )
+            for index, narration in enumerate(narrations, start=1)
+        ],
+        confirmed=False,
+    )
+    item.status = "pending_review"
+    confirmed_variant.narrations = list(narrations)
+    item.updated_at = now_iso()
+    item.add_event(
+        "scene_plan_generated",
+        actor,
+        {"scene_count": len(narrations), "production_task_id": production_task.production_task_id},
+    )
+    save_item(item)
+    from pixelle_video.content.production_tasks import set_task_state
+
+    set_task_state(
+        production_task.production_task_id,
+        state="needs_user",
+        stage_id="review_pages" if review_kind == "image_pages" else "review_scenes",
+        stage_label="确认分页" if review_kind == "image_pages" else "确认分镜",
+        next_actor="user",
+        action_type="confirm_pages" if review_kind == "image_pages" else "confirm_scenes",
+        action_label="确认分页" if review_kind == "image_pages" else "确认分镜",
+    )
+    return item
+
+
+@router.post("/{item_id}/revise-review", response_model=ContentItem)
+async def revise_review(
+    item_id: str,
+    request: ReviseReviewRequest,
+    identity: IdentityDep,
+    pixelle_video: PixelleVideoDep,
+):
+    """Regenerate the current review content while keeping the production task stable."""
+
+    item = _item_or_404(item_id)
+    if item.status != "pending_review":
+        raise HTTPException(status_code=409, detail="当前内容不在待确认状态。")
+    if request.content_version != item.updated_at:
+        raise HTTPException(status_code=409, detail="待确认内容已经更新，请刷新后再操作。")
+    operation, created = _begin(
+        request,
+        operation="revise_review",
+        item=item,
+        payload={"item_id": item_id, **request.model_dump(mode="json")},
+    )
+    if not created:
+        return _item_or_404(item_id)
+
+    from pixelle_video.content.drafting import draft_topic, rewrite_review_unit
+    from pixelle_video.content.production_tasks import latest_task_for_content, set_task_state
+
+    task = latest_task_for_content(item.item_id, states={"needs_user", "in_progress"})
+    if task is None:
+        fail_operation(operation, "没有可继续的生产任务。", layer="product_assumption")
+        raise HTTPException(status_code=409, detail="没有可继续的生产任务。")
+    if pixelle_video.llm is None:
+        fail_operation(operation, "写稿模型服务尚未初始化。", layer="config")
+        raise HTTPException(status_code=503, detail="写稿模型服务尚未初始化。")
+
+    try:
+        if request.action == "direct_edit":
+            if item.scene_manifest is not None:
+                if request.scene_manifest is None:
+                    raise ValueError("直接编辑分镜或分页时必须提交完整清单。")
+                item.scene_manifest = request.scene_manifest.model_copy(
+                    update={"confirmed": False, "updated_at": now_iso()}
+                )
+            else:
+                if not request.variants:
+                    raise ValueError("直接编辑文案时必须提交完整语言版本。")
+                if not any(variant.script.strip() for variant in request.variants.values()):
+                    raise ValueError("待确认文案不能为空。")
+                item.variants = {
+                    language: variant.model_copy(
+                        update={"language": language, "status": "pending"}
+                    )
+                    for language, variant in request.variants.items()
+                }
+        elif request.action == "rewrite_script":
+            if item.scene_manifest is not None:
+                raise ValueError("当前正在确认分镜或分页，不能重写上一个确认站的文案。")
+            topic = str(task.input_snapshot.get("topic") or item.title).strip()
+            draft = await draft_topic(
+                llm_service=pixelle_video.llm,
+                topic=topic,
+                languages=item.languages or ["Chinese"],
+                settings=task.effective_params,
+            )
+            language_drafts = draft.get("language_drafts") or {}
+            if not language_drafts:
+                raise ValueError("系统重写没有返回可确认文案。")
+            item.variants = {
+                language: ContentVariant(
+                    language=language,
+                    status="pending",
+                    title=payload.get("title") or item.title,
+                    script=payload.get("script") or "",
+                    narrations=list(payload.get("narrations") or []),
+                )
+                for language, payload in language_drafts.items()
+            }
+        else:
+            manifest = item.scene_manifest
+            if manifest is None:
+                raise ValueError("当前没有可重新生成的分镜或分页。")
+            if request.action == "regenerate_all":
+                confirmed_variant = next(
+                    (variant for variant in item.variants.values() if variant.script.strip()),
+                    None,
+                )
+                if confirmed_variant is None:
+                    raise ValueError("没有可用于重新规划的文案。")
+                narrations = await split_confirmed_script(
+                    llm_service=pixelle_video.llm,
+                    script=confirmed_variant.script,
+                    settings=task.effective_params,
+                    language=confirmed_variant.language,
+                    topic=item.title,
+                )
+                manifest.scenes = [
+                    SceneDraft(
+                        scene_id=f"scene-{index}",
+                        order=index,
+                        narration=narration,
+                        image_prompt=narration,
+                    )
+                    for index, narration in enumerate(narrations, start=1)
+                ]
+            else:
+                selected = set(request.selected_scene_ids)
+                if not selected:
+                    raise ValueError("请至少选择一个要重新生成的镜头或分页。")
+                known = {scene.scene_id for scene in manifest.scenes}
+                unknown = sorted(selected - known)
+                if unknown:
+                    raise ValueError(f"找不到选中的镜头或分页：{', '.join(unknown)}")
+                model = str(task.effective_params.get("split_model") or "") or None
+                provider_id = (
+                    str(task.effective_params.get("split_provider_id") or "") or None
+                )
+                for scene in manifest.scenes:
+                    if scene.scene_id in selected:
+                        scene.narration = await rewrite_review_unit(
+                            llm_service=pixelle_video.llm,
+                            text=scene.narration,
+                            instruction=request.instruction or "",
+                            provider_id=provider_id,
+                            kind=manifest.review_kind,
+                            model=model,
+                        )
+                        if manifest.review_kind == "agent_image_scenes":
+                            scene.image_prompt = scene.narration
+            manifest.confirmed = False
+            manifest.updated_at = now_iso()
+
+        item.updated_at = now_iso()
+        item.add_event(
+            "review_regenerated",
+            identity.actor,
+            {
+                "action": request.action,
+                "selected_scene_ids": request.selected_scene_ids,
+                "has_instruction": bool((request.instruction or "").strip()),
+                **_trace(request),
+            },
+        )
+        save_item(item)
+        stage_is_pages = bool(
+            item.scene_manifest and item.scene_manifest.review_kind == "image_pages"
+        )
+        set_task_state(
+            task.production_task_id,
+            state="needs_user",
+            stage_id=("review_pages" if stage_is_pages else "review_scenes") if item.scene_manifest else "review_script",
+            stage_label=("确认分页" if stage_is_pages else "确认分镜") if item.scene_manifest else "确认文案",
+            next_actor="user",
+            action_type=("confirm_pages" if stage_is_pages else "confirm_scenes") if item.scene_manifest else "confirm_script",
+            action_label=("确认分页" if stage_is_pages else "确认分镜") if item.scene_manifest else "确认文案",
+            operation_id=operation.operation_id,
+        )
+        complete_operation(operation, {"item_id": item.item_id, "status": item.status})
+        return item
+    except ValueError as exc:
+        fail_operation(operation, str(exc), layer="input")
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except Exception as exc:
+        fail_operation(operation, str(exc), layer="runtime")
+        raise HTTPException(status_code=502, detail="重新生成失败，请查看本机 API 日志。") from exc
+
+
 def _begin(
     request: TraceRequest, *, operation: str, item: ContentItem, payload: dict[str, Any]
 ) -> tuple[ContentFlowOperation, bool]:
@@ -205,10 +455,7 @@ async def add_topics(request: TopicsRequest, identity: IdentityDep):
     if not titles:
         raise HTTPException(status_code=400, detail="至少需要一个标题。")
     project_id = request.project_id
-    if not project_id:
-        project = get_default_project()
-        project_id = project.project_id if project else "PetWoods"
-    elif get_project(project_id) is None:
+    if get_project(project_id) is None:
         raise HTTPException(status_code=404, detail=f"未找到项目：{project_id}")
 
     synthetic = ContentItem(
@@ -277,6 +524,37 @@ async def draft_item(
         fail_operation(operation, f"只有 idea 状态可以起草，当前为 {item.status}。", layer="input")
         raise HTTPException(status_code=400, detail="只有选题池中的内容可以开始起草。")
 
+    from pixelle_video.content.production_service import prepare_production
+    from pixelle_video.content.production_tasks import latest_task_for_content
+
+    template = build_default_production_template_registry().get(request.recipe_id)
+    if template.pipeline_id not in {"topic_to_video", "topic_to_image_post"}:
+        fail_operation(operation, "所选模板不是主题起稿路线。", layer="input")
+        raise HTTPException(status_code=400, detail="所选模板不是主题起稿路线。")
+
+    production_task = latest_task_for_content(
+        item.item_id,
+        states={"in_progress", "needs_user"},
+        pipeline_id=template.pipeline_id,
+    )
+    if production_task is None:
+        try:
+            prepare_production(
+                project_id=item.project,
+                pipeline_id=template.pipeline_id,
+                recipe_id=request.recipe_id,
+                input_payload={"topic": item.title},
+                overrides=request.overrides,
+                request_id=f"{request.request_id}:production",
+                source="agent" if identity.is_agent else "react",
+                actor="agent" if identity.is_agent else "user",
+                content_item_id=item.item_id,
+                metadata=_trace(request),
+            )
+        except (ProductionTemplateError, ValueError) as exc:
+            fail_operation(operation, str(exc), layer="input")
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
     item.status = "drafting"
     item.updated_at = now_iso()
     item.add_event(
@@ -290,6 +568,7 @@ async def draft_item(
         operation.operation_id,
         item_id,
         request,
+        template.pipeline_id,
         identity.actor,
         pixelle_video,
     )
@@ -300,45 +579,36 @@ async def _run_draft(
     operation_id: str,
     item_id: str,
     request: DraftRequest,
+    pipeline_id: str,
     actor: str,
     pixelle_video,
 ) -> None:
-    from api.routers.generation import (
-        ScriptReviewDraftCreateRequest,
-        create_script_review_draft_set,
-    )
+    from pixelle_video.content.drafting import draft_topic
 
     operation = load_operation(operation_id)
     item = load_item(item_id)
     if operation is None or item is None:
         return
     try:
-        draft_set = await create_script_review_draft_set(
-            ScriptReviewDraftCreateRequest(
-                topics=[item.title],
-                languages=item.languages,
-                template_id=request.template_id,
-                project_id=item.project,
-                metadata={"content_item_id": item.item_id, **_trace(request)},
-                idempotency_key=operation.request_id,
-            ),
-            pixelle_video,
+        from pixelle_video.content.production_tasks import latest_task_for_content
+
+        production_task = latest_task_for_content(
+            item.item_id,
+            states={"in_progress"},
+            pipeline_id=pipeline_id,
         )
-        draft_set = (
-            draft_set.model_dump(mode="json")
-            if hasattr(draft_set, "model_dump")
-            else dict(draft_set)
+        if production_task is None:
+            raise RuntimeError("主题路线缺少可读取的生产设置快照。")
+        draft = await draft_topic(
+            llm_service=pixelle_video.llm,
+            topic=item.title,
+            languages=item.languages,
+            settings=production_task.effective_params,
         )
-        operation.draft_set_id = draft_set["draft_set_id"]
         operation.phase = "external_completed"
         save_operation(operation)
-        draft = next(
-            (entry for entry in draft_set.get("drafts", []) if entry.get("topic") == item.title),
-            None,
-        )
-        if not draft or not draft.get("language_drafts"):
-            error = next(iter(draft_set.get("errors") or []), {})
-            raise RuntimeError(error.get("message") or "草稿生成没有返回可审核内容。")
+        if not draft.get("language_drafts"):
+            raise RuntimeError("草稿生成没有返回可审核内容。")
         variants: dict[str, ContentVariant] = {}
         for language, payload in draft["language_drafts"].items():
             variants[language] = ContentVariant(
@@ -350,22 +620,33 @@ async def _run_draft(
             )
         item = _item_or_404(item_id)
         item.variants = variants
-        item.links = {
-            **item.links,
-            "draft_set_id": draft_set["draft_set_id"],
-            "draft_index": draft.get("index", 1),
-        }
         item.status = "pending_review"
         item.updated_at = now_iso()
         item.add_event(
             "draft_generated",
             actor,
-            {"draft_set_id": draft_set["draft_set_id"], **_trace(request)},
+            {"recipe_id": request.recipe_id, **_trace(request)},
         )
         save_item(item)
         operation.phase = "item_updated"
         save_operation(operation)
         complete_operation(operation, {"item_id": item.item_id, "status": item.status})
+        from pixelle_video.content.production_tasks import set_task_state
+
+        production_task = latest_task_for_content(
+            item.item_id, states={"in_progress"}, pipeline_id=pipeline_id
+        )
+        if production_task is not None:
+            set_task_state(
+                production_task.production_task_id,
+                state="needs_user",
+                stage_id="review_script",
+                stage_label="确认文案",
+                next_actor="user",
+                action_type="confirm_script",
+                action_label="确认文案",
+                operation_id=operation.operation_id,
+            )
     except Exception as exc:  # noqa: BLE001 - persisted failure is the API contract
         item = load_item(item_id)
         if item is not None and item.status == "drafting":
@@ -378,12 +659,60 @@ async def _run_draft(
             )
             save_item(item)
         fail_operation(operation, str(exc))
+        from pixelle_video.content.production_tasks import (
+            latest_task_for_content,
+            set_task_state,
+        )
+
+        production_task = latest_task_for_content(
+            item_id, states={"in_progress"}, pipeline_id=pipeline_id
+        )
+        if production_task is not None:
+            from pixelle_video.generation.schemas import GenerationError
+
+            set_task_state(
+                production_task.production_task_id,
+                state="failed",
+                stage_id="generate_script",
+                stage_label="写稿失败",
+                next_actor="user",
+                action_type="view_error",
+                action_label="查看原因",
+                error=GenerationError(
+                    layer="runtime",
+                    message=str(exc),
+                    exception_type=type(exc).__name__,
+                ),
+                operation_id=operation.operation_id,
+            )
 
 
 @router.post("/{item_id}/confirm", response_model=ContentItem)
-async def confirm_item(item_id: str, request: ConfirmRequest, identity: IdentityDep):
-    reject_agent_confirmation(identity)
+async def confirm_item(
+    item_id: str,
+    request: ConfirmRequest,
+    identity: IdentityDep,
+    generation_service: GenerationServiceDep,
+    pixelle_video: PixelleVideoDep,
+):
     item = _item_or_404(item_id)
+    if identity.is_agent:
+        if not request.explicit_user_confirmation:
+            raise HTTPException(
+                status_code=403,
+                detail="Agent 只能转交用户明确作出的确认决定。",
+            )
+        if not request.client_name or not request.agent_session_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Agent 确认缺少可追溯的客户端或会话标识。",
+            )
+        if request.content_version != item.updated_at:
+            raise HTTPException(
+                status_code=409,
+                detail="待确认内容已经更新，请重新读取完整内容后再请用户确认。",
+            )
+    had_scene_manifest = item.scene_manifest is not None
     operation, created = _begin(
         request,
         operation="confirm",
@@ -413,7 +742,6 @@ async def confirm_item(item_id: str, request: ConfirmRequest, identity: Identity
     if not any(variant.status == "confirmed" for variant in item.variants.values()):
         fail_operation(operation, "确认内容不能为空。", layer="input")
         raise HTTPException(status_code=400, detail="确认内容不能为空。")
-    _sync_legacy_draft_set(item)
     if item.scene_manifest:
         item.scene_manifest.confirmed = True
         item.scene_manifest.updated_at = now_iso()
@@ -423,6 +751,192 @@ async def confirm_item(item_id: str, request: ConfirmRequest, identity: Identity
     item.add_event("confirmed", "user", {"from": previous, "to": "confirmed", **_trace(request)})
     save_item(item)
     complete_operation(operation, {"item_id": item.item_id, "status": item.status})
+    from pixelle_video.content.production_tasks import (
+        latest_task_for_content,
+        record_task_confirmation,
+        set_task_state,
+    )
+
+    production_task = latest_task_for_content(item.item_id, states={"needs_user", "in_progress"})
+    if production_task is None:
+        return item
+    record_task_confirmation(
+        production_task.production_task_id,
+        references={
+            "confirmation_operation_id": operation.operation_id,
+            "content_updated_at": item.updated_at,
+            "confirmed_content_hash": request_hash(
+                {
+                    language: variant.model_dump(mode="json")
+                    for language, variant in item.variants.items()
+                }
+            ),
+            "scene_manifest_updated_at": (
+                item.scene_manifest.updated_at if item.scene_manifest else ""
+            ),
+        },
+    )
+    if production_task.pipeline_id == "codex_scene_video":
+        set_task_state(
+            production_task.production_task_id,
+            state="in_progress",
+            stage_id="generate_agent_images",
+            stage_label="等待 Agent 生成并上传图片",
+            next_actor="agent",
+            operation_id=operation.operation_id,
+        )
+        return item
+    if production_task.pipeline_id == "digital_human" and not had_scene_manifest:
+        confirmed_variant = next(
+            (variant for variant in item.variants.values() if variant.status == "confirmed"),
+            None,
+        )
+        if confirmed_variant is None or not confirmed_variant.script.strip():
+            raise HTTPException(status_code=400, detail="数字人口播确认稿不能为空。")
+        try:
+            template_registry = build_default_production_template_registry()
+            generation_request = template_registry.compile_request(
+                production_task.recipe_id,
+                input={
+                    **production_task.input_snapshot,
+                    **production_task.effective_params,
+                    "script": confirmed_variant.script,
+                },
+                metadata={
+                    "content_item_id": item.item_id,
+                    "project_id": item.project,
+                    "production_task_id": production_task.production_task_id,
+                    "production_run_id": production_task.production_task_id,
+                    **_trace(request),
+                },
+                idempotency_key=f"{request.request_id}:produce",
+                available_capabilities=detect_available_generation_capabilities(),
+                surface="agent" if identity.is_agent else "public",
+            )
+            generation_request.params = dict(production_task.effective_params)
+            # The generated copy is confirmed content, not a mutable recipe setting.
+            generation_request.input["script"] = confirmed_variant.script
+            generation_task = generation_service.submit(
+                generation_request,
+                surface="agent" if identity.is_agent else "public",
+            )
+            from pixelle_video.content.production_tasks import attach_generation_task
+
+            attach_generation_task(
+                production_task.production_task_id,
+                generation_task,
+                effective_params=generation_request.params,
+            )
+            links = dict(item.links)
+            task_ids = list(links.get("task_ids") or [])
+            if generation_task.task_id not in task_ids:
+                task_ids.append(generation_task.task_id)
+            links["task_ids"] = task_ids
+            item.links = links
+            item.status = "producing"
+            item.updated_at = now_iso()
+            item.add_event(
+                "production_started",
+                identity.actor,
+                {
+                    "production_task_id": production_task.production_task_id,
+                    "task_id": generation_task.task_id,
+                    **_trace(request),
+                },
+            )
+            save_item(item)
+            return item
+        except (ProductionTemplateError, ValueError) as exc:
+            set_task_state(
+                production_task.production_task_id,
+                state="failed",
+                stage_id="submit_production",
+                stage_label="数字人生产启动失败",
+                next_actor="user",
+                action_type="view_error",
+                action_label="查看原因",
+                error=GenerationError(layer="input", message=str(exc)),
+            )
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+    if production_task.pipeline_id in {"topic_to_video", "topic_to_image_post"} and not had_scene_manifest:
+        set_task_state(
+            production_task.production_task_id,
+            state="in_progress",
+            stage_id="plan_scenes",
+            stage_label="正在规划分镜",
+            next_actor="system",
+            operation_id=operation.operation_id,
+        )
+        try:
+            return await plan_video_scenes(
+                item=item,
+                production_task=production_task,
+                pixelle_video=pixelle_video,
+                review_kind=(
+                    "image_pages"
+                    if production_task.pipeline_id == "topic_to_image_post"
+                    else "video_scenes"
+                ),
+            )
+        except Exception as exc:
+            set_task_state(
+                production_task.production_task_id,
+                state="failed",
+                stage_id="plan_scenes",
+                stage_label="分镜规划失败",
+                next_actor="user",
+                action_type="retry",
+                action_label="原样重试",
+                error=GenerationError(
+                    layer="runtime",
+                    message="分镜规划未能完成，请查看本机 API 日志。",
+                    exception_type=type(exc).__name__,
+                ),
+            )
+            raise HTTPException(status_code=502, detail="文案已确认，但分镜规划失败。") from exc
+    if production_task.pipeline_id in {
+        "topic_to_video",
+        "topic_to_image_post",
+        "script_to_video",
+        "image_post",
+    }:
+        is_image_post = production_task.pipeline_id in {"image_post", "topic_to_image_post"}
+        set_task_state(
+            production_task.production_task_id,
+            state="in_progress",
+            stage_id="compose_pages" if is_image_post else "split_scenes",
+            stage_label="准备生成图集" if is_image_post else "准备视频生产",
+            next_actor="system",
+            operation_id=operation.operation_id,
+        )
+        try:
+            await produce_item(
+                item.item_id,
+                ProduceRequest(
+                    request_id=f"{request.request_id}:produce",
+                    recipe_id=production_task.recipe_id,
+                    client_name=request.client_name,
+                    agent_session_id=request.agent_session_id,
+                    source=request.source,
+                ),
+                identity,
+                generation_service,
+            )
+        except HTTPException as exc:
+            set_task_state(
+                production_task.production_task_id,
+                state="failed",
+                stage_id="submit_production",
+                stage_label="视频生产启动失败",
+                next_actor="user",
+                action_type="view_error",
+                action_label="查看原因",
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="内容已确认，但生产启动失败；请在工作台查看原因并重试。",
+            ) from exc
+        return _item_or_404(item.item_id)
     return item
 
 
@@ -468,7 +982,9 @@ async def submit_scene_manifest(item_id: str, request: SceneManifestRequest, ide
         script="\n".join(narrations),
         narrations=narrations,
     )
-    item.scene_manifest = SceneManifest(scenes=scenes, confirmed=False)
+    item.scene_manifest = SceneManifest(
+        review_kind="agent_image_scenes", scenes=scenes, confirmed=False
+    )
     previous = item.status
     item.status = "pending_review"
     item.updated_at = now_iso()
@@ -477,6 +993,29 @@ async def submit_scene_manifest(item_id: str, request: SceneManifestRequest, ide
         identity.actor,
         {"from": previous, "to": "pending_review", "scene_count": len(scenes), **_trace(request)},
     )
+    from pixelle_video.content.production_tasks import latest_task_for_content
+
+    production_task = latest_task_for_content(
+        item.item_id,
+        states={"in_progress", "needs_user"},
+        pipeline_id="codex_scene_video",
+    )
+    if production_task is None:
+        fail_operation(
+            operation,
+            "没有可继续的 Agent 配图视频生产任务。",
+            layer="product_assumption",
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="请先用 start_production 发起 Agent 配图视频，再提交分镜修改。",
+        )
+    links = dict(item.links)
+    production_task_ids = list(links.get("production_task_ids") or [])
+    if production_task.production_task_id not in production_task_ids:
+        production_task_ids.append(production_task.production_task_id)
+    links["production_task_ids"] = production_task_ids
+    item.links = links
     save_item(item)
     operation.phase = "item_updated"
     save_operation(operation)
@@ -485,7 +1024,12 @@ async def submit_scene_manifest(item_id: str, request: SceneManifestRequest, ide
 
 
 @router.post("/{item_id}/scene-images")
-async def upload_scene_images(item_id: str, request: SceneImagesRequest, identity: IdentityDep):
+async def upload_scene_images(
+    item_id: str,
+    request: SceneImagesRequest,
+    identity: IdentityDep,
+    generation_service: GenerationServiceDep,
+):
     require_agent(identity)
     item = _item_or_404(item_id)
     operation, created = _begin(
@@ -551,6 +1095,34 @@ async def upload_scene_images(item_id: str, request: SceneImagesRequest, identit
     )
     save_item(item)
     complete_operation(operation, {"item_id": item.item_id, "images": results})
+    if all(scene.asset_id for scene in item.scene_manifest.scenes):
+        from pixelle_video.content.production_tasks import latest_task_for_content
+
+        production_task = latest_task_for_content(
+            item.item_id,
+            states={"in_progress", "produced"},
+            pipeline_id="codex_scene_video",
+        )
+        if production_task is None:
+            raise HTTPException(status_code=409, detail="关联生产任务不存在，无法继续合成。")
+        production = await produce_item(
+            item.item_id,
+            ProduceRequest(
+                request_id=f"{request.request_id}:produce",
+                recipe_id=production_task.recipe_id,
+                client_name=request.client_name,
+                agent_session_id=request.agent_session_id,
+                source=request.source,
+            ),
+            identity,
+            generation_service,
+        )
+        return {
+            "operation_id": operation.operation_id,
+            "images": results,
+            "item": _item_or_404(item.item_id),
+            "production": production,
+        }
     return {"operation_id": operation.operation_id, "images": results, "item": item}
 
 
@@ -601,14 +1173,7 @@ async def produce_item(
         fail_operation(operation, "请先在控制台确认内容。", layer="input")
         raise HTTPException(status_code=400, detail="请先在控制台确认内容。")
 
-    project = get_project(item.project)
-    template_id = (
-        request.recipe_id
-        or (project.default_production_template_id if project else None)
-        or build_default_production_template_registry().default_template_id(
-            project="PetWoods", channel="xiaohongshu"
-        )
-    )
+    template_id = request.recipe_id
     registry = build_default_production_template_registry()
     try:
         template = registry.get(template_id)
@@ -617,21 +1182,24 @@ async def produce_item(
         raise HTTPException(status_code=400, detail=str(exc)) from None
     if template.access_scope == "agent":
         if not identity.is_agent:
-            fail_operation(operation, "Agent 配方需要有效的 Agent Token。", layer="permissions")
+            fail_operation(operation, "Agent 模板需要有效的 Agent Token。", layer="permissions")
             require_agent(identity)
-    if template.entry not in {"script", "scenes"}:
+    pipeline = build_default_pipeline_registry().get_manifest(template.pipeline_id)
+    required_input_names = {field.name for field in pipeline.input.required_fields}
+    is_scene_pipeline = template.pipeline_id == "codex_scene_video"
+    if not is_scene_pipeline and not ({"script", "topic"} & required_input_names):
         fail_operation(
             operation,
-            "这个配方需要专用素材输入，首批内容用例接口不能安全构造。",
+            "这个模板需要专用素材输入，首批内容用例接口不能安全构造。",
             layer="product_assumption",
         )
         raise HTTPException(
             status_code=400,
-            detail="这个配方需要专用素材输入，请从 React 快速生成发起。",
+            detail="这个模板需要专用素材输入，请从 React 快速生成发起。",
         )
 
-    submissions: list[tuple[str, dict[str, Any]]] = []
-    if template.entry == "scenes":
+    submissions: list[tuple[str, dict[str, Any], str | None]] = []
+    if is_scene_pipeline:
         manifest = item.scene_manifest
         if not manifest or not manifest.confirmed:
             fail_operation(operation, "分镜尚未确认。", layer="input")
@@ -662,7 +1230,11 @@ async def produce_item(
             fail_operation(operation, str(exc), layer="persistence")
             raise HTTPException(status_code=400, detail=str(exc)) from None
         submissions.append(
-            (request.language or item.languages[0], {"scenes": scenes, "title": item.title})
+            (
+                request.language or item.languages[0],
+                {"scenes": scenes, "title": item.title},
+                None,
+            )
         )
     else:
         for language, variant in item.variants.items():
@@ -671,21 +1243,59 @@ async def produce_item(
             if variant.status != "confirmed" or not variant.script.strip():
                 continue
             narrations = [line.strip() for line in variant.narrations if line.strip()]
-            input_payload: dict[str, Any] = {
-                "script": "\n".join(narrations) if narrations else variant.script,
-                "title": variant.title or item.title,
-            }
-            if narrations:
-                input_payload["split_mode"] = "line"
-            submissions.append((language, input_payload))
+            confirmed_script = "\n".join(narrations) if narrations else variant.script
+            input_payload: dict[str, Any]
+            if "topic" in required_input_names:
+                input_payload = {
+                    "topic": item.title,
+                    "title": variant.title or item.title,
+                }
+            else:
+                input_payload = {
+                    "script": confirmed_script,
+                    "title": variant.title or item.title,
+                }
+            submissions.append((language, input_payload, confirmed_script))
     if not submissions:
         fail_operation(operation, "没有可生产的已确认内容。", layer="input")
         raise HTTPException(status_code=400, detail="没有可生产的已确认内容。")
 
+    from pixelle_video.content.production_tasks import (
+        attach_generation_task,
+        latest_task_for_content,
+        set_task_state,
+    )
+
+    production_task = latest_task_for_content(
+        item.item_id,
+        states={"needs_user", "in_progress", "produced"},
+        pipeline_id=template.pipeline_id,
+    )
+    has_frozen_task_settings = production_task is not None
+    if production_task is None:
+        fail_operation(
+            operation,
+            "没有可继续的生产任务。",
+            layer="product_assumption",
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="生产必须从快速生产或 Agent 的 start_production 发起。",
+        )
+    else:
+        set_task_state(
+            production_task.production_task_id,
+            state="in_progress",
+            stage_id=pipeline.stages[0].id,
+            stage_label=pipeline.stages[0].name,
+            next_actor="system",
+            operation_id=operation.operation_id,
+        )
+
     batch_id = uuid.uuid4().hex
     batch_items: list[dict[str, Any]] = []
     try:
-        for index, (language, input_payload) in enumerate(submissions, start=1):
+        for index, (language, input_payload, confirmed_script) in enumerate(submissions, start=1):
             metadata = {
                 "content_item_id": item.item_id,
                 "project_id": item.project,
@@ -693,8 +1303,24 @@ async def produce_item(
                 "language": language,
                 "batch_id": batch_id,
                 "batch_index": index,
+                "production_task_id": production_task.production_task_id,
                 **_trace(request),
             }
+            if template.pipeline_id in {"topic_to_video", "topic_to_image_post"} and confirmed_script:
+                metadata["confirmed_script"] = confirmed_script
+            if (
+                template.pipeline_id in {
+                    "topic_to_video",
+                    "topic_to_image_post",
+                    "script_to_video",
+                    "image_post",
+                }
+                and item.scene_manifest
+                and item.scene_manifest.confirmed
+            ):
+                metadata["confirmed_scenes"] = [
+                    scene.narration for scene in item.scene_manifest.scenes
+                ]
             generation_request = registry.compile_request(
                 template.id,
                 input={**input_payload, **request.overrides},
@@ -703,9 +1329,18 @@ async def produce_item(
                 available_capabilities=detect_available_generation_capabilities(),
                 surface="agent" if identity.is_agent else "public",
             )
+            if has_frozen_task_settings:
+                # 主题路线在提交主题时已冻结本次设置。人工确认后
+                # 必须继续使用同一份快照，不能重读已变化的模板默认。
+                generation_request.params = dict(production_task.effective_params)
             task = generation_service.submit(
                 generation_request,
                 surface="agent" if identity.is_agent else "public",
+            )
+            attach_generation_task(
+                production_task.production_task_id,
+                task,
+                effective_params=generation_request.params,
             )
             operation.task_ids.append(task.task_id)
             operation.batch_id = batch_id
@@ -725,6 +1360,15 @@ async def produce_item(
     except (ProductionTemplateError, ValueError) as exc:
         if not operation.task_ids:
             fail_operation(operation, str(exc), layer="input")
+            set_task_state(
+                production_task.production_task_id,
+                state="failed",
+                stage_id="submit_production",
+                stage_label="生产任务提交失败",
+                next_actor="user",
+                action_type="view_error",
+                action_label="查看原因",
+            )
             raise HTTPException(status_code=400, detail=str(exc)) from None
         _persist_partial_production(
             item=item,
@@ -754,6 +1398,15 @@ async def produce_item(
             )
         else:
             fail_operation(operation, str(exc))
+            set_task_state(
+                production_task.production_task_id,
+                state="failed",
+                stage_id="submit_production",
+                stage_label="生产任务提交失败",
+                next_actor="user",
+                action_type="view_error",
+                action_label="查看原因",
+            )
         raise HTTPException(
             status_code=502,
             detail="生产任务提交失败，请查看本机 API 日志和操作记录。",
@@ -982,35 +1635,3 @@ def _persist_partial_production(
     save_item(item)
     operation.phase = "linked"
     fail_operation(operation, error)
-
-
-def _sync_legacy_draft_set(item: ContentItem) -> None:
-    """Keep the old review artifact readable while ContentItem stays canonical."""
-
-    draft_set_id = item.links.get("draft_set_id")
-    draft_index = item.links.get("draft_index")
-    if not draft_set_id or draft_index is None:
-        return
-    from api.routers.generation import (
-        _load_script_review_draft_set,
-        _save_script_review_draft_set,
-    )
-
-    draft_set = _load_script_review_draft_set(str(draft_set_id))
-    if draft_set is None:
-        return
-    for draft in draft_set.get("drafts", []):
-        if draft.get("index") != draft_index:
-            continue
-        draft["language_drafts"] = {
-            language: {
-                "title": variant.title,
-                "script": variant.script,
-                "narrations": variant.narrations,
-            }
-            for language, variant in item.variants.items()
-        }
-        break
-    draft_set["status"] = "reviewed"
-    draft_set["updated_at"] = now_iso()
-    _save_script_review_draft_set(draft_set)

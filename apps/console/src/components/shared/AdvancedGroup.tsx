@@ -19,7 +19,7 @@ export function AdvancedGroup({
   id: string
   title: string
   description?: string
-  /** 与配方详情页产线图对齐的步骤编号。 */
+  /** 与模板详情页产线图对齐的步骤编号。 */
   step?: string | null
   defaultOpen?: boolean
   children: React.ReactNode

@@ -25,9 +25,6 @@ from pixelle_video.utils.os_util import create_task_output_dir
 class WorkflowVideoPipeline(BasePipeline):
     """Shared helpers for ComfyKit/RunningHub single-result video workflows."""
 
-    def _workflow_input(self, workflow_path: Path) -> str:
-        return self._workflow_source_and_input(workflow_path)[1]
-
     def _workflow_source_and_input(self, workflow_path: Path) -> tuple[str, str]:
         if not workflow_path.exists():
             raise FileNotFoundError(f"Workflow file does not exist: {workflow_path}")

@@ -19,7 +19,6 @@ export type SeededTrackedTask = ReturnType<typeof trackedTaskForState>
 export const PRIMARY_ROUTES = [
   { label: "工作台", path: "/board" },
   { label: "快速生产", path: "/create" },
-  { label: "任务", path: "/tasks" },
   { label: "作品库", path: "/library" },
   { label: "设置", path: "/settings" },
 ] as const
@@ -63,8 +62,7 @@ export function trackedTaskForState(state: SeededRunState) {
   return {
     task: {
       task_id: `run-${state}`,
-      pipeline_id: "standard",
-      entry: "script",
+      pipeline_id: "script_to_video",
       status: state,
       progress: {
         stage: state,

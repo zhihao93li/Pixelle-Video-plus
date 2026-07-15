@@ -45,8 +45,3 @@ npm run build
 ```
 
 完成后继续阅读[快速开始](quick-start.md)。
-
-## 可选运行面
-
-`web/app.py` 是冻结中的 legacy Streamlit 工具面，只用于迁移期排查。Windows
-整合包和正式产品入口均使用 React 控制台；完成兼容验收后将删除旧工具面。

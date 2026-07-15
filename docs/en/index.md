@@ -1,10 +1,10 @@
 # Pixelle
 
-Pixelle is an AI content production workspace for solo content operators. It connects topics, drafts, review, production, artifacts, and publishing inside one project scope, with support for video, image sets, and long-form text.
+Pixelle is an AI content production workspace for solo content operators. It connects the content ledger, human confirmation, production tasks, artifacts, and publishing inside one project scope, with support for video, image sets, and long-form text.
 
 ## Product Surfaces
 
-- **Board** manages content lifecycle and the next available action.
+- **Workbench** groups production tasks by needs-attention, in-progress, failed, and produced states.
 - **Quick Create** submits single or batch work through standard, asset, and specialized recipes.
 - **Tasks** shows production runs, child tasks, cancellation, failures, and retries.
 - **Library** previews video, image sets, and text before publishing.

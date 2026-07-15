@@ -141,8 +141,7 @@ async def test_image_post_rejects_empty_script(patched_generators):
 def test_generation_result_defaults_to_video_without_artifact_type():
     result = GenerationResult(
         task_id="t",
-        pipeline_id="standard",
-        entry="script",
+        pipeline_id="script_to_video",
         artifacts=[GenerationArtifact(kind="video", path="/v.mp4")],
         primary_video=GenerationArtifact(kind="video", path="/v.mp4"),
     )
@@ -154,7 +153,6 @@ def test_generation_result_image_set_allows_null_primary_video():
     result = GenerationResult(
         task_id="t",
         pipeline_id="image_post",
-        entry="script",
         artifact_type="image_set",
         artifacts=[
             GenerationArtifact(kind="image", path="/c.png", role="cover"),
@@ -172,14 +170,12 @@ def test_generation_result_image_set_allows_null_primary_video():
 def _image_post_task() -> GenerationTask:
     request = GenerationRequest(
         pipeline_id="image_post",
-        entry="script",
         input={"script": "a\nb"},
         metadata={"production_template": {"id": IMAGE_POST_SKELETON}},
     )
     return GenerationTask(
         task_id="task-1",
         pipeline_id="image_post",
-        entry="script",
         request=request,
         progress=GenerationProgress(stage="paginate"),
     )
@@ -213,11 +209,11 @@ def test_service_converts_image_post_result_to_image_set():
 # --- 注册（管线 manifest + 生产模板骨架） ---
 
 
-def test_image_post_manifest_registered_with_script_entry():
+def test_image_post_manifest_registered_with_script_input():
     manifests = {m.id: m for m in build_default_pipeline_manifests()}
     assert "image_post" in manifests
     manifest = manifests["image_post"]
-    assert manifest.default_entry == "script"
+    assert [field.name for field in manifest.input.required_fields] == ["script"]
     assert "ffmpeg" not in manifest.required_capabilities
     assert "tts" not in manifest.required_capabilities
 
@@ -226,9 +222,7 @@ def test_image_post_skeleton_registered_and_compiles():
     registry = build_default_production_template_registry()
     template = registry.get(IMAGE_POST_SKELETON)
     assert template.pipeline_id == "image_post"
-    assert template.entry == "script"
     assert template.enabled is True
-    assert template.product_entry == "generate"
     # 无 ffmpeg/tts 依赖
     assert "ffmpeg" not in template.required_capabilities
     assert "tts" not in template.required_capabilities
@@ -239,6 +233,5 @@ def test_image_post_skeleton_registered_and_compiles():
         IMAGE_POST_SKELETON, input={"script": "第一行\n第二行"}
     )
     assert request.pipeline_id == "image_post"
-    assert request.entry == "script"
     assert request.input == {"script": "第一行\n第二行"}
     assert request.params["split_mode"] == "line"

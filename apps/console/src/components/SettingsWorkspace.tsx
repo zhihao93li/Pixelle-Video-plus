@@ -7,6 +7,7 @@ import {
   Gauge,
   Loader2,
   PanelsTopLeft,
+  FileText,
   Plus,
   RefreshCw,
   Save,
@@ -18,6 +19,8 @@ import { HelpWorkspace } from "@/components/HelpWorkspace"
 import { ProjectsPanel } from "@/components/ProjectsPanel"
 import { UnsavedChangesGuard } from "@/components/settings/UnsavedChangesGuard"
 import { ImageProviderSettings } from "@/components/settings/ImageProviderSettings"
+import { PromptLibraryPanel } from "@/components/settings/PromptLibraryPanel"
+import { LlmProviderSettings } from "@/components/settings/LlmProviderSettings"
 import { AsyncState } from "@/components/shared/AsyncState"
 import { InlineError } from "@/components/shared/feedback"
 import { PageFrame } from "@/components/shared/PageFrame"
@@ -67,10 +70,8 @@ import {
   listResourceMediaWorkflows,
   listResourceTemplates,
   listResourceTtsWorkflows,
-  loadLlmModels,
   resetSettingsConfig,
   testComfyuiConnection,
-  testLlmConnection,
   updateSettingsConfig,
   type AppSettingsConfig,
   type BufferChannel,
@@ -134,9 +135,15 @@ const SETTINGS_NAV: Array<{
   },
   {
     view: "recipes",
-    label: "配方",
+    label: "模板",
     description: "启停与克隆",
     icon: PanelsTopLeft,
+  },
+  {
+    view: "prompts",
+    label: "提示词库",
+    description: "写稿与分镜规则",
+    icon: FileText,
   },
   {
     view: "help",
@@ -179,12 +186,6 @@ export function SettingsWorkspace() {
     ttsWorkflows: [],
   })
   const [resourceError, setResourceError] = useState<string | null>(null)
-  const [llmModels, setLlmModels] = useState<string[]>([])
-  const [llmActionState, setLlmActionState] = useState<ActionState>("idle")
-  const [llmStatus, setLlmStatus] = useState<{
-    ok: boolean
-    message: string
-  } | null>(null)
   const [comfyActionState, setComfyActionState] = useState<ActionState>("idle")
   const [comfyStatus, setComfyStatus] = useState<{
     ok: boolean
@@ -467,7 +468,6 @@ export function SettingsWorkspace() {
       setSettings(response.config)
       setSavedSettings(response.config)
       setConfigured(response.configured)
-      setLlmModels([])
       void refreshDiagnostics()
       setNotice("设置已重置为默认值。")
       toast({ title: "系统设置已重置", variant: "success" })
@@ -478,52 +478,6 @@ export function SettingsWorkspace() {
     }
   }
 
-  async function loadModels() {
-    if (!settings) {
-      return
-    }
-    setLlmActionState("loading")
-    setLlmStatus(null)
-    try {
-      const response = await loadLlmModels(
-        settings.llm.api_key,
-        settings.llm.base_url
-      )
-      setLlmModels(response.models)
-      setLlmStatus({
-        ok: true,
-        message: `已加载 ${response.models.length} 个模型。`,
-      })
-    } catch (loadError) {
-      setLlmStatus({ ok: false, message: readableError(loadError) })
-    } finally {
-      setLlmActionState("idle")
-    }
-  }
-
-  async function testLlm() {
-    if (!settings) {
-      return
-    }
-    setLlmActionState("testing")
-    setLlmStatus(null)
-    try {
-      const response = await testLlmConnection(
-        settings.llm.api_key,
-        settings.llm.base_url
-      )
-      setLlmStatus({
-        ok: response.ok,
-        message: response.ok
-          ? `连接成功，可用模型 ${response.model_count} 个。`
-          : response.message,
-      })
-    } catch (testError) {
-      setLlmStatus({ ok: false, message: readableError(testError) })
-    } finally {
-      setLlmActionState("idle")
-    }
-  }
 
   async function testComfyui() {
     if (!settings) {
@@ -627,7 +581,7 @@ export function SettingsWorkspace() {
             </Button>
           </>
         }
-        description="管理项目、模型、生成引擎、发布与配方。每个分区独立保存。"
+        description="管理项目、模型、生成引擎、发布与模板。每个分区独立保存。"
         title="设置中心"
       />
 
@@ -768,113 +722,18 @@ export function SettingsWorkspace() {
                 saving={savingSection === "ai-voice"}
                 title="AI 与语音"
               />
-              <Section id="llm" title="内容起草模型">
-                <SecretSettingField
-                  configured={Boolean(settings.llm.api_key_configured)}
-                  label="AiHubMix API Key"
-                  onChange={(value) =>
-                    patchSettings({
-                      llm: {
-                        ...settings.llm,
-                        api_key: value,
-                        clear_api_key: false,
-                      },
-                    })
-                  }
-                  onClear={() =>
-                    patchSettings({
-                      llm: {
-                        ...settings.llm,
-                        api_key: "",
-                        api_key_configured: false,
-                        clear_api_key: true,
-                      },
-                    })
-                  }
-                  value={settings.llm.api_key}
+              <Section id="llm" title="LLM 服务">
+                <LlmProviderSettings
+                  onSettingsChanged={(next) => {
+                    setSettings((current) =>
+                      current ? { ...current, llm: next.llm } : next
+                    )
+                    setSavedSettings((current) =>
+                      current ? { ...current, llm: next.llm } : next
+                    )
+                  }}
+                  settings={settings}
                 />
-                <Field label="服务地址">
-                  <Input
-                    onChange={(event) =>
-                      patchSettings({
-                        llm: { ...settings.llm, base_url: event.target.value },
-                      })
-                    }
-                    value={settings.llm.base_url}
-                  />
-                </Field>
-                <Field label="默认模型">
-                  {llmModels.length > 0 ? (
-                    <Select
-                      onValueChange={(value) =>
-                        patchSettings({
-                          llm: { ...settings.llm, model: value },
-                        })
-                      }
-                      value={settings.llm.model}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {llmModels.map((model) => (
-                            <SelectItem key={model} value={model}>
-                              {model}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input
-                      onChange={(event) =>
-                        patchSettings({
-                          llm: { ...settings.llm, model: event.target.value },
-                        })
-                      }
-                      value={settings.llm.model}
-                    />
-                  )}
-                </Field>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    disabled={llmActionState !== "idle"}
-                    onClick={() => void loadModels()}
-                    variant="outline"
-                  >
-                    {llmActionState === "loading" ? (
-                      <Loader2
-                        className="animate-spin"
-                        data-icon="inline-start"
-                      />
-                    ) : (
-                      <RefreshCw data-icon="inline-start" />
-                    )}
-                    加载模型
-                  </Button>
-                  <Button
-                    disabled={llmActionState !== "idle"}
-                    onClick={() => void testLlm()}
-                    variant="outline"
-                  >
-                    {llmActionState === "testing" ? (
-                      <Loader2
-                        className="animate-spin"
-                        data-icon="inline-start"
-                      />
-                    ) : (
-                      <CheckCircle2 data-icon="inline-start" />
-                    )}
-                    测试连接
-                  </Button>
-                </div>
-                {llmStatus ? (
-                  <StatusMessage
-                    message={llmStatus.message}
-                    ok={llmStatus.ok}
-                  />
-                ) : null}
               </Section>
 
               <Section id="tts" title="Fish Audio">
@@ -1519,6 +1378,7 @@ export function SettingsWorkspace() {
           ) : null}
 
           {activeView === "recipes" ? <TemplateStatusPanel /> : null}
+          {activeView === "prompts" ? <PromptLibraryPanel /> : null}
           {activeView === "help" ? <HelpWorkspace /> : null}
 
           {error && settings && requiresSettings(activeView) ? (
@@ -1640,7 +1500,7 @@ function ResetSettingsDialog({
             <AlertDialogHeader>
               <AlertDialogTitle>重置所有系统设置？</AlertDialogTitle>
               <AlertDialogDescription>
-                AI、语音、生成服务、发布渠道与存储配置会恢复默认值。项目、配方和作品不会删除，此操作无法撤销。
+                AI、语音、生成服务、发布渠道与存储配置会恢复默认值。项目、模板和作品不会删除，此操作无法撤销。
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -1662,7 +1522,7 @@ function ExpertModeSection() {
     <Section title="专家模式">
       <div className="flex items-start justify-between gap-4">
         <p className="text-sm leading-6 text-muted-foreground">
-          开启后显示生成流程、底层覆盖项与配方默认配置。日常生产建议保持关闭。
+          开启后显示生成流程、底层覆盖项与模板默认配置。日常生产建议保持关闭。
         </p>
         <Switch
           aria-label="专家模式"

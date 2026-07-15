@@ -31,8 +31,8 @@ async def media_generate(
     """
     Generate image or video media through the shared media workflow service.
 
-    This is the FastAPI boundary for the old Streamlit style preview flow:
-    React calls this endpoint instead of invoking pixelle_video.media directly.
+    React calls this endpoint for one-off media previews without creating a
+    formal production task.
     """
     try:
         logger.info(

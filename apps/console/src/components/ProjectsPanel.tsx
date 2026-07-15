@@ -228,7 +228,7 @@ export function ProjectsPanel() {
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             <Badge variant="outline">
-              配方：
+              模板：
               {templateName(project.default_production_template_id) ??
                 "内置默认"}
             </Badge>
@@ -318,7 +318,7 @@ export function ProjectsPanel() {
             项目
           </h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-            每个项目代表一个品牌或内容线，管理默认配方、语言音色与发布平台。
+            每个项目代表一个品牌或内容线，管理默认模板、语言音色与发布平台。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -344,7 +344,7 @@ export function ProjectsPanel() {
       {loadState === "loading" ? (
         <AsyncState
           className="mt-5"
-          description="正在同步项目与配方默认值。"
+          description="正在同步项目与模板默认值。"
           state="loading"
           title="正在读取项目"
         />

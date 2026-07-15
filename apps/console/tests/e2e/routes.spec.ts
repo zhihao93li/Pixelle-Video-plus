@@ -40,6 +40,46 @@ test.describe("正式路由", () => {
     await expect(page).toHaveURL(/#\/settings\?view=overview$/)
     expect(unhandledApi).toEqual([])
   })
+
+  test("提示词库可独立管理写稿与分镜提示词", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page)
+    await preparePage(page)
+    await page.goto("/#/settings?view=prompts", { waitUntil: "networkidle" })
+    await expect(page.getByRole("heading", { name: "提示词库", exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "写稿提示词" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "分镜提示词" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "复制并编辑" })).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("设置中心展示多条真实 LLM 服务", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page)
+    await preparePage(page)
+    await page.goto("/#/settings?view=ai-voice", { waitUntil: "networkidle" })
+    await expect(page.getByRole("heading", { name: "LLM 服务" })).toBeVisible()
+    await expect(page.getByRole("button", { name: /AiHubMix 主账号/ })).toBeVisible()
+    await expect(page.getByRole("button", { name: /OpenAI 直连/ })).toBeVisible()
+    await expect(page.getByRole("button", { name: "添加 LLM 服务" })).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+})
+
+test("工作台生产任务卡进入同一稳定任务详情", async ({ page }) => {
+  const unhandledApi = await installApiFixtures(page)
+  await preparePage(page)
+  await page.goto("/#/board/tasks/production-needs_user", {
+    waitUntil: "networkidle",
+  })
+
+  await expect(
+    page.getByRole("heading", { name: "猫咪为什么喜欢猫薄荷", level: 2 })
+  ).toBeVisible()
+  await expect(page.getByText("待你处理", { exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: /确认文案/ })).toHaveAttribute(
+    "href",
+    "#/board/item/content-1"
+  )
+  expect(unhandledApi).toEqual([])
 })
 
 function escapeRegExp(value: string) {

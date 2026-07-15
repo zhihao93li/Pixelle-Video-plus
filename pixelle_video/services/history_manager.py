@@ -19,8 +19,6 @@ Provides high-level operations on top of PersistenceService.
 
 from typing import Any, Dict, Optional
 
-from loguru import logger
-
 from pixelle_video.generation.summaries import build_generation_summary
 from pixelle_video.services.persistence import PersistenceService
 
@@ -128,41 +126,6 @@ class HistoryManager:
             True if successful, False otherwise
         """
         return await self.persistence.delete_task(task_id)
-
-    async def duplicate_task(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Duplicate a task (get input parameters for new generation)
-
-        This allows users to:
-        1. Copy all generation parameters from a previous task
-        2. Pre-fill the generation form
-        3. Regenerate with same/modified parameters
-
-        Args:
-            task_id: Task ID to duplicate
-
-        Returns:
-            Input parameters dict or None if task not found
-            {
-                "text": "...",
-                "mode": "generate",
-                "title": "...",
-                "n_scenes": 5,
-                "tts_inference_mode": "local",
-                "tts_voice": "...",
-                ...
-            }
-        """
-        metadata = await self.persistence.load_task_metadata(task_id)
-        if not metadata:
-            logger.warning(f"Task {task_id} not found for duplication")
-            return None
-
-        # Extract input parameters
-        input_params = metadata.get("input", {})
-        logger.info(f"Duplicated task {task_id} parameters")
-
-        return input_params
 
     async def rebuild_index(self):
         """Rebuild task index (useful for maintenance or after manual changes)"""

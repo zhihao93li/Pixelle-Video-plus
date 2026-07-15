@@ -224,7 +224,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
       <PageFrame>
         <BackRow />
         <AsyncState
-          description="正在同步项目、生产配方与发布平台。"
+          description="正在同步项目、生产模板与发布平台。"
           state="loading"
           title="正在读取项目"
         />
@@ -294,7 +294,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
             </AlertDialog>
           </>
         }
-        description="分区保存品牌信息、语言音色与生产发布默认。写稿规则在配方中管理。"
+        description="分区保存品牌信息、语言音色与生产发布默认。写稿规则在模板中管理。"
         title={project.name}
       />
       {isDefault && (
@@ -483,7 +483,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               }
               title="生产与发布默认"
             />
-            <div className="mt-3 text-xs text-muted-foreground">生产配方</div>
+            <div className="mt-3 text-xs text-muted-foreground">生产模板</div>
             <Select
               onValueChange={setProductionTemplateId}
               value={productionTemplateId}
@@ -494,10 +494,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
               <SelectContent>
                 <SelectItem value={NONE}>用内置默认模板</SelectItem>
                 {templates
-                  .filter(
-                    (template) =>
-                      template.enabled && template.product_entry === "generate"
-                  )
+                  .filter((template) => template.enabled)
                   .map((template) => (
                     <SelectItem key={template.id} value={template.id}>
                       {template.display_name}
@@ -515,7 +512,7 @@ export function ProjectDetailPage({ projectId }: { projectId: string }) {
                 variant="outline"
               >
                 <SlidersHorizontal data-icon="inline-start" />
-                看这套配方的产线
+                看这套模板的产线
               </Button>
             )}
             <div className="mt-4 text-xs text-muted-foreground">

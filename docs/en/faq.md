@@ -27,7 +27,7 @@ Yes, you can use traditional pip + venv approach.
 | Template Type | ComfyUI | Best For | Speed |
 |--------------|---------|----------|-------|
 | Text-only<br/>(e.g., `simple.html`) | ❌ Not needed | Quotes, announcements, reading prompts | ⚡⚡⚡ Very fast |
-| AI Images<br/>(e.g., `default.html`) | ✅ Required | Rich visual content | ⚡ Standard |
+| AI Images<br/>(e.g., `image_default.html`) | ✅ Required | Rich visual content | ⚡ Standard |
 
 **Tip**: Beginners can start with text-only templates for instant zero-barrier experience!
 

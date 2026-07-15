@@ -14,12 +14,12 @@ export function resolveGenerateTemplate(
 ): GenerateTemplateResolution {
   const requestedId = requestedTemplateId?.trim()
   const targetId = requestedId || defaultTemplateId?.trim()
-  const targetLabel = requestedId ? "指定配方" : "默认配方"
+  const targetLabel = requestedId ? "指定模板" : "默认模板"
 
   if (!targetId) {
     return {
       ok: false,
-      error: "当前项目没有配置默认生产配方，请返回快速生产重新选择。",
+      error: "当前项目没有配置默认生产模板，请返回快速生产重新选择。",
     }
   }
 
@@ -33,16 +33,12 @@ export function resolveGenerateTemplate(
   if (!template.enabled) {
     return {
       ok: false,
-      error: `${targetLabel}「${template.display_name}」已停用，请返回快速生产选择其他配方。`,
+      error: `${targetLabel}「${template.display_name}」已停用，请返回快速生产选择其他模板。`,
     }
   }
-  if (template.retired) {
-    return {
-      ok: false,
-      error: `${targetLabel}「${template.display_name}」已退役，请返回快速生产选择其他配方。`,
-    }
-  }
-  if (template.product_entry !== "generate") {
+  if (
+    ["i2v", "action_transfer", "digital_human"].includes(template.pipeline_id)
+  ) {
     return {
       ok: false,
       error: `${targetLabel}「${template.display_name}」属于专用生产模式，不能在当前生成页打开。`,

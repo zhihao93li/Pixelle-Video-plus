@@ -33,14 +33,6 @@ export function InlineError({
   )
 }
 
-export function InlineNotice({ message }: { message: string }) {
-  return (
-    <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-primary">
-      {message}
-    </div>
-  )
-}
-
 /** 键值元数据卡。 */
 export function Fact({ label, value }: { label: string; value: string }) {
   return (

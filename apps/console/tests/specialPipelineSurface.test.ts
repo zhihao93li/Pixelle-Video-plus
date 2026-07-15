@@ -30,17 +30,12 @@ function specialTemplate(
     input_requirements: ["assets", "prompt"],
     quality_tier: "daily",
     pipeline_id: "i2v",
-    entry: "assets",
+    drafting: null,
     fixed_params: {},
     required_capabilities: ["media", "persistence"],
     user_selectable_runtime: false,
     user_selectable_providers: [],
     enabled: true,
-    retired: false,
-    migration_status: "ready",
-    product_entry: "image_to_video",
-    streamlit_source: null,
-    migration_notes: "",
     allowed_user_params: [],
     passthrough_input_fields: [],
     ...patch,
@@ -67,7 +62,6 @@ test("special route never silently falls back for invalid recipe identity", () =
   const action = specialTemplate({
     id: "action",
     use_case: "action_transfer",
-    product_entry: "action_transfer",
     pipeline_id: "action_transfer",
   })
   const disabled = specialTemplate({ id: "disabled", enabled: false })
@@ -172,7 +166,6 @@ test("digital voice defaults only become task overrides after a real edit", () =
   const template = specialTemplate({
     id: "digital",
     use_case: "digital_human",
-    product_entry: "digital_human",
     pipeline_id: "digital_human",
     fixed_params: {
       tts_inference_mode: "fish",
@@ -203,7 +196,6 @@ test("special task payloads keep single-file identity and omit unchanged voice d
     duration: 0,
     script: "",
     goodsTitle: "",
-    voiceOverrides: {},
   })
   assert.deepEqual(action, {
     reference_video: "/action-1.mp4",
@@ -224,7 +216,6 @@ test("special task payloads keep single-file identity and omit unchanged voice d
     duration: 0,
     script: " hello ",
     goodsTitle: "",
-    voiceOverrides: {},
   })
   assert.deepEqual(digital, {
     character_assets: ["/character.png"],

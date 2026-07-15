@@ -28,18 +28,13 @@ function template(patch: Partial<ProductionTemplate> = {}): ProductionTemplate {
     template_tags: [],
     input_requirements: ["script"],
     quality_tier: "basic",
-    pipeline_id: "standard",
-    entry: "",
+    pipeline_id: "script_to_video",
+    drafting: null,
     fixed_params: {},
     required_capabilities: [],
     user_selectable_runtime: false,
     user_selectable_providers: [],
     enabled: true,
-    retired: false,
-    migration_status: "ready",
-    product_entry: "generate",
-    streamlit_source: null,
-    migration_notes: "",
     allowed_user_params: [],
     passthrough_input_fields: [],
     ...patch,
@@ -50,7 +45,6 @@ test("production routes preserve a special recipe identity", () => {
   const i2v = template({
     id: "template-i2v",
     pipeline_id: "i2v",
-    product_entry: "image_to_video",
     input_requirements: ["assets", "prompt"],
     requires_user_assets: true,
   })
@@ -61,16 +55,16 @@ test("production routes preserve a special recipe identity", () => {
   )
 })
 
-test("production routes keep direct generation and review flows distinct", () => {
+test("non-special pipelines use the unified production route", () => {
   assert.equal(
     productionStartRoute(template()),
     "/create/generate/template-standard"
   )
   assert.equal(
     productionStartRoute(
-      template({ id: "review", product_entry: "script_review" })
+      template({ id: "topic", pipeline_id: "topic_to_video" })
     ),
-    "/create/script-review"
+    "/create/generate/topic"
   )
 })
 
@@ -93,7 +87,7 @@ test("Codex-only recipes are described as configuration-only in React", () => {
     id: "codex-image-story",
     pipeline_id: "codex_scene_video",
     input_requirements: ["scenes"],
-    access_scope: "codex",
+    access_scope: "agent",
   })
 
   assert.equal(isCodexOnlyTemplate(codex), true)
@@ -116,7 +110,7 @@ test("explicit generate recipe identities never fall back", () => {
     resolveGenerateTemplate([standard], "missing-recipe", standard.id),
     {
       ok: false,
-      error: "指定配方不存在或当前项目无权使用，请返回快速生产重新选择。",
+      error: "指定模板不存在或当前项目无权使用，请返回快速生产重新选择。",
     }
   )
   assert.equal(
@@ -129,7 +123,7 @@ test("explicit generate recipe identities never fall back", () => {
   )
   assert.equal(
     resolveGenerateTemplate(
-      [standard, template({ id: "special", product_entry: "image_to_video" })],
+      [standard, template({ id: "special", pipeline_id: "i2v" })],
       "special",
       standard.id
     ).ok,

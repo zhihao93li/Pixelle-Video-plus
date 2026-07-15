@@ -55,13 +55,3 @@ def resolve_workflow_path(
         'runninghub/image.json'
     """
     return f"{source}/{service_name}.json"
-
-
-def get_default_source() -> WorkflowSource:
-    """
-    Get default workflow source
-    
-    Returns:
-        'runninghub' - Cloud-first approach, better for beginners
-    """
-    return 'runninghub'

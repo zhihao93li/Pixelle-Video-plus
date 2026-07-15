@@ -37,14 +37,6 @@ class APIConfig(BaseModel):
         "http://localhost:4173",
     ]
     
-    # Task settings
-    max_concurrent_tasks: int = 5
-    task_cleanup_interval: int = 3600  # Clean completed tasks every hour
-    task_retention_time: int = 86400   # Keep task results for 24 hours
-    
-    # File upload settings
-    max_upload_size: int = 100 * 1024 * 1024  # 100MB
-    
     # API settings
     api_prefix: str = "/api"
     docs_url: Optional[str] = "/docs"

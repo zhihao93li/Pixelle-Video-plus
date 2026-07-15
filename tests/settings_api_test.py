@@ -318,6 +318,133 @@ def test_settings_llm_model_endpoint_loads_models(monkeypatch):
     assert response.json()["models"] == ["deepseek-v4-flash", "gpt-4.1"]
 
 
+def test_settings_llm_model_catalog_uses_real_configured_provider(monkeypatch):
+    fake_config_manager.config = PixelleVideoConfig(
+        llm={
+            "api_key": "llm-key",
+            "base_url": "https://aihubmix.com/v1",
+            "model": "gpt-4.1",
+        }
+    )
+    monkeypatch.setattr(
+        settings_router,
+        "fetch_available_models",
+        lambda api_key, base_url: ["gpt-4.1", "claude-sonnet-4", "qwen-max"],
+    )
+    app.dependency_overrides[get_config_manager] = get_fake_config_manager
+    try:
+        response = TestClient(app).get("/api/settings/llm/model-catalog")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["configured"] is True
+    assert [provider["id"] for provider in payload["providers"]] == ["aihubmix"]
+    assert payload["providers"][0]["provider_type"] == "aihubmix"
+    assert [model["id"] for model in payload["providers"][0]["models"]] == [
+        "claude-sonnet-4",
+        "gpt-4.1",
+        "qwen-max",
+    ]
+    assert not any("selected" in provider for provider in payload["providers"])
+
+
+def test_settings_support_multiple_real_llm_providers_and_default_selection(monkeypatch):
+    fake_config_manager.config = PixelleVideoConfig()
+    app.dependency_overrides[get_config_manager] = get_fake_config_manager
+    client = TestClient(app)
+    try:
+        aihubmix = client.put(
+            "/api/settings/llm/providers/aihubmix-main",
+            json={
+                "name": "AiHubMix 主账号",
+                "provider_type": "aihubmix",
+                "enabled": True,
+                "api_key": "aihub-secret",
+                "base_url": "https://aihubmix.com/v1",
+                "default_model": "claude-sonnet-4",
+            },
+        )
+        openai = client.put(
+            "/api/settings/llm/providers/openai-direct",
+            json={
+                "name": "OpenAI 直连",
+                "provider_type": "openai",
+                "enabled": True,
+                "api_key": "openai-secret",
+                "base_url": "https://api.openai.com/v1",
+                "default_model": "gpt-4.1",
+            },
+        )
+        selected = client.put("/api/settings/llm/default-provider/openai-direct")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert aihubmix.status_code == 200, aihubmix.text
+    assert openai.status_code == 200, openai.text
+    assert selected.status_code == 200, selected.text
+    assert set(fake_config_manager.config.llm.providers) == {
+        "aihubmix-main",
+        "openai-direct",
+    }
+    assert fake_config_manager.config.llm.default_provider_id == "openai-direct"
+    assert fake_config_manager.config.llm.providers["openai-direct"].api_key == "openai-secret"
+    assert selected.json()["config"]["llm"]["providers"]["openai-direct"]["api_key"] == ""
+    assert (
+        selected.json()["config"]["llm"]["providers"]["openai-direct"][
+            "api_key_configured"
+        ]
+        is True
+    )
+
+
+def test_llm_model_catalog_calls_each_provider_own_endpoint(monkeypatch):
+    fake_config_manager.config = PixelleVideoConfig(
+        llm={
+            "default_provider_id": "aihubmix-main",
+            "providers": {
+                "aihubmix-main": {
+                    "name": "AiHubMix 主账号",
+                    "provider_type": "aihubmix",
+                    "api_key": "a-key",
+                    "base_url": "https://aihubmix.com/v1",
+                    "default_model": "claude-sonnet-4",
+                },
+                "openai-direct": {
+                    "name": "OpenAI 直连",
+                    "provider_type": "openai",
+                    "api_key": "o-key",
+                    "base_url": "https://api.openai.com/v1",
+                    "default_model": "gpt-4.1",
+                },
+            },
+        }
+    )
+    calls = []
+
+    def fake_fetch(api_key, base_url):
+        calls.append((api_key, base_url))
+        return ["gpt-4.1"] if "openai.com" in base_url else ["claude-sonnet-4"]
+
+    monkeypatch.setattr(settings_router, "fetch_available_models", fake_fetch)
+    app.dependency_overrides[get_config_manager] = get_fake_config_manager
+    try:
+        response = TestClient(app).get("/api/settings/llm/model-catalog")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200, response.text
+    assert calls == [
+        ("a-key", "https://aihubmix.com/v1"),
+        ("o-key", "https://api.openai.com/v1"),
+    ]
+    assert [provider["id"] for provider in response.json()["providers"]] == [
+        "aihubmix-main",
+        "openai-direct",
+    ]
+
+
 def test_settings_llm_test_endpoint_returns_connection_result(monkeypatch):
     def fake_test_llm_connection(api_key, base_url):
         assert api_key == "llm-key"

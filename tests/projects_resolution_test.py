@@ -27,14 +27,6 @@ def test_project_default_template_wins():
     )
 
 
-def test_retired_project_default_falls_back_to_builtin():
-    project = projects.create_project(
-        name="R", default_production_template_id="petwoods_xhs_static_subtitle_v1"
-    )
-    # 退役模板（disabled）不作为有效默认 → 回退内置骨架
-    assert generation_router._default_template_for_project(project.project_id) == BUILTIN_DEFAULT
-
-
 def test_invalid_project_template_falls_back_to_builtin():
     project = projects.create_project(name="B", default_production_template_id="does_not_exist")
     assert generation_router._default_template_for_project(project.project_id) == BUILTIN_DEFAULT
@@ -47,7 +39,7 @@ def test_none_project_uses_builtin_default():
 def test_resolve_project_id_prefers_valid_explicit_project():
     project = projects.create_project(name="C")
     assert generation_router._resolve_project_id(project.project_id) == project.project_id
-    # 不传时回退到默认项目（迁移已建）
+    # 不传时回退到自动创建的默认项目
     resolved = generation_router._resolve_project_id(None)
     assert resolved is not None
 

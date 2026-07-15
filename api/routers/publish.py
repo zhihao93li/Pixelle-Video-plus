@@ -1,7 +1,7 @@
 """
 Publish API routes.
 
-These endpoints expose the existing PublishManager to non-Streamlit clients.
+These endpoints expose publishing operations to the React console.
 """
 
 from typing import Any

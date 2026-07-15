@@ -17,7 +17,6 @@ dependencies = [
     "ffmpeg-python>=0.2.0",
     "httpx>=0.28.1",
     "pillow>=10.0.0,<12",
-    "streamlit>=1.40.0",
     "openai>=2.6.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -55,8 +54,6 @@ ignore = ["E501"]
 [tool.ruff.lint.per-file-ignores]
 # These executable entry points add the repository root before importing packages.
 "api/app.py" = ["E402"]
-"web/app.py" = ["E402"]
-"web/pages/*.py" = ["E402"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

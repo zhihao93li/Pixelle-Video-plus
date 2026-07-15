@@ -13,7 +13,6 @@ import {
 
 import { AdvancedGroup } from "@/components/shared/AdvancedGroup"
 import { AsyncState } from "@/components/shared/AsyncState"
-import { BatchStatusCard } from "@/components/shared/BatchStatusCard"
 import { FileDropzone } from "@/components/shared/FileDropzone"
 import {
   Fact,
@@ -61,8 +60,9 @@ import {
 import {
   artifactFileUrl,
   cancelGenerationTask,
-  createGenerationBatch,
   createGenerationTemplateTask,
+  createProductionTask,
+  getTask,
   getTaskResult,
   listTemplates,
   uploadGenerationAssets,
@@ -87,7 +87,7 @@ import {
   type AssetManifestInput,
   type QualityReviewInput,
 } from "@/lib/resultSummary"
-import { routeHref } from "@/lib/router"
+import { navigate, routeHref } from "@/lib/router"
 import {
   buildSpecialTaskInput,
   digitalVoiceDefaults,
@@ -104,8 +104,6 @@ import {
   type SpecialPipelineMode,
 } from "@/lib/specialPipelineSurface"
 import { useTaskCenter } from "@/lib/taskCenter"
-import { trackBatchTasks } from "@/lib/trackBatch"
-import { useBatchPolling } from "@/lib/useBatchPolling"
 import { cn } from "@/lib/utils"
 
 export type { SpecialPipelineMode } from "@/lib/specialPipelineSurface"
@@ -190,9 +188,9 @@ export function SpecialPipelinesWorkspace({
     return (
       <SpecialStateShell mode={initialMode}>
         <AsyncState
-          description="正在同步当前项目的专用生产配方。"
+          description="正在同步当前项目的专用生产模板。"
           state="loading"
-          title="正在读取配方"
+          title="正在读取模板"
         />
       </SpecialStateShell>
     )
@@ -212,9 +210,9 @@ export function SpecialPipelinesWorkspace({
               重试
             </Button>
           }
-          description={loadError || "暂时无法读取配方。"}
+          description={loadError || "暂时无法读取模板。"}
           state="error"
-          title="配方读取失败"
+          title="模板读取失败"
         />
       </SpecialStateShell>
     )
@@ -228,8 +226,8 @@ export function SpecialPipelinesWorkspace({
     return (
       <SpecialStateShell mode={initialMode}>
         <ResolutionError
-          description={`没有找到配方「${resolution.templateId}」，链接可能已失效。`}
-          title="配方不存在"
+          description={`没有找到模板「${resolution.templateId}」，链接可能已失效。`}
+          title="模板不存在"
         />
       </SpecialStateShell>
     )
@@ -239,8 +237,8 @@ export function SpecialPipelinesWorkspace({
     return (
       <SpecialStateShell mode={initialMode}>
         <ResolutionError
-          description={`「${resolution.template.display_name}」不属于${SPECIAL_MODE_COPY[initialMode].label}，不会自动改用其他配方。`}
-          title="配方与生产模式不匹配"
+          description={`「${resolution.template.display_name}」不属于${SPECIAL_MODE_COPY[initialMode].label}，不会自动改用其他模板。`}
+          title="模板与生产模式不匹配"
         />
       </SpecialStateShell>
     )
@@ -250,8 +248,8 @@ export function SpecialPipelinesWorkspace({
     return (
       <SpecialStateShell mode={initialMode}>
         <ResolutionError
-          description={`「${resolution.template.display_name}」已停用，请返回快速生产选择可用配方。`}
-          title="当前配方暂不可用"
+          description={`「${resolution.template.display_name}」已停用，请返回快速生产选择可用模板。`}
+          title="当前模板暂不可用"
         />
       </SpecialStateShell>
     )
@@ -318,14 +316,6 @@ function SpecialWorkspace({
   const [resultReloadToken, setResultReloadToken] = useState(0)
   const [batchMode, setBatchMode] = useState(false)
   const [batchConfirmOpen, setBatchConfirmOpen] = useState(false)
-  const {
-    batch: submittedBatch,
-    setBatch: setSubmittedBatch,
-    cancelBatch: cancelSubmittedBatch,
-    isCancelling: isCancellingBatch,
-    retryItem: retryBatchItem,
-    retryingItemIndex: retryingBatchIndex,
-  } = useBatchPolling()
 
   const task = currentTaskId
     ? (taskCenter.getTask(currentTaskId)?.task ?? null)
@@ -355,7 +345,7 @@ function SpecialWorkspace({
   })
   const canSubmit = validation.ok
   const recipeOptions = specialTemplatesForMode(templates, mode).filter(
-    (item) => item.enabled && !item.retired
+    (item) => item.enabled
   )
   const inputChecks = buildInputChecks({
     mode,
@@ -414,7 +404,7 @@ function SpecialWorkspace({
   }
 
   async function submitSingle() {
-    if (!canSubmit || inBatch) {
+    if (!canSubmit || inBatch || !projectId) {
       return
     }
     setIsSubmitting(true)
@@ -445,19 +435,21 @@ function SpecialWorkspace({
         duration,
         script,
         goodsTitle,
-        voiceOverrides: voiceOverrideValues,
       })
       const response = await createGenerationTemplateTask(
         template.id,
+        template.pipeline_id,
         input,
-        {
-          source: "react_special_pipeline",
-          template_use_case: template.use_case,
-        },
-        projectId
+        projectId,
+        voiceOverrideValues
       )
-      taskCenter.trackTask(response.task, template.display_name)
-      setCurrentTaskId(response.task.task_id)
+      const generationTaskId = response.task.generation_task_ids.at(-1)
+      if (!generationTaskId) {
+        throw new Error("生产任务已建立，但执行任务尚未创建。")
+      }
+      const generationTask = await getTask(generationTaskId)
+      taskCenter.trackTask(generationTask, template.display_name)
+      setCurrentTaskId(generationTask.task_id)
     } catch (error) {
       setSubmitError(readableError(error))
     } finally {
@@ -466,7 +458,7 @@ function SpecialWorkspace({
   }
 
   async function submitBatch() {
-    if (!canSubmit || !inBatch) {
+    if (!canSubmit || !inBatch || !projectId) {
       return
     }
     setIsSubmitting(true)
@@ -487,25 +479,35 @@ function SpecialWorkspace({
           duration: 0,
           script: "",
           goodsTitle: "",
-          voiceOverrides: {},
         }),
       }))
-      const response = await createGenerationBatch({
-        templateId: template.id,
-        items,
-        metadata: { source: "react_special_pipeline_batch", mode: "fixed" },
-        projectId,
-      })
-      setSubmittedBatch(response)
-      toast({
-        title: `批量任务已创建（${response.total_count} 条）`,
-        variant: "success",
-      })
-      void trackBatchTasks(
-        response,
-        taskCenter.trackTask,
-        template.display_name
+      const results = await Promise.allSettled(
+        items.map((item) =>
+          createProductionTask({
+            projectId,
+            pipelineId: template.pipeline_id,
+            recipeId: template.id,
+            payload: item.input,
+            source: "react",
+          })
+        )
       )
+      const createdCount = results.filter(
+        (result) => result.status === "fulfilled"
+      ).length
+      const failedCount = results.length - createdCount
+      if (createdCount === 0) {
+        const firstFailure = results.find(
+          (result): result is PromiseRejectedResult => result.status === "rejected"
+        )
+        throw firstFailure?.reason ?? new Error("批量任务创建失败。")
+      }
+      toast({
+        title: `已创建 ${createdCount} 条独立任务`,
+        description: failedCount ? `${failedCount} 条未能创建。` : undefined,
+        variant: failedCount ? "default" : "success",
+      })
+      navigate("/board")
     } catch (error) {
       setSubmitError(readableError(error))
     } finally {
@@ -558,7 +560,7 @@ function SpecialWorkspace({
         actions={
           <>
             <Button
-              aria-label="刷新专用配方"
+              aria-label="刷新专用模板"
               disabled={isRefreshing}
               onClick={onReload}
               size="icon-sm"
@@ -569,7 +571,7 @@ function SpecialWorkspace({
             </Button>
             <Button asChild className="hidden lg:inline-flex" variant="outline">
               <a href={routeHref(`/create/recipes/${template.id}`)}>
-                调整配方默认
+                调整模板默认
               </a>
             </Button>
             <SubmitButton
@@ -589,7 +591,7 @@ function SpecialWorkspace({
             {template.display_name}
             <Badge variant="secondary">视频</Badge>
             {template.is_custom ? (
-              <Badge variant="outline">我的配方</Badge>
+              <Badge variant="outline">我的模板</Badge>
             ) : null}
           </span>
         }
@@ -611,7 +613,7 @@ function SpecialWorkspace({
           }
           description={loadError}
           state="stale"
-          title="专用配方可能不是最新状态"
+          title="专用模板可能不是最新状态"
         />
       ) : null}
 
@@ -729,16 +731,6 @@ function SpecialWorkspace({
               ) : null}
             </WorkspacePanel>
 
-            {inBatch && submittedBatch ? (
-              <BatchStatusCard
-                artifactLabel="视频"
-                batch={submittedBatch}
-                isCancelling={isCancellingBatch}
-                onCancel={() => void cancelSubmittedBatch()}
-                onRetryItem={retryBatchItem}
-                retryingItemIndex={retryingBatchIndex}
-              />
-            ) : null}
           </section>
 
           {inBatch ? (
@@ -1060,7 +1052,7 @@ function DigitalHumanFields({
         description={
           voiceIsDirty
             ? "已调整当次音色设置"
-            : `沿用配方：${voiceLabel(voiceDefaults.voice) || "默认音色"}·${voiceDefaults.speed}x`
+            : `沿用模板：${voiceLabel(voiceDefaults.voice) || "默认音色"}·${voiceDefaults.speed}x`
         }
         id="special-digital-voice"
         title="当次声音设置"
@@ -1095,7 +1087,7 @@ function DigitalHumanFields({
             variant="ghost"
           >
             <RotateCcw data-icon="inline-start" />
-            恢复配方默认
+            恢复模板默认
           </Button>
         ) : null}
       </AdvancedGroup>
@@ -1301,7 +1293,7 @@ function RunInspector({
             ))}
           </div>
           <p className="mt-4 border-t pt-3 text-xs leading-5 text-muted-foreground">
-            生成流程、执行位置和质量策略由当前配方提供。
+            生成流程、执行位置和质量策略由当前模板提供。
           </p>
         </WorkspacePanel>
       </aside>
@@ -1327,7 +1319,7 @@ function RunInspector({
       </Button>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Fact label="生产配方" value={template.display_name} />
+        <Fact label="生产模板" value={template.display_name} />
         <Fact label="时长" value={formatDuration(result.duration)} />
         <Fact label="文件大小" value={formatBytes(result.file_size)} />
         <Fact label="发布判断" value={qualitySummary.label} />
@@ -1532,9 +1524,9 @@ function RecipeNavigation({
 }) {
   return (
     <div className="mt-3 border-t pt-3">
-      <div className="mb-2 text-xs text-muted-foreground">当前模式的配方</div>
+      <div className="mb-2 text-xs text-muted-foreground">当前模式的模板</div>
       <nav
-        aria-label="选择专用生产配方"
+        aria-label="选择专用生产模板"
         className="flex gap-2 overflow-x-auto pb-1"
       >
         {templates.map((template) => {
@@ -1609,7 +1601,7 @@ function SpecialStateShell({
     <PageFrame>
       <BackLink />
       <WorkspaceHeader
-        description="使用专用素材和生产配方生成视频。"
+        description="使用专用素材和生产模板生成视频。"
         headingLevel={2}
         title={SPECIAL_MODE_COPY[mode].label}
       />

@@ -3,14 +3,14 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.dependencies import GenerationServiceDep, PixelleVideoDep
+from api.security import RequestIdentity, get_request_identity
 from pixelle_video.generation import (
-    DraftingSpec,
     GenerationProgress,
     GenerationRequest,
     GenerationResult,
@@ -19,25 +19,17 @@ from pixelle_video.generation import (
     ProductionTemplate,
     ProductionTemplateError,
     build_base_production_template_registry,
+    build_default_pipeline_registry,
     build_default_production_template_registry,
     detect_available_generation_capabilities,
-)
-from pixelle_video.generation.script_review import (
-    DEFAULT_REVIEW_LANGUAGES,
-    PromptTemplate,
-    build_generation_jobs,
-    generate_independent_language_drafts,
-    load_prompt_templates,
-    validate_draft_translation_counts,
-    validate_language_tts_overrides,
 )
 from pixelle_video.utils.os_util import get_data_path
 
 router = APIRouter(prefix="/generation", tags=["Generation Pipelines"])
+IdentityDep = Annotated[RequestIdentity, Depends(get_request_identity)]
 
 GENERATION_ASSET_UPLOAD_DIR: Path | None = None
 GENERATION_BATCH_DIR: Path | None = None
-GENERATION_SCRIPT_REVIEW_DIR: Path | None = None
 GENERATION_ASSET_TYPES = {
     ".jpg": "image",
     ".jpeg": "image",
@@ -63,31 +55,34 @@ class PipelineListResponse(BaseModel):
     pipelines: list[PipelineManifest]
 
 
+class ProductionTemplateResponse(ProductionTemplate):
+    """Public recipe projection."""
+
+
 class ProductionTemplateListResponse(BaseModel):
     default_template: str | None
-    templates: list[ProductionTemplate]
-    agent_templates: list[ProductionTemplate] = Field(default_factory=list)
-    # Deprecated compatibility alias. New clients must read agent_templates.
-    codex_templates: list[ProductionTemplate] = Field(default_factory=list)
-
-
-class ProductionTemplateTaskRequest(BaseModel):
-    input: dict
-    metadata: dict = Field(default_factory=dict)
-    idempotency_key: str | None = None
+    templates: list[ProductionTemplateResponse]
+    agent_templates: list[ProductionTemplateResponse] = Field(default_factory=list)
 
 
 class ProductionTemplateBatchItemRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     input: dict
+    overrides: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
     idempotency_key: str | None = None
 
 
 class ProductionTemplateBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     template_id: str
+    pipeline_id: str
+    project_id: str
     items: list[ProductionTemplateBatchItemRequest] = Field(..., min_length=1, max_length=100)
     metadata: dict = Field(default_factory=dict)
-    idempotency_key: str | None = None
+    idempotency_key: str = Field(min_length=1, max_length=200)
 
 
 class ProductionTemplateCloneRequest(BaseModel):
@@ -96,13 +91,6 @@ class ProductionTemplateCloneRequest(BaseModel):
     display_name: str
     description: str | None = None
     fixed_params_patch: dict = Field(default_factory=dict)
-
-
-class GenerationSubmitResponse(BaseModel):
-    success: bool = True
-    message: str = "Generation task created successfully"
-    generation_task_id: str
-    task: GenerationTask
 
 
 class UploadedGenerationAsset(BaseModel):
@@ -125,6 +113,8 @@ class GenerationBatchItem(BaseModel):
     params: dict = Field(default_factory=dict)
     metadata: dict
     task_id: str | None = None
+    production_task_id: str | None = None
+    content_item_id: str | None = None
     status: str
     progress: GenerationProgress | None = None
     error: dict | None = None
@@ -147,81 +137,6 @@ class GenerationBatchListResponse(BaseModel):
     batches: list[GenerationBatchResponse]
 
 
-class ScriptReviewPromptTemplateResponse(BaseModel):
-    name: str
-    content: str
-    source: str
-
-
-class ScriptReviewTemplateListResponse(BaseModel):
-    default_languages: list[str]
-    script_templates: list[ScriptReviewPromptTemplateResponse]
-    split_templates: list[ScriptReviewPromptTemplateResponse]
-
-
-class ScriptReviewDraftCreateRequest(BaseModel):
-    topics: list[str] = Field(..., min_length=1, max_length=50)
-    # None = 未显式指定语言，走配方默认（与旧默认区分开）
-    languages: list[str] | None = None
-    template_id: str | None = None
-    project_id: str | None = None
-    script_template_name: str | None = None
-    split_template_name: str | None = None
-    script_model: str | None = None
-    split_model: str | None = None
-    language_script_templates: dict[str, str] = Field(default_factory=dict)
-    language_script_models: dict[str, str] = Field(default_factory=dict)
-    metadata: dict = Field(default_factory=dict)
-    idempotency_key: str | None = None
-
-
-class ScriptReviewDraftUpdateRequest(BaseModel):
-    drafts: list[dict]
-    metadata: dict = Field(default_factory=dict)
-
-
-class ScriptReviewSubmitRequest(BaseModel):
-    drafts: list[dict] | None = None
-    template_id: str | None = None
-    base_params: dict = Field(default_factory=dict)
-    language_tts_overrides: dict[str, dict] = Field(default_factory=dict)
-    metadata: dict = Field(default_factory=dict)
-    idempotency_key: str | None = None
-
-
-class ScriptReviewDraftSetResponse(BaseModel):
-    draft_set_id: str
-    status: str
-    created_at: str
-    updated_at: str
-    topics: list[str]
-    languages: list[str]
-    metadata: dict
-    draft_settings: dict
-    drafts: list[dict]
-    errors: list[dict]
-    submissions: list[dict] = Field(default_factory=list)
-
-
-class ScriptReviewDraftSetListResponse(BaseModel):
-    draft_sets: list[ScriptReviewDraftSetResponse]
-
-
-class TemplateDraftingConfigResponse(BaseModel):
-    template_id: str
-    drafting: DraftingSpec
-    is_overridden: bool
-
-
-class TemplateDraftingConfigUpdateRequest(BaseModel):
-    drafting: DraftingSpec
-
-
-class ScriptReviewSubmitResponse(BaseModel):
-    draft_set: ScriptReviewDraftSetResponse
-    batch: GenerationBatchResponse
-
-
 @router.get("/pipelines", response_model=PipelineListResponse)
 async def list_generation_pipelines(pixelle_video: PixelleVideoDep):
     manifests = [
@@ -230,7 +145,9 @@ async def list_generation_pipelines(pixelle_video: PixelleVideoDep):
         if manifest.access_scope == "public"
     ]
     default_pipeline = (
-        "standard" if "standard" in pixelle_video.pipeline_registry.pipeline_ids() else None
+        "script_to_video"
+        if "script_to_video" in pixelle_video.pipeline_registry.pipeline_ids()
+        else None
     )
 
     return PipelineListResponse(
@@ -239,22 +156,29 @@ async def list_generation_pipelines(pixelle_video: PixelleVideoDep):
     )
 
 
+def _production_template_responses(
+    templates: list[ProductionTemplate],
+) -> list[ProductionTemplateResponse]:
+    responses: list[ProductionTemplateResponse] = []
+    for template in templates:
+        responses.append(ProductionTemplateResponse(**template.model_dump(mode="python")))
+    return responses
+
+
+def _production_template_response(template: ProductionTemplate) -> ProductionTemplateResponse:
+    return _production_template_responses([template])[0]
+
+
 @router.get("/templates", response_model=ProductionTemplateListResponse)
 async def list_generation_templates(project: str | None = None):
-    from pixelle_video.generation.templates import annotate_retired
-
     registry = build_default_production_template_registry()
-    all_templates = registry.list()
-    annotate_retired(all_templates)  # 展示用退役标记（代码层停用的 generate 预设）
+    all_templates = _production_template_responses(registry.list())
     templates = [template for template in all_templates if template.access_scope == "public"]
-    agent_templates = [
-        template for template in all_templates if template.access_scope == "agent"
-    ]
+    agent_templates = [template for template in all_templates if template.access_scope == "agent"]
     return ProductionTemplateListResponse(
         default_template=_default_template_for_project(project),
         templates=templates,
         agent_templates=agent_templates,
-        codex_templates=agent_templates,
     )
 
 
@@ -285,7 +209,9 @@ def _template_generation_config_response(
     except ProductionTemplateError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
-    allowed = set(template.allowed_user_params)
+    manifest = build_default_pipeline_registry().get_manifest(template.pipeline_id)
+    pipeline_setting_keys = {key for stage in manifest.stages for key in stage.setting_keys}
+    allowed = set(template.allowed_user_params) & pipeline_setting_keys
     overridable = [key for key in OVERRIDABLE_PARAMS if key in allowed]
     try:
         base_template = base_registry.get(template_id)
@@ -338,90 +264,24 @@ async def update_template_generation_config(
     try:
         cleaned = validate_overrides(
             request.overrides,
-            allowed_user_params=template.allowed_user_params,
+            allowed_user_params=[
+                key
+                for key in template.allowed_user_params
+                if key
+                in {
+                    setting_key
+                    for stage in build_default_pipeline_registry()
+                    .get_manifest(template.pipeline_id)
+                    .stages
+                    for setting_key in stage.setting_keys
+                }
+            ],
         )
     except TemplateOverrideError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     save_overrides(template_id, cleaned)
     return _template_generation_config_response(template_id)
-
-
-def _drafting_template(template_id: str) -> ProductionTemplate:
-    registry = build_default_production_template_registry()
-    try:
-        template = registry.get(template_id)
-    except ProductionTemplateError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-    if template.product_entry != "generate" or "script" not in template.input_requirements:
-        raise HTTPException(
-            status_code=400,
-            detail="只有接收文稿输入的生产配方可以配置写稿规则。",
-        )
-    return template
-
-
-def _validate_drafting_spec(drafting: DraftingSpec) -> None:
-    script_names = {item.name for item in load_prompt_templates("script")}
-    split_names = {item.name for item in load_prompt_templates("split")}
-    if drafting.script_template_name not in script_names:
-        raise HTTPException(
-            status_code=400,
-            detail=f"脚本 Prompt 不存在：{drafting.script_template_name}",
-        )
-    if drafting.split_template_name not in split_names:
-        raise HTTPException(
-            status_code=400,
-            detail=f"分镜 Prompt 不存在：{drafting.split_template_name}",
-        )
-
-
-def _template_drafting_config_response(template_id: str) -> TemplateDraftingConfigResponse:
-    from pixelle_video.generation.template_overrides import load_drafting
-
-    template = _drafting_template(template_id)
-    return TemplateDraftingConfigResponse(
-        template_id=template.id,
-        drafting=template.drafting,
-        is_overridden=load_drafting(template.id) is not None,
-    )
-
-
-@router.get(
-    "/templates/{template_id}/drafting-config",
-    response_model=TemplateDraftingConfigResponse,
-)
-async def get_template_drafting_config(template_id: str):
-    """Return the recipe-owned defaults used before reviewed production."""
-    return _template_drafting_config_response(template_id)
-
-
-@router.put(
-    "/templates/{template_id}/drafting-config",
-    response_model=TemplateDraftingConfigResponse,
-)
-async def update_template_drafting_config(
-    template_id: str,
-    request: TemplateDraftingConfigUpdateRequest,
-):
-    from pixelle_video.generation.template_overrides import save_drafting
-
-    _drafting_template(template_id)
-    _validate_drafting_spec(request.drafting)
-    save_drafting(template_id, request.drafting.model_dump())
-    return _template_drafting_config_response(template_id)
-
-
-@router.delete(
-    "/templates/{template_id}/drafting-config",
-    response_model=TemplateDraftingConfigResponse,
-)
-async def reset_template_drafting_config(template_id: str):
-    from pixelle_video.generation.template_overrides import save_drafting
-
-    _drafting_template(template_id)
-    save_drafting(template_id, None)
-    return _template_drafting_config_response(template_id)
 
 
 class TemplateEnabledRequest(BaseModel):
@@ -439,7 +299,7 @@ def _project_using_default_template(template_id: str) -> str | None:
     return None
 
 
-@router.put("/templates/{template_id}/enabled", response_model=ProductionTemplate)
+@router.put("/templates/{template_id}/enabled", response_model=ProductionTemplateResponse)
 async def set_template_enabled(template_id: str, request: TemplateEnabledRequest):
     """用户侧启用/停用模板（退役的内置模板不可启用；被项目默认引用的不可停用）。"""
     from pixelle_video.generation.template_overrides import save_enabled
@@ -468,10 +328,12 @@ async def set_template_enabled(template_id: str, request: TemplateEnabledRequest
             )
         save_enabled(template_id, False)
 
-    return build_default_production_template_registry().get(template_id)
+    return _production_template_response(
+        build_default_production_template_registry().get(template_id)
+    )
 
 
-@router.post("/templates", response_model=ProductionTemplate)
+@router.post("/templates", response_model=ProductionTemplateResponse)
 async def clone_production_template(request_body: ProductionTemplateCloneRequest):
     """从现有生产模板克隆一条自定义风格线（不改代码新增模板）。"""
     from pixelle_video.generation.custom_templates import save_custom_template
@@ -496,7 +358,10 @@ async def clone_production_template(request_body: ProductionTemplateCloneRequest
         raise HTTPException(status_code=400, detail=f"模板 id 已存在：{new_id}")
 
     patch = request_body.fixed_params_patch or {}
-    allowed = set(source.allowed_user_params)
+    source_manifest = build_default_pipeline_registry().get_manifest(source.pipeline_id)
+    allowed = set(source.allowed_user_params) & {
+        key for stage in source_manifest.stages for key in stage.setting_keys
+    }
     for key in patch:
         if key not in allowed:
             raise HTTPException(
@@ -516,7 +381,7 @@ async def clone_production_template(request_body: ProductionTemplateCloneRequest
     clone.fixed_params.update(patch)
 
     save_custom_template(clone)
-    return clone
+    return _production_template_response(clone)
 
 
 @router.delete("/templates/{template_id}")
@@ -595,9 +460,13 @@ async def upload_generation_assets(files: list[UploadFile] = File(...)):
 
 def _resolve_project_id(explicit: str | None) -> str:
     """Resolve a real project scope; never invent or silently substitute one."""
-    from pixelle_video.content.projects import ensure_migrated, get_default_project, get_project
+    from pixelle_video.content.projects import (
+        ensure_default_project,
+        get_default_project,
+        get_project,
+    )
 
-    ensure_migrated()
+    ensure_default_project()
     if explicit:
         if get_project(explicit) is None:
             raise HTTPException(status_code=400, detail=f"Unknown project: {explicit}")
@@ -625,92 +494,126 @@ def _default_template_for_project(project_id: str | None) -> str | None:
     return registry.default_template_id(project="PetWoods", channel="xiaohongshu")
 
 
-@router.post("/templates/{template_id}/tasks", response_model=GenerationSubmitResponse)
-async def submit_generation_template_task(
-    template_id: str,
-    request_body: ProductionTemplateTaskRequest,
-    generation_service: GenerationServiceDep,
-):
-    registry = build_default_production_template_registry()
-    metadata = {
-        **request_body.metadata,
-        "project_id": _resolve_project_id(request_body.metadata.get("project_id")),
-    }
-    try:
-        generation_request = registry.compile_request(
-            template_id,
-            input=request_body.input,
-            metadata=metadata,
-            idempotency_key=request_body.idempotency_key,
-            available_capabilities=detect_available_generation_capabilities(),
-        )
-        task = generation_service.submit(generation_request)
-        return GenerationSubmitResponse(
-            generation_task_id=task.task_id,
-            task=task,
-        )
-    except ProductionTemplateError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-
-
 @router.post("/batches", response_model=GenerationBatchResponse)
 async def submit_generation_batch(
     request_body: ProductionTemplateBatchRequest,
+    background_tasks: BackgroundTasks,
     generation_service: GenerationServiceDep,
+    pixelle_video: PixelleVideoDep,
+    identity: IdentityDep,
 ):
-    """Create a persisted batch and submit each item as a real generation task."""
-    registry = build_default_production_template_registry()
+    """Create one ledger item and one stable production task per batch row."""
+    from api.routers.content_flows import DraftRequest, draft_item
+    from pixelle_video.content.production_service import prepare_production
+    from pixelle_video.content.production_tasks import (
+        ProductionTaskConflict,
+        attach_generation_task,
+        set_task_state,
+    )
+
     batch_id = uuid.uuid4().hex
     now = _now_iso()
-    project_id = _resolve_project_id(request_body.metadata.get("project_id"))
+    project_id = _resolve_project_id(request_body.project_id)
     items: list[dict] = []
 
     for index, item in enumerate(request_body.items, start=1):
+        request_id = item.idempotency_key or f"{request_body.idempotency_key}:{index}"
         item_metadata = {
             **request_body.metadata,
             **item.metadata,
-            "source": item.metadata.get("source")
-            or request_body.metadata.get("source")
-            or "react_batch",
-            "project_id": item.metadata.get("project_id")
-            or request_body.metadata.get("project_id")
-            or project_id,
+            "source": "batch",
+            "project_id": project_id,
             "batch_id": batch_id,
             "batch_index": index,
         }
-        idempotency_key = item.idempotency_key
-        if not idempotency_key and request_body.idempotency_key:
-            idempotency_key = f"{request_body.idempotency_key}:{index}"
 
         try:
-            generation_request = registry.compile_request(
-                request_body.template_id,
-                input=item.input,
+            prepared = prepare_production(
+                project_id=project_id,
+                pipeline_id=request_body.pipeline_id,
+                recipe_id=request_body.template_id,
+                input_payload=item.input,
+                overrides=item.overrides,
+                request_id=request_id,
+                source="batch",
+                actor="agent" if identity.is_agent else "user",
                 metadata=item_metadata,
-                idempotency_key=idempotency_key,
-                available_capabilities=detect_available_generation_capabilities(),
             )
-            task = generation_service.submit(generation_request)
+            task = None
+            if prepared.created and prepared.task.pipeline_id == "topic_to_video":
+                await draft_item(
+                    prepared.item.item_id,
+                    DraftRequest(
+                        request_id=f"{request_id}:draft",
+                        recipe_id=prepared.template.id,
+                        client_name="react-console",
+                        source="batch",
+                    ),
+                    background_tasks,
+                    pixelle_video,
+                    identity,
+                )
+            elif prepared.created:
+                if prepared.generation_request is None:
+                    raise RuntimeError("批量生产请求缺少执行合同。")
+                task = generation_service.submit(prepared.generation_request)
+                attach_generation_task(
+                    prepared.task.production_task_id,
+                    task,
+                    effective_params=prepared.generation_request.params,
+                )
             items.append(
                 {
                     "index": index,
                     "input": item.input,
+                    "params": (
+                        prepared.generation_request.params
+                        if prepared.generation_request is not None
+                        else prepared.task.effective_params
+                    ),
                     "metadata": item_metadata,
-                    "task_id": task.task_id,
-                    "status": task.status,
-                    "progress": task.progress.model_dump(mode="json"),
+                    "task_id": task.task_id if task else None,
+                    "production_task_id": prepared.task.production_task_id,
+                    "content_item_id": prepared.item.item_id,
+                    "status": task.status if task else prepared.task.state,
+                    "progress": task.progress.model_dump(mode="json") if task else None,
                     "error": None,
                 }
             )
-        except (ProductionTemplateError, ValueError) as exc:
+            items[-1]["metadata"] = {
+                **item_metadata,
+                "production_task_id": prepared.task.production_task_id,
+                "content_item_id": prepared.item.item_id,
+            }
+        except (ProductionTemplateError, ProductionTaskConflict, ValueError, RuntimeError) as exc:
+            if "prepared" in locals() and prepared.created:
+                from pixelle_video.generation.schemas import GenerationError
+
+                set_task_state(
+                    prepared.task.production_task_id,
+                    state="failed",
+                    stage_id="submit_production",
+                    stage_label="批量任务提交失败",
+                    next_actor="user",
+                    action_type="view_error",
+                    action_label="查看原因",
+                    error=GenerationError(
+                        layer="input",
+                        message=str(exc),
+                        exception_type=type(exc).__name__,
+                    ),
+                )
             items.append(
                 {
                     "index": index,
                     "input": item.input,
+                    "params": item.overrides,
                     "metadata": item_metadata,
                     "task_id": None,
+                    "production_task_id": (
+                        prepared.task.production_task_id if "prepared" in locals() else None
+                    ),
+                    "content_item_id": (prepared.item.item_id if "prepared" in locals() else None),
                     "status": "failed",
                     "progress": None,
                     "error": {
@@ -720,6 +623,9 @@ async def submit_generation_batch(
                     },
                 }
             )
+        finally:
+            if "prepared" in locals():
+                del prepared
 
     batch = {
         "batch_id": batch_id,
@@ -727,7 +633,11 @@ async def submit_generation_batch(
         "status": "submitted",
         "created_at": now,
         "updated_at": now,
-        "metadata": {**request_body.metadata, "project_id": project_id},
+        "metadata": {
+            **request_body.metadata,
+            "project_id": project_id,
+            "pipeline_id": request_body.pipeline_id,
+        },
         "items": items,
     }
     batch = _hydrate_batch(batch, generation_service)
@@ -762,22 +672,44 @@ async def get_generation_batch(
 async def cancel_generation_batch(
     batch_id: str,
     generation_service: GenerationServiceDep,
+    request_id: str = Query(min_length=1, max_length=200),
 ):
     batch = _load_batch(batch_id)
     if batch is None:
         raise HTTPException(status_code=404, detail=f"Generation batch not found: {batch_id}")
+    if batch.get("cancellation_request_id") not in {None, request_id}:
+        raise HTTPException(status_code=409, detail="这个批次已由另一次请求取消。")
+    batch["cancellation_request_id"] = request_id
 
     batch = _hydrate_batch(batch, generation_service)
     for item in batch.get("items", []):
-        if item.get("status") not in {"pending", "submitted", "running"}:
+        if item.get("status") not in {
+            "pending",
+            "submitted",
+            "running",
+            "in_progress",
+            "needs_user",
+        }:
             continue
         task_id = item.get("task_id")
-        if not task_id:
-            continue
-        task = generation_service.cancel_task(task_id)
-        item["status"] = task.status
-        item["progress"] = task.progress.model_dump(mode="json")
-        item["error"] = task.error.model_dump(mode="json") if task.error else None
+        if task_id:
+            task = generation_service.cancel_task(task_id)
+            item["status"] = task.status
+            item["progress"] = task.progress.model_dump(mode="json")
+            item["error"] = task.error.model_dump(mode="json") if task.error else None
+        production_task_id = item.get("production_task_id") or (item.get("metadata") or {}).get(
+            "production_task_id"
+        )
+        if production_task_id:
+            from pixelle_video.content.production_tasks import set_task_state
+
+            set_task_state(
+                production_task_id,
+                state="cancelled",
+                stage_id="cancelled",
+                stage_label="已取消",
+                next_actor="user",
+            )
 
     batch = _hydrate_batch(batch, generation_service)
     _save_batch(batch)
@@ -792,6 +724,7 @@ async def retry_generation_batch_item(
     batch_id: str,
     item_index: int,
     generation_service: GenerationServiceDep,
+    request_id: str = Query(min_length=1, max_length=200),
 ):
     batch = _load_batch(batch_id)
     if batch is None:
@@ -803,6 +736,16 @@ async def retry_generation_batch_item(
         raise HTTPException(
             status_code=404, detail=f"Generation batch item not found: {item_index}"
         )
+    production_task_id = item.get("production_task_id") or (item.get("metadata") or {}).get(
+        "production_task_id"
+    )
+    if not production_task_id:
+        raise HTTPException(
+            status_code=409,
+            detail="批次条目缺少生产任务身份，不能重试。",
+        )
+    if (item.get("metadata") or {}).get("retry_request_id") == request_id:
+        return batch
     if item.get("status") not in {"failed", "cancelled"}:
         raise HTTPException(
             status_code=409,
@@ -817,15 +760,36 @@ async def retry_generation_batch_item(
         "batch_id": batch_id,
         "batch_index": item_index,
         "retry_count": retry_count,
+        "retry_request_id": request_id,
         "retry_of_task_id": item.get("task_id"),
+        "production_run_id": f"{batch_id}:{item_index}:retry:{retry_count}",
     }
     try:
+        if batch.get("metadata", {}).get("pipeline_id") == "topic_to_video":
+            raise ValueError("主题路线请在工作台重试，以保留人工确认站。")
         generation_request = _compile_batch_retry_request(
             batch=batch,
             item=item,
             metadata=metadata,
         )
         task = generation_service.submit(generation_request)
+        from pixelle_video.content.production_tasks import (
+            attach_generation_task,
+            set_task_state,
+        )
+
+        set_task_state(
+            production_task_id,
+            state="in_progress",
+            stage_id=generation_request.pipeline_id,
+            stage_label="正在重试",
+            next_actor="system",
+        )
+        attach_generation_task(
+            production_task_id,
+            task,
+            effective_params=generation_request.params,
+        )
         item.update(
             {
                 "metadata": metadata,
@@ -854,288 +818,6 @@ async def retry_generation_batch_item(
     return batch
 
 
-@router.get("/script-review/templates", response_model=ScriptReviewTemplateListResponse)
-async def list_script_review_templates():
-    return ScriptReviewTemplateListResponse(
-        default_languages=list(DEFAULT_REVIEW_LANGUAGES),
-        script_templates=[
-            _prompt_template_response(template) for template in load_prompt_templates("script")
-        ],
-        split_templates=[
-            _prompt_template_response(template) for template in load_prompt_templates("split")
-        ],
-    )
-
-
-@router.post("/script-review/draft-sets", response_model=ScriptReviewDraftSetResponse)
-async def create_script_review_draft_set(
-    request_body: ScriptReviewDraftCreateRequest,
-    pixelle_video: PixelleVideoDep,
-):
-    topics = _clean_string_items(request_body.topics, "topics")
-    if not getattr(pixelle_video, "llm", None):
-        raise HTTPException(status_code=400, detail="LLM service is not available.")
-
-    from pixelle_video.content.projects import get_project
-
-    resolved_project_id = _resolve_project_id(request_body.project_id)
-    project = get_project(resolved_project_id)
-    template_id = (
-        request_body.template_id
-        or _default_template_for_project(resolved_project_id)
-        or "pipeline_standard_base_v1"
-    )
-    template = _drafting_template(template_id)
-    if not template.enabled:
-        raise HTTPException(status_code=400, detail="该生产配方已停用，请先换一个配方。")
-    drafting = template.drafting
-
-    languages = _clean_string_items(
-        request_body.languages
-        if request_body.languages is not None
-        else (project.languages if project else list(DEFAULT_REVIEW_LANGUAGES)),
-        "languages",
-    )
-    if not languages:
-        raise HTTPException(status_code=400, detail="At least one language is required.")
-
-    script_template_name = request_body.script_template_name or drafting.script_template_name
-    split_template_name = request_body.split_template_name or drafting.split_template_name
-    script_model = request_body.script_model or drafting.script_model or None
-    split_model = request_body.split_model or drafting.split_model or None
-    language_script_models = {
-        **drafting.language_script_models,
-        **request_body.language_script_models,
-    }
-
-    script_template = _resolve_prompt_template("script", script_template_name)
-    split_template = _resolve_prompt_template("split", split_template_name)
-    draft_set_id = request_body.idempotency_key or uuid.uuid4().hex
-    now = _now_iso()
-    drafts: list[dict] = []
-    errors: list[dict] = []
-
-    for index, topic in enumerate(topics, start=1):
-        try:
-            draft = await generate_independent_language_drafts(
-                llm_service=pixelle_video.llm,
-                topic=topic,
-                script_template=script_template.content,
-                script_model=script_model,
-                split_template=split_template.content,
-                split_model=split_model,
-                languages=languages,
-                language_script_templates=request_body.language_script_templates,
-                language_script_models=language_script_models,
-            )
-            draft["selected_for_generation"] = True
-            draft["index"] = index
-            drafts.append(draft)
-        except Exception as exc:
-            errors.append(
-                {
-                    "topic": topic,
-                    "layer": "runtime",
-                    "message": str(exc),
-                    "exception_type": type(exc).__name__,
-                }
-            )
-
-    if not drafts and errors:
-        status = "failed"
-    elif errors:
-        status = "partial_failed"
-    else:
-        status = "drafted"
-
-    draft_set = {
-        "draft_set_id": draft_set_id,
-        "status": status,
-        "created_at": now,
-        "updated_at": now,
-        "topics": topics,
-        "languages": languages,
-        "metadata": request_body.metadata,
-        "draft_settings": {
-            "script_template_name": script_template.name,
-            "project_id": resolved_project_id,
-            "production_template_id": template.id,
-            "production_template_name": template.display_name,
-            "production_template_version": template.version,
-            "script_template_source": script_template.source,
-            "split_template_name": split_template.name,
-            "split_template_source": split_template.source,
-            "script_model": script_model or "",
-            "split_model": split_model or "",
-            "language_script_templates": {
-                language: "custom" for language in request_body.language_script_templates
-            },
-            "language_script_models": language_script_models,
-        },
-        "drafts": drafts,
-        "errors": errors,
-        "submissions": [],
-    }
-    _save_script_review_draft_set(draft_set)
-    return draft_set
-
-
-@router.get("/script-review/draft-sets", response_model=ScriptReviewDraftSetListResponse)
-async def list_script_review_draft_sets(project: str | None = None):
-    draft_sets = _load_script_review_draft_sets()
-    if project is not None:
-        # 旧草稿集无 project_id → 视为默认项目（读取端兜底，不回填数据）。
-        default_project = _resolve_project_id(None)
-        draft_sets = [
-            draft_set
-            for draft_set in draft_sets
-            if (draft_set.get("draft_settings", {}).get("project_id") or default_project) == project
-        ]
-    return ScriptReviewDraftSetListResponse(
-        draft_sets=sorted(
-            draft_sets,
-            key=lambda draft_set: draft_set["created_at"],
-            reverse=True,
-        )
-    )
-
-
-@router.get("/script-review/draft-sets/{draft_set_id}", response_model=ScriptReviewDraftSetResponse)
-async def get_script_review_draft_set(draft_set_id: str):
-    draft_set = _load_script_review_draft_set(draft_set_id)
-    if draft_set is None:
-        raise HTTPException(
-            status_code=404, detail=f"Script review draft set not found: {draft_set_id}"
-        )
-    return draft_set
-
-
-@router.put("/script-review/draft-sets/{draft_set_id}", response_model=ScriptReviewDraftSetResponse)
-async def update_script_review_draft_set(
-    draft_set_id: str,
-    request_body: ScriptReviewDraftUpdateRequest,
-):
-    draft_set = _load_script_review_draft_set(draft_set_id)
-    if draft_set is None:
-        raise HTTPException(
-            status_code=404, detail=f"Script review draft set not found: {draft_set_id}"
-        )
-    draft_set["drafts"] = request_body.drafts
-    draft_set["metadata"] = {
-        **(draft_set.get("metadata") or {}),
-        **request_body.metadata,
-    }
-    draft_set["status"] = "reviewed"
-    draft_set["updated_at"] = _now_iso()
-    _save_script_review_draft_set(draft_set)
-    return draft_set
-
-
-@router.post(
-    "/script-review/draft-sets/{draft_set_id}/tasks",
-    response_model=ScriptReviewSubmitResponse,
-)
-async def submit_script_review_draft_set_tasks(
-    draft_set_id: str,
-    request_body: ScriptReviewSubmitRequest,
-    generation_service: GenerationServiceDep,
-):
-    draft_set = _load_script_review_draft_set(draft_set_id)
-    if draft_set is None:
-        raise HTTPException(
-            status_code=404, detail=f"Script review draft set not found: {draft_set_id}"
-        )
-
-    drafts = request_body.drafts if request_body.drafts is not None else draft_set.get("drafts", [])
-    selected_drafts = [draft for draft in drafts if draft.get("selected_for_generation", True)]
-    validation_errors: list[str] = []
-    for draft in selected_drafts:
-        validation_errors.extend(validate_draft_translation_counts(draft))
-    validation_errors.extend(
-        validate_language_tts_overrides(
-            selected_drafts,
-            request_body.language_tts_overrides,
-        )
-    )
-    if validation_errors:
-        raise HTTPException(status_code=400, detail=validation_errors[0])
-
-    try:
-        jobs = build_generation_jobs(
-            selected_drafts,
-            base_config=request_body.base_params,
-            language_tts_overrides=request_body.language_tts_overrides,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-
-    if not jobs:
-        raise HTTPException(status_code=400, detail="No approved script review jobs to submit.")
-
-    # 审核稿出片统一走生产模板体系（模板管默认，表单管这一次）。
-    registry = build_default_production_template_registry()
-    locked_template_id = draft_set.get("draft_settings", {}).get("production_template_id")
-    template_id = (
-        locked_template_id
-        or request_body.template_id
-        or _default_template_for_project(draft_set.get("draft_settings", {}).get("project_id"))
-        or "pipeline_standard_base_v1"
-    )
-    if request_body.template_id and locked_template_id != request_body.template_id:
-        raise HTTPException(
-            status_code=409,
-            detail="这批草稿由另一配方起草。请返回第一步换配方后重新起草。",
-        )
-    try:
-        template = registry.get(template_id)
-    except ProductionTemplateError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from None
-    if (
-        not template.enabled
-        or template.product_entry != "generate"
-        or "script" not in template.input_requirements
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Production template {template_id!r} cannot render reviewed scripts; "
-                "choose an enabled script-input template."
-            ),
-        )
-
-    batch = _submit_generation_jobs_as_batch(
-        registry=registry,
-        template_id=template_id,
-        jobs=jobs,
-        generation_service=generation_service,
-        metadata={
-            **request_body.metadata,
-            "source": request_body.metadata.get("source") or "react_script_review",
-            "review_flow": "script_review",
-            "draft_set_id": draft_set_id,
-            "project_id": draft_set.get("draft_settings", {}).get("project_id")
-            or _resolve_project_id(request_body.metadata.get("project_id")),
-        },
-        idempotency_key=request_body.idempotency_key,
-    )
-    _save_batch(batch)
-
-    draft_set["drafts"] = drafts
-    draft_set["status"] = "submitted"
-    draft_set["updated_at"] = _now_iso()
-    draft_set["submissions"] = [
-        *(draft_set.get("submissions") or []),
-        {
-            "batch_id": batch["batch_id"],
-            "submitted_at": draft_set["updated_at"],
-            "task_count": batch["submitted_count"],
-            "failed_count": batch["failed_count"],
-        },
-    ]
-    _save_script_review_draft_set(draft_set)
-    return ScriptReviewSubmitResponse(draft_set=draft_set, batch=batch)
-
-
 @router.get("/pipelines/{pipeline_id}", response_model=PipelineManifest)
 async def get_generation_pipeline(pipeline_id: str, pixelle_video: PixelleVideoDep):
     try:
@@ -1145,21 +827,6 @@ async def get_generation_pipeline(pipeline_id: str, pixelle_video: PixelleVideoD
         return manifest
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Unknown pipeline: {pipeline_id}") from None
-
-
-@router.post("/tasks", response_model=GenerationSubmitResponse)
-async def submit_generation_task(
-    request_body: GenerationRequest,
-    generation_service: GenerationServiceDep,
-):
-    try:
-        task = generation_service.submit(request_body)
-        return GenerationSubmitResponse(
-            generation_task_id=task.task_id,
-            task=task,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @router.get("/tasks/{task_id}", response_model=GenerationTask)
@@ -1206,12 +873,6 @@ def _batch_dir() -> Path:
     return Path(get_data_path("generation-batches"))
 
 
-def _script_review_dir() -> Path:
-    if GENERATION_SCRIPT_REVIEW_DIR is not None:
-        return Path(GENERATION_SCRIPT_REVIEW_DIR)
-    return Path(get_data_path("script-review-drafts"))
-
-
 def _batch_path(batch_id: str) -> Path:
     safe_id = re.sub(r"[^A-Za-z0-9._-]+", "_", batch_id).strip("._-")
     if not safe_id:
@@ -1219,27 +880,11 @@ def _batch_path(batch_id: str) -> Path:
     return _batch_dir() / f"{safe_id}.json"
 
 
-def _script_review_path(draft_set_id: str) -> Path:
-    safe_id = re.sub(r"[^A-Za-z0-9._-]+", "_", draft_set_id).strip("._-")
-    if not safe_id:
-        raise HTTPException(status_code=400, detail="Script review draft set id is required")
-    return _script_review_dir() / f"{safe_id}.json"
-
-
 def _save_batch(batch: dict) -> None:
     batch_dir = _batch_dir()
     batch_dir.mkdir(parents=True, exist_ok=True)
     _batch_path(batch["batch_id"]).write_text(
         json.dumps(batch, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _save_script_review_draft_set(draft_set: dict) -> None:
-    draft_dir = _script_review_dir()
-    draft_dir.mkdir(parents=True, exist_ok=True)
-    _script_review_path(draft_set["draft_set_id"]).write_text(
-        json.dumps(draft_set, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
@@ -1265,32 +910,6 @@ def _load_batches() -> list[dict]:
         except (OSError, json.JSONDecodeError):
             continue
     return batches
-
-
-def _load_script_review_draft_set(draft_set_id: str) -> dict | None:
-    path = _script_review_path(draft_set_id)
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-def _load_script_review_draft_sets() -> list[dict]:
-    draft_dir = _script_review_dir()
-    if not draft_dir.exists():
-        return []
-    draft_sets = []
-    for path in sorted(draft_dir.glob("*.json")):
-        try:
-            draft_set = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(draft_set, dict) or draft_set.get("draft_set_id") != path.stem:
-            continue
-        draft_sets.append(draft_set)
-    return draft_sets
 
 
 def _hydrate_batch(batch: dict, generation_service) -> dict:
@@ -1345,97 +964,6 @@ def _compile_batch_retry_request(*, batch: dict, item: dict, metadata: dict) -> 
     )
 
 
-def _submit_generation_jobs_as_batch(
-    *,
-    registry,
-    template_id: str,
-    jobs: list[dict],
-    generation_service,
-    metadata: dict,
-    idempotency_key: str | None = None,
-) -> dict:
-    batch_id = uuid.uuid4().hex
-    now = _now_iso()
-    items: list[dict] = []
-    for index, job in enumerate(jobs, start=1):
-        params = dict(job.get("params") or {})
-        # review_* 字段是审核流程的溯源信息，进 metadata 而不是生产参数。
-        review_metadata = {
-            key: params.pop(key) for key in list(params) if key.startswith("review_")
-        }
-        item_metadata = {
-            **metadata,
-            "batch_id": batch_id,
-            "batch_index": index,
-            "review_topic": job.get("topic"),
-            "review_language": job.get("language"),
-            **review_metadata,
-        }
-        item_idempotency_key = f"{idempotency_key}:{index}" if idempotency_key else None
-        try:
-            script = str(params.pop("text", "")).strip()
-            if not script:
-                raise ValueError("Script review job is missing script text.")
-            # 通过模板编译：fixed_params（含模板级 overrides）打底，
-            # params 里的字段仅在模板 allowed_user_params 白名单内生效。
-            generation_request = registry.compile_request(
-                template_id,
-                input={**params, "script": script},
-                metadata=item_metadata,
-                idempotency_key=item_idempotency_key,
-            )
-            task = generation_service.submit(generation_request)
-            items.append(
-                {
-                    "index": index,
-                    "input": {
-                        "topic": job.get("topic"),
-                        "language": job.get("language"),
-                        "script": script,
-                    },
-                    "params": params,
-                    "metadata": item_metadata,
-                    "task_id": task.task_id,
-                    "status": task.status,
-                    "progress": task.progress.model_dump(mode="json"),
-                    "error": None,
-                }
-            )
-        except ValueError as exc:
-            items.append(
-                {
-                    "index": index,
-                    "input": {
-                        "topic": job.get("topic"),
-                        "language": job.get("language"),
-                    },
-                    "params": dict(job.get("params") or {}),
-                    "metadata": item_metadata,
-                    "task_id": None,
-                    "status": "failed",
-                    "progress": None,
-                    "error": {
-                        "layer": "input",
-                        "message": str(exc),
-                        "exception_type": type(exc).__name__,
-                    },
-                }
-            )
-
-    return _hydrate_batch(
-        {
-            "batch_id": batch_id,
-            "template_id": template_id,
-            "status": "submitted",
-            "created_at": now,
-            "updated_at": now,
-            "metadata": metadata,
-            "items": items,
-        },
-        generation_service,
-    )
-
-
 def _batch_status(statuses: list[str]) -> str:
     if not statuses:
         return "empty"
@@ -1471,50 +999,3 @@ def _stored_asset_filename(original_filename: str) -> str:
     if not safe_stem:
         safe_stem = "asset"
     return f"{uuid.uuid4().hex[:12]}-{safe_stem}{suffix}"
-
-
-def _prompt_template_response(template: PromptTemplate) -> ScriptReviewPromptTemplateResponse:
-    return ScriptReviewPromptTemplateResponse(
-        name=template.name,
-        content=template.content,
-        source=template.source,
-    )
-
-
-# 未显式指定 Prompt 时的安全默认（内置通用模板）。
-# 刻意不取"列表第一个"：自定义 Prompt 文件的存在与排序不应改变默认起草行为。
-SAFE_DEFAULT_PROMPT_TEMPLATES = {
-    "script": "Short Oral Script",
-    "split": "Copy-Safe Scene Split",
-}
-
-
-def _resolve_prompt_template(kind: str, name: str | None) -> PromptTemplate:
-    templates = load_prompt_templates(kind)
-    if not templates:
-        raise HTTPException(status_code=500, detail=f"No {kind} prompt templates are available.")
-    if name:
-        for template in templates:
-            if template.name == name:
-                return template
-        raise HTTPException(status_code=400, detail=f"Unknown {kind} prompt template: {name}")
-    safe_default = SAFE_DEFAULT_PROMPT_TEMPLATES.get(kind)
-    for template in templates:
-        if template.name == safe_default:
-            return template
-    return templates[0]
-
-
-def _clean_string_items(items: list[str], field_name: str) -> list[str]:
-    cleaned = []
-    seen = set()
-    for item in items:
-        value = str(item or "").strip()
-        if value and value not in seen:
-            cleaned.append(value)
-            seen.add(value)
-    if not cleaned:
-        raise HTTPException(
-            status_code=400, detail=f"{field_name} must contain at least one value."
-        )
-    return cleaned

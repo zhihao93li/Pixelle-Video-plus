@@ -1,12 +1,12 @@
 import shutil
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
-from pixelle_video.generation.schemas import EntryId, GenerationRequest
+from pixelle_video.generation.schemas import GenerationRequest
 
 # 长文骨架的内置中性默认提示词（不带品牌词；含 {script}/{title}/{language}/{word_count} 占位）。
-# 与 pipelines/long_form.py 的回落默认保持一致；模板把它写进 fixed_params，用户在配方详情页可编辑。
+# 与 pipelines/long_form.py 的回落默认保持一致；模板把它写进 fixed_params，用户在模板详情页可编辑。
 _LONG_FORM_DEFAULT_PROMPT = (
     "你是一名资深长文写作者。请把下面的确认稿扩写成一篇结构化的 markdown 长文，"
     "适合公众号 / 知乎 / 小红书长文发布。\n\n"
@@ -26,18 +26,17 @@ class ProductionTemplateError(ValueError):
 
 DEFAULT_SCRIPT_TEMPLATE = "Short Oral Script"
 DEFAULT_SPLIT_TEMPLATE = "Copy-Safe Scene Split"
-
-
-class DraftingSpec(BaseModel):
-    """Recipe-owned defaults for topic-to-draft generation."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    script_template_name: str = DEFAULT_SCRIPT_TEMPLATE
-    split_template_name: str = DEFAULT_SPLIT_TEMPLATE
-    script_model: str = ""
-    split_model: str = ""
-    language_script_models: dict[str, str] = Field(default_factory=dict)
+SCRIPT_SETTING_DEFAULTS: dict[str, Any] = {
+    "script_template_name": DEFAULT_SCRIPT_TEMPLATE,
+    "script_provider_id": "",
+    "script_model": "",
+    "language_script_models": {},
+}
+SPLIT_SETTING_DEFAULTS: dict[str, Any] = {
+    "split_template_name": DEFAULT_SPLIT_TEMPLATE,
+    "split_provider_id": "",
+    "split_model": "",
+}
 
 
 class ProductionTemplate(BaseModel):
@@ -59,35 +58,22 @@ class ProductionTemplate(BaseModel):
     input_requirements: list[str] = Field(default_factory=list)
     quality_tier: str
     pipeline_id: str
-    entry: EntryId
-    drafting: DraftingSpec = Field(default_factory=DraftingSpec)
     fixed_params: dict[str, Any] = Field(default_factory=dict)
     required_capabilities: list[str] = Field(default_factory=list)
     user_selectable_runtime: bool = False
     user_selectable_providers: list[str] = Field(default_factory=list)
     enabled: bool = True
-    # 代码层退役标记（面向展示）：True 表示已退役的内置预设，只读、不可复活、归入「已退役」分组。
-    # 与 ``enabled`` 区分——用户可停用/重启用普通模板（enabled 变化），但退役是代码事实（retired 恒定）。
-    retired: bool = False
-    migration_status: Literal["ready", "partial", "legacy_only", "planned"] = "ready"
-    product_entry: str = "generate"
-    streamlit_source: str | None = None
-    migration_notes: str = ""
     allowed_user_params: list[str] = Field(default_factory=list)
     passthrough_input_fields: list[str] = Field(default_factory=list)
     is_custom: bool = False
     access_scope: Literal["public", "agent"] = "public"
-
-    @field_validator("access_scope", mode="before")
-    @classmethod
-    def normalize_legacy_access_scope(cls, value):
-        return "agent" if value == "codex" else value
 
     def identity_metadata(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "version": self.version,
             "name": self.display_name,
+            "pipeline_id": self.pipeline_id,
             "quality_tier": self.quality_tier,
         }
 
@@ -140,7 +126,7 @@ class ProductionTemplateRegistry:
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
         available_capabilities: set[str] | None = None,
-        surface: Literal["public", "agent", "codex"] = "public",
+        surface: Literal["public", "agent"] = "public",
     ) -> GenerationRequest:
         template = self.get(template_id)
         self.require_access(template, surface=surface)
@@ -148,7 +134,7 @@ class ProductionTemplateRegistry:
             raise ProductionTemplateError(
                 f"Production template {template.id!r} is not available through the generic "
                 f"production-template task endpoint. "
-                f"{template.migration_notes or 'Use its dedicated product entry for this flow.'}"
+                f"{template.failure_guidance}"
             )
         self._require_capabilities(template, available_capabilities)
         self._require_input(template, input)
@@ -164,8 +150,7 @@ class ProductionTemplateRegistry:
             value = input[key]
             # Per-run override contract: omitted means inherit the recipe;
             # explicit null removes an inherited value and lets the runtime use
-            # its own default. Empty strings from older clients keep the legacy
-            # "not provided" behavior.
+            # its own default. Empty strings mean "not provided".
             if value is None:
                 params.pop(key, None)
                 continue
@@ -178,7 +163,6 @@ class ProductionTemplateRegistry:
 
         return GenerationRequest(
             pipeline_id=template.pipeline_id,
-            entry=template.entry,
             input=pipeline_input,
             params=params,
             metadata={
@@ -194,10 +178,9 @@ class ProductionTemplateRegistry:
     def require_access(
         template: ProductionTemplate,
         *,
-        surface: Literal["public", "agent", "codex"],
+        surface: Literal["public", "agent"],
     ) -> None:
-        normalized_surface = "agent" if surface == "codex" else surface
-        if template.access_scope == "agent" and normalized_surface != "agent":
+        if template.access_scope == "agent" and surface != "agent":
             raise ProductionTemplateError(
                 f"Production template {template.id!r} is only available through an Agent."
             )
@@ -244,7 +227,6 @@ def build_default_production_template_registry() -> ProductionTemplateRegistry:
     registry = _build_builtin_production_template_registry()
     _append_custom_templates(registry)
     _apply_template_overrides(registry)
-    _apply_drafting_overrides(registry)
     _apply_enabled_overrides(registry)
     return registry
 
@@ -254,16 +236,6 @@ def build_base_production_template_registry() -> ProductionTemplateRegistry:
     registry = _build_builtin_production_template_registry()
     _append_custom_templates(registry)
     return registry
-
-
-def _apply_drafting_overrides(registry: ProductionTemplateRegistry) -> None:
-    from pixelle_video.generation.template_overrides import load_all_drafting
-
-    for template_id, drafting in load_all_drafting().items():
-        try:
-            registry.get(template_id).drafting = DraftingSpec.model_validate(drafting)
-        except (ProductionTemplateError, ValueError):
-            continue
 
 
 def _apply_enabled_overrides(registry: ProductionTemplateRegistry) -> None:
@@ -314,31 +286,30 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
     return ProductionTemplateRegistry(
         [
             ProductionTemplate(
-                id="pipeline_standard_base_v1",
+                id="pipeline_topic_to_video_base_v1",
                 version="v1",
-                display_name="图文口播视频",
-                description=(
-                    "文案 → 每段生成一张 AI 配图，配上字幕和配音，合成竖版口播视频。"
-                    "克隆后可调默认画面、音色等参数。"
-                ),
-                use_case="standard_base",
-                runtime_label="标准稳定合成",
-                estimated_turnaround="日常速度",
-                failure_guidance="检查文案、TTS、素材生成和 FFmpeg 配置后重试。",
-                template_tags=["图文口播", "标准线", "骨架模板"],
-                input_requirements=["script"],
+                display_name="主题起稿口播视频",
+                description="输入一个主题，先生成可确认文案，再继续制作图文口播视频。",
+                use_case="topic_to_video_base",
+                runtime_label="人工确认后继续生产",
+                estimated_turnaround="比已有文案稍长",
+                failure_guidance="检查写稿模型、Prompt、TTS、画面生成和 FFmpeg 配置后重试。",
+                template_tags=["图文口播", "主题起稿", "人工确认", "骨架模板"],
+                input_requirements=["topic"],
                 quality_tier="daily",
-                pipeline_id="standard",
-                entry="script",
+                pipeline_id="topic_to_video",
                 required_capabilities=["llm", "tts", "media", "ffmpeg", "persistence"],
-                migration_status="ready",
-                migration_notes=(
-                    "标准线（standard）的中性骨架模板，参数取自 daily 去品牌化；"
-                    "克隆后自定义默认参数。"
-                ),
                 allowed_user_params=[
                     "title",
-                    "split_mode",
+                    "script_template_name",
+                    "script_prompt",
+                    "script_provider_id",
+                    "script_model",
+                    "language_script_models",
+                    "split_template_name",
+                    "split_prompt",
+                    "split_provider_id",
+                    "split_model",
                     "frame_template",
                     "template_params",
                     "media_workflow",
@@ -360,8 +331,64 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                     "compose_runtime",
                 ],
                 fixed_params={
-                    "mode": "fixed",
-                    "split_mode": "paragraph",
+                    **SCRIPT_SETTING_DEFAULTS,
+                    **SPLIT_SETTING_DEFAULTS,
+                    "frame_template": "1080x1920/image_default.html",
+                    "tts_inference_mode": "local",
+                    "tts_voice": "zh-CN-YunjianNeural",
+                    "video_fps": 30,
+                    "bgm_volume": 0.2,
+                    "bgm_mode": "loop",
+                    "compose_runtime": "html_ffmpeg",
+                    "quality_profile": "basic",
+                    "allow_silent": False,
+                },
+            ),
+            ProductionTemplate(
+                id="pipeline_standard_base_v1",
+                version="v1",
+                display_name="图文口播视频",
+                description=(
+                    "文案 → 每段生成一张 AI 配图，配上字幕和配音，合成竖版口播视频。"
+                    "克隆后可调默认画面、音色等参数。"
+                ),
+                use_case="standard_base",
+                runtime_label="标准稳定合成",
+                estimated_turnaround="日常速度",
+                failure_guidance="检查文案、TTS、素材生成和 FFmpeg 配置后重试。",
+                template_tags=["图文口播", "标准线", "骨架模板"],
+                input_requirements=["script"],
+                quality_tier="daily",
+                pipeline_id="script_to_video",
+                required_capabilities=["llm", "tts", "media", "ffmpeg", "persistence"],
+                allowed_user_params=[
+                    "title",
+                    "split_template_name",
+                    "split_prompt",
+                    "split_provider_id",
+                    "split_model",
+                    "frame_template",
+                    "template_params",
+                    "media_workflow",
+                    "image_provider",
+                    "image_model",
+                    "media_width",
+                    "media_height",
+                    "prompt_prefix",
+                    "image_prompt_visual_context",
+                    "image_prompt_generation_rules",
+                    "bgm_path",
+                    "bgm_volume",
+                    "bgm_mode",
+                    "tts_inference_mode",
+                    "tts_workflow",
+                    "tts_voice",
+                    "tts_speed",
+                    "ref_audio",
+                    "compose_runtime",
+                ],
+                fixed_params={
+                    **SPLIT_SETTING_DEFAULTS,
                     "frame_template": "1080x1920/image_default.html",
                     "tts_inference_mode": "local",
                     "tts_voice": "zh-CN-YunjianNeural",
@@ -389,11 +416,8 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                 input_requirements=["scenes"],
                 quality_tier="daily",
                 pipeline_id="codex_scene_video",
-                entry="scenes",
                 access_scope="agent",
                 required_capabilities=["tts", "ffmpeg", "persistence"],
-                migration_status="ready",
-                migration_notes="Agent \u4e13\u7528\uff1b\u4e0d\u4f7f\u7528 Pixelle \u56fe\u7247 Provider \u6216 OpenAI API\u3002",
                 allowed_user_params=[
                     "title",
                     "frame_template",
@@ -440,13 +464,7 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                 input_requirements=["assets"],
                 quality_tier="daily",
                 pipeline_id="asset_based",
-                entry="assets",
                 required_capabilities=["ffmpeg", "persistence"],
-                migration_status="ready",
-                migration_notes=(
-                    "素材线（asset_based）的中性骨架模板，参数取自素材增强去品牌化；"
-                    "克隆后自定义默认参数。"
-                ),
                 allowed_user_params=[
                     "bgm_path",
                     "bgm_volume",
@@ -474,6 +492,53 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                 },
             ),
             ProductionTemplate(
+                id="pipeline_topic_to_image_post_base_v1",
+                version="v1",
+                display_name="主题生成小红书图文",
+                description="主题 → 图文文案确认 → 分页确认 → 图集。",
+                use_case="topic_to_image_post_base",
+                runtime_label="图文写作与图集渲染",
+                estimated_turnaround="需两次人工确认",
+                failure_guidance="检查写稿模型、分页模型、画面生成和版式配置后重试。",
+                template_tags=["主题", "图文帖", "骨架模板"],
+                input_requirements=["topic"],
+                quality_tier="daily",
+                pipeline_id="topic_to_image_post",
+                required_capabilities=["llm", "media", "persistence"],
+                allowed_user_params=[
+                    "title",
+                    "script_template_name",
+                    "script_prompt",
+                    "script_provider_id",
+                    "script_model",
+                    "language_script_models",
+                    "split_template_name",
+                    "split_prompt",
+                    "split_provider_id",
+                    "split_model",
+                    "frame_template",
+                    "template_params",
+                    "media_workflow",
+                    "image_provider",
+                    "image_model",
+                    "media_width",
+                    "media_height",
+                    "prompt_prefix",
+                    "image_prompt_visual_context",
+                    "image_prompt_generation_rules",
+                    "source",
+                ],
+                fixed_params={
+                    "script_template_name": DEFAULT_SCRIPT_TEMPLATE,
+                    "split_template_name": DEFAULT_SPLIT_TEMPLATE,
+                    "split_mode": "line",
+                    "frame_template": "1080x1440/image_post_default.html",
+                    "media_width": 1024,
+                    "media_height": 1024,
+                    "quality_profile": "basic",
+                },
+            ),
+            ProductionTemplate(
                 id="pipeline_image_post_base_v1",
                 version="v1",
                 display_name="小红书图文帖",
@@ -489,13 +554,7 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                 input_requirements=["script"],
                 quality_tier="daily",
                 pipeline_id="image_post",
-                entry="script",
                 required_capabilities=["llm", "media", "persistence"],
-                migration_status="ready",
-                migration_notes=(
-                    "图文线（image_post）的中性骨架模板；无 TTS、无视频合成，"
-                    "确认稿行=页出图集。克隆后自定义默认参数。"
-                ),
                 allowed_user_params=[
                     "title",
                     "split_mode",
@@ -512,12 +571,37 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                     "source",
                 ],
                 fixed_params={
-                    "mode": "fixed",
                     "split_mode": "line",
                     "frame_template": "1080x1440/image_post_default.html",
                     "media_width": 1024,
                     "media_height": 1024,
                     "quality_profile": "basic",
+                },
+            ),
+            ProductionTemplate(
+                id="pipeline_topic_to_long_form_base_v1",
+                version="v1",
+                display_name="主题生成长文",
+                description="主题或写作方向 → 结构化长文；长文本身就是最终产物，不设中间确认。",
+                use_case="topic_to_long_form_base",
+                runtime_label="LLM 长文写作",
+                estimated_turnaround="最快（纯文字）",
+                failure_guidance="检查主题、长文提示词与写作模型配置后重试。",
+                template_tags=["主题", "长文", "骨架模板"],
+                input_requirements=["topic"],
+                quality_tier="daily",
+                pipeline_id="topic_to_long_form",
+                required_capabilities=["llm", "persistence"],
+                allowed_user_params=[
+                    "title",
+                    "long_form_prompt",
+                    "word_count",
+                    "llm_provider_id",
+                    "llm_model",
+                ],
+                fixed_params={
+                    "word_count": 1800,
+                    "long_form_prompt": _LONG_FORM_DEFAULT_PROMPT,
                 },
             ),
             ProductionTemplate(
@@ -536,353 +620,17 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                 input_requirements=["script"],
                 quality_tier="daily",
                 pipeline_id="long_form",
-                entry="script",
                 required_capabilities=["llm", "persistence"],
-                migration_status="ready",
-                migration_notes=(
-                    "长文线（long_form）的中性骨架模板；LLM-only，无配图/TTS/合成，"
-                    "确认稿下游扩写成 markdown。克隆后自定义长文风格。"
-                ),
                 allowed_user_params=[
                     "title",
                     "long_form_prompt",
                     "word_count",
+                    "llm_provider_id",
                     "llm_model",
                 ],
                 fixed_params={
-                    "mode": "fixed",
                     "word_count": 1800,
                     "long_form_prompt": _LONG_FORM_DEFAULT_PROMPT,
-                },
-            ),
-            ProductionTemplate(
-                id="petwoods_xhs_daily_v1",
-                version="v1",
-                display_name="PetWoods 小红书日常短视频",
-                description="日常稳定产出的 PetWoods 小红书短视频模板。",
-                project="PetWoods",
-                channel="xiaohongshu",
-                use_case="daily",
-                runtime_label="标准稳定合成",
-                estimated_turnaround="日常速度",
-                failure_guidance="检查文案、TTS、素材生成和 FFmpeg 配置后重试。",
-                template_tags=["小红书", "日常", "字幕视频"],
-                input_requirements=["script"],
-                quality_tier="daily",
-                pipeline_id="standard",
-                entry="script",
-                required_capabilities=["llm", "tts", "media", "ffmpeg", "persistence"],
-                streamlit_source="web/pipelines/standard.py",
-                enabled=False,
-                migration_status="ready",
-                migration_notes="已退役（PetWoods 预设，品牌进配方名）。替代：图文口播视频（pipeline_standard_base_v1），克隆后自定义。",
-                allowed_user_params=[
-                    "title",
-                    "split_mode",
-                    "frame_template",
-                    "template_params",
-                    "media_workflow",
-                    "image_provider",
-                    "image_model",
-                    "media_width",
-                    "media_height",
-                    "prompt_prefix",
-                    "image_prompt_visual_context",
-                    "image_prompt_generation_rules",
-                    "bgm_path",
-                    "bgm_volume",
-                    "bgm_mode",
-                    "tts_inference_mode",
-                    "tts_workflow",
-                    "tts_voice",
-                    "tts_speed",
-                    "ref_audio",
-                ],
-                fixed_params={
-                    "mode": "fixed",
-                    "split_mode": "paragraph",
-                    "frame_template": "1080x1920/image_default.html",
-                    "tts_inference_mode": "local",
-                    "tts_voice": "zh-CN-YunjianNeural",
-                    "video_fps": 30,
-                    "bgm_volume": 0.2,
-                    "bgm_mode": "loop",
-                    "compose_runtime": "html_ffmpeg",
-                    "quality_profile": "basic",
-                    "allow_silent": False,
-                },
-            ),
-            ProductionTemplate(
-                id="petwoods_xhs_static_subtitle_v1",
-                version="v1",
-                display_name="PetWoods 静态字幕短视频",
-                description="不依赖外部媒体生成的低成本字幕短视频模板。",
-                project="PetWoods",
-                channel="xiaohongshu",
-                use_case="static_subtitle",
-                runtime_label="本地静态合成",
-                estimated_turnaround="最快",
-                failure_guidance="检查文案、TTS、静态帧模板和 FFmpeg 配置后重试。",
-                template_tags=["小红书", "静态字幕", "本地合成", "低成本"],
-                input_requirements=["script"],
-                quality_tier="daily",
-                pipeline_id="standard",
-                entry="script",
-                required_capabilities=["llm", "tts", "ffmpeg", "persistence"],
-                streamlit_source="web/components/style_config.py",
-                enabled=False,
-                migration_status="ready",
-                migration_notes=(
-                    "已退役（PetWoods 预设）。替代：迁移生成的自定义模板"
-                    "「静态字幕快出」（migrated_static_subtitle_v1），或克隆图文口播视频。"
-                ),
-                allowed_user_params=[
-                    "title",
-                    "split_mode",
-                    "template_params",
-                    "bgm_path",
-                    "bgm_volume",
-                    "bgm_mode",
-                    "tts_inference_mode",
-                    "tts_workflow",
-                    "tts_voice",
-                    "tts_speed",
-                    "ref_audio",
-                ],
-                fixed_params={
-                    "mode": "fixed",
-                    "split_mode": "paragraph",
-                    "frame_template": "1080x1920/static_default.html",
-                    "tts_inference_mode": "local",
-                    "tts_voice": "zh-CN-YunjianNeural",
-                    "video_fps": 30,
-                    "bgm_volume": 0.2,
-                    "bgm_mode": "loop",
-                    "compose_runtime": "html_ffmpeg",
-                    "quality_profile": "basic",
-                    "allow_silent": False,
-                },
-            ),
-            ProductionTemplate(
-                id="petwoods_xhs_topic_to_video_v1",
-                version="v1",
-                display_name="PetWoods 选题生成短视频",
-                description="输入选题或内容方向，由标准 pipeline 生成脚本并制作小红书短视频。",
-                project="PetWoods",
-                channel="xiaohongshu",
-                use_case="topic_to_video",
-                runtime_label="标准稳定合成",
-                estimated_turnaround="比已有文案稍长",
-                failure_guidance="检查选题文本、LLM、TTS、素材生成和 FFmpeg 配置后重试。",
-                template_tags=["小红书", "选题", "脚本生成", "字幕视频"],
-                input_requirements=["topic"],
-                quality_tier="daily",
-                pipeline_id="standard",
-                entry="topic",
-                required_capabilities=["llm", "tts", "media", "ffmpeg", "persistence"],
-                streamlit_source="web/pipelines/standard.py",
-                enabled=False,
-                migration_status="ready",
-                migration_notes="已退役（PetWoods 预设）。替代：图文口播视频（pipeline_standard_base_v1，输入选题也支持），克隆后自定义。",
-                allowed_user_params=[
-                    "title",
-                    "n_scenes",
-                    "frame_template",
-                    "template_params",
-                    "media_workflow",
-                    "image_provider",
-                    "image_model",
-                    "media_width",
-                    "media_height",
-                    "prompt_prefix",
-                    "image_prompt_visual_context",
-                    "image_prompt_generation_rules",
-                    "bgm_path",
-                    "bgm_volume",
-                    "bgm_mode",
-                    "tts_inference_mode",
-                    "tts_workflow",
-                    "tts_voice",
-                    "tts_speed",
-                    "ref_audio",
-                ],
-                fixed_params={
-                    "mode": "generate",
-                    "n_scenes": 5,
-                    "frame_template": "1080x1920/image_default.html",
-                    "tts_inference_mode": "local",
-                    "tts_voice": "zh-CN-YunjianNeural",
-                    "video_fps": 30,
-                    "bgm_volume": 0.2,
-                    "bgm_mode": "loop",
-                    "compose_runtime": "html_ffmpeg",
-                    "quality_profile": "basic",
-                    "allow_silent": False,
-                },
-            ),
-            ProductionTemplate(
-                id="petwoods_xhs_quality_explainer_v1",
-                version="v1",
-                display_name="PetWoods 高质量解释视频",
-                description="用于重点内容的高质量动效解释视频模板。",
-                project="PetWoods",
-                channel="xiaohongshu",
-                use_case="high_quality",
-                runtime_label="高质量动效合成",
-                estimated_turnaround="渲染耗时更长",
-                failure_guidance="检查 HyperFrames 渲染环境、Node/npx 依赖和素材路径后重试。",
-                template_tags=["小红书", "高质量", "解释视频", "强动效"],
-                input_requirements=["script"],
-                quality_tier="high_quality",
-                pipeline_id="standard",
-                entry="script",
-                required_capabilities=[
-                    "llm",
-                    "tts",
-                    "media",
-                    "ffmpeg",
-                    "persistence",
-                    "hyperframes",
-                ],
-                streamlit_source="web/pipelines/standard.py",
-                enabled=False,
-                migration_status="ready",
-                migration_notes="已退役（PetWoods 预设）。替代：克隆图文口播视频（pipeline_standard_base_v1），在默认配置里改 compose_runtime=hyperframes。",
-                allowed_user_params=[
-                    "title",
-                    "split_mode",
-                    "frame_template",
-                    "template_params",
-                    "media_workflow",
-                    "image_provider",
-                    "image_model",
-                    "media_width",
-                    "media_height",
-                    "prompt_prefix",
-                    "image_prompt_visual_context",
-                    "image_prompt_generation_rules",
-                    "bgm_path",
-                    "bgm_volume",
-                    "bgm_mode",
-                    "tts_inference_mode",
-                    "tts_workflow",
-                    "tts_voice",
-                    "tts_speed",
-                    "ref_audio",
-                ],
-                fixed_params={
-                    "mode": "fixed",
-                    "split_mode": "paragraph",
-                    "frame_template": "1080x1920/image_default.html",
-                    "tts_inference_mode": "local",
-                    "tts_voice": "zh-CN-YunjianNeural",
-                    "video_fps": 30,
-                    "bgm_volume": 0.18,
-                    "bgm_mode": "loop",
-                    "compose_runtime": "hyperframes",
-                    "quality_profile": "strict",
-                    "allow_silent": False,
-                    "template_params": {
-                        "motion_style": "kinetic_explainer",
-                        "subtitle_density": "high",
-                    },
-                },
-            ),
-            ProductionTemplate(
-                id="petwoods_xhs_asset_enhanced_v1",
-                version="v1",
-                display_name="PetWoods 素材增强短视频",
-                description="用已有图片或视频素材包装成适合小红书发布的短视频。",
-                project="PetWoods",
-                channel="xiaohongshu",
-                use_case="asset_enhanced",
-                runtime_label="素材包装合成",
-                estimated_turnaround="取决于素材数量",
-                failure_guidance="检查上传素材路径、素材格式和 FFmpeg 配置后重试。",
-                requires_user_assets=True,
-                template_tags=["小红书", "用户素材", "素材包装"],
-                input_requirements=["assets"],
-                quality_tier="daily",
-                pipeline_id="asset_based",
-                entry="assets",
-                required_capabilities=["ffmpeg", "persistence"],
-                streamlit_source="web/pipelines/asset_based.py",
-                enabled=False,
-                migration_status="ready",
-                migration_notes="已退役（PetWoods 预设）。替代：素材增强视频（pipeline_asset_based_base_v1），克隆后自定义。",
-                allowed_user_params=[
-                    "bgm_path",
-                    "bgm_volume",
-                    "bgm_mode",
-                    "voice_id",
-                    "tts_speed",
-                ],
-                passthrough_input_fields=["video_title", "intent", "duration"],
-                fixed_params={
-                    "mode": "asset_based",
-                    "source": "runninghub",
-                    "frame_template": "1080x1920/asset_default.html",
-                    "video_fps": 30,
-                    "bgm_volume": 0.18,
-                    "bgm_mode": "loop",
-                    "compose_runtime": "html_ffmpeg",
-                    "quality_profile": "basic",
-                    "runninghub_instance_type": "plus",
-                    "allow_silent": False,
-                    "template_params": {
-                        "layout": "asset_first",
-                        "subtitle_density": "medium",
-                    },
-                },
-            ),
-            ProductionTemplate(
-                id="petwoods_xhs_real_material_montage_v1",
-                version="v1",
-                display_name="PetWoods 真实素材混剪短视频",
-                description="轻量真实素材 montage 模板，适合宠物场景、生活方式和科普氛围短片。",
-                project="PetWoods",
-                channel="xiaohongshu",
-                use_case="real_material_montage",
-                runtime_label="轻量素材混剪",
-                estimated_turnaround="取决于素材数量",
-                failure_guidance="检查用户素材、素材时长、字幕文本和 FFmpeg 配置后重试。",
-                requires_user_assets=True,
-                template_tags=["小红书", "真实素材", "混剪", "轻量 montage"],
-                input_requirements=["assets"],
-                quality_tier="daily",
-                pipeline_id="asset_based",
-                entry="assets",
-                required_capabilities=["ffmpeg", "persistence"],
-                streamlit_source="web/pipelines/asset_based.py",
-                enabled=False,
-                migration_status="ready",
-                migration_notes="已退役（PetWoods 预设）。替代：素材增强视频（pipeline_asset_based_base_v1），克隆后自定义混剪参数。",
-                allowed_user_params=[
-                    "bgm_path",
-                    "bgm_volume",
-                    "bgm_mode",
-                    "voice_id",
-                    "tts_speed",
-                ],
-                passthrough_input_fields=["video_title", "intent", "duration"],
-                fixed_params={
-                    "mode": "asset_based",
-                    "source": "runninghub",
-                    "source_policy": "user_assets_first",
-                    "montage_style": "light_real_material",
-                    "frame_template": "1080x1920/asset_default.html",
-                    "video_fps": 30,
-                    "bgm_volume": 0.2,
-                    "bgm_mode": "loop",
-                    "compose_runtime": "html_ffmpeg",
-                    "quality_profile": "basic",
-                    "runninghub_instance_type": "plus",
-                    "allow_silent": False,
-                    "template_params": {
-                        "shot_selection": "simple_sequence",
-                        "subtitle_density": "medium",
-                        "transition": "cut",
-                    },
                 },
             ),
             ProductionTemplate(
@@ -900,12 +648,7 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                 input_requirements=["assets", "prompt"],
                 quality_tier="daily",
                 pipeline_id="i2v",
-                entry="assets",
                 enabled=True,
-                migration_status="ready",
-                product_entry="image_to_video",
-                streamlit_source="web/pipelines/i2v.py",
-                migration_notes="React 已可通过统一 generation task 提交；workflow 固定在模板配置里。",
                 allowed_user_params=["source", "title", "duration", "workflow_key"],
                 fixed_params={
                     "workflow_key": "runninghub/i2v_LTX2.json",
@@ -928,12 +671,7 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                 input_requirements=["reference_video", "assets", "prompt"],
                 quality_tier="daily",
                 pipeline_id="action_transfer",
-                entry="video",
                 enabled=True,
-                migration_status="ready",
-                product_entry="action_transfer",
-                streamlit_source="web/pipelines/action_transfer.py",
-                migration_notes="React 已可通过统一 generation task 提交；workflow 固定在模板配置里。",
                 allowed_user_params=["title", "duration", "workflow_key"],
                 fixed_params={
                     "workflow_key": "runninghub/af_scail.json",
@@ -956,12 +694,7 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                 input_requirements=["character_assets"],
                 quality_tier="daily",
                 pipeline_id="digital_human",
-                entry="assets",
                 enabled=True,
-                migration_status="ready",
-                product_entry="digital_human",
-                streamlit_source="web/pipelines/digital_human.py",
-                migration_notes="React 已可通过统一 generation task 提交；三段 workflow 固定在模板配置里。",
                 allowed_user_params=[
                     "title",
                     "mode",
@@ -989,26 +722,6 @@ def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                     "allow_silent": True,
                 },
             ),
-            ProductionTemplate(
-                id="pixelle_script_review_v1",
-                version="v1",
-                display_name="多语言审核出片",
-                description="AI 起草多语言文案，人工审核后批量出片",
-                use_case="script_review",
-                runtime_label="专用审核 API 工作流",
-                estimated_turnaround="取决于草稿数量和语言数量",
-                failure_guidance="检查选题、LLM、Prompt 模板、每语言 Fish TTS reference_id 和生成配置后重试。",
-                template_tags=["文案审核", "多语言", "计划迁移"],
-                input_requirements=["topic"],
-                quality_tier="daily",
-                pipeline_id="standard",
-                entry="topic",
-                enabled=False,
-                migration_status="ready",
-                product_entry="script_review",
-                streamlit_source="web/components/script_review_workflow.py",
-                migration_notes="React 已接入专用 draft API 与审核后生成任务提交；不通过普通 template task 端点提交。",
-            ),
         ],
         defaults={("PetWoods", "xiaohongshu"): "pipeline_standard_base_v1"},
     )
@@ -1024,26 +737,6 @@ def code_level_enabled(template_id: str) -> bool | None:
         return registry.get(template_id).enabled
     except ProductionTemplateError:
         return None
-
-
-def code_level_enabled_map() -> dict[str, bool]:
-    """一次性构建内置注册表并返回 {id: 代码层 enabled}，避免逐个查询重复构建。"""
-    return {
-        template.id: template.enabled
-        for template in _build_builtin_production_template_registry().list()
-    }
-
-
-def annotate_retired(templates: list[ProductionTemplate]) -> None:
-    """就地标注展示用 ``retired``：代码层停用的 generate 预设 = 已退役（只读、不可复活）。
-
-    用户停用普通模板只会改 ``enabled``，其代码层 enabled 仍为 True → 不算退役。
-    """
-    builtin_enabled = code_level_enabled_map()
-    for template in templates:
-        template.retired = (
-            builtin_enabled.get(template.id) is False and template.product_entry == "generate"
-        )
 
 
 def detect_available_generation_capabilities() -> set[str]:

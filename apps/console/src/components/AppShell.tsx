@@ -3,7 +3,6 @@ import {
   AlertCircle,
   Columns3,
   FolderOpen,
-  ListChecks,
   Loader2,
   Moon,
   Plus,
@@ -14,7 +13,6 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ProjectScopeBoundary } from "@/components/shared/ProjectScopeBoundary"
 import {
@@ -38,7 +36,6 @@ import {
   type RouteLayout,
 } from "@/lib/router"
 import { settingsLink } from "@/lib/settingsLinks"
-import { useTaskCenter } from "@/lib/taskCenter"
 import { cn } from "@/lib/utils"
 
 const MAIN_CONTENT_ID = "main-content"
@@ -47,7 +44,6 @@ const MANAGE_PROJECTS_VALUE = "__manage_projects__"
 const NAV_ICONS: Partial<Record<RouteId, LucideIcon>> = {
   board: Columns3,
   create: Plus,
-  tasks: ListChecks,
   library: FolderOpen,
   settings: Settings,
 }
@@ -146,7 +142,9 @@ function ProjectSwitcher({
           )}
           title={selectedProject.name}
         >
-          <SelectValue placeholder="选择项目">{selectedProject.name}</SelectValue>
+          <SelectValue placeholder="选择项目">
+            {selectedProject.name}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
@@ -251,7 +249,6 @@ export function AppShell({
   projectScoped: boolean
   children: ReactNode
 }) {
-  const { runningCount } = useTaskCenter()
   const projectState = useCurrentProject()
   const previousPathRef = useRef<string | null>(null)
 
@@ -315,14 +312,6 @@ export function AppShell({
               >
                 <Icon className="size-4" />
                 <span className="flex-1">{route.nav.label}</span>
-                {route.id === "tasks" && runningCount > 0 ? (
-                  <Badge
-                    className={cn(active && "bg-background text-foreground")}
-                    variant="secondary"
-                  >
-                    {runningCount}
-                  </Badge>
-                ) : null}
               </a>
             )
           })}
@@ -367,7 +356,11 @@ export function AppShell({
           tabIndex={-1}
         >
           <ProjectBoundary
-            key={projectScoped ? (projectState.projectId ?? "no-project") : "global"}
+            key={
+              projectScoped
+                ? (projectState.projectId ?? "no-project")
+                : "global"
+            }
             projectScoped={projectScoped}
             state={projectState}
           >
@@ -405,11 +398,6 @@ export function AppShell({
               >
                 <span className="relative">
                   <Icon className="size-5" />
-                  {route.id === "tasks" && runningCount > 0 ? (
-                    <span className="absolute -top-2 -right-3 min-w-4 rounded-full bg-primary px-1 text-center text-xs leading-4 text-primary-foreground">
-                      {runningCount > 99 ? "99+" : runningCount}
-                    </span>
-                  ) : null}
                 </span>
                 <span>{route.nav.label}</span>
               </a>

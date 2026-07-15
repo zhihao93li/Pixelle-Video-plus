@@ -4,7 +4,7 @@ The Pixelle console organizes content production by project. Desktop uses a prim
 
 ## Board
 
-The board follows the content lifecycle: topic, draft, review, production, publishing, and metrics. Content detail supports language editing, draft approval, production submission, and one visible next action.
+The workbench groups production tasks by confirmed states: needs attention, in progress, failed, and produced. Content detail supports language editing, human confirmation, artifact review, and publish or metric evidence.
 
 ## Quick Create
 
@@ -14,7 +14,6 @@ Quick Create first selects the artifact family and then a production recipe:
 - Image sets with a cover and pages
 - Structured long-form text
 - Specialized video flows: image-to-video, action transfer, and digital human
-- Multilingual review followed by unified production submission
 
 The generation workspace keeps input and current overrides on the left. The right rail moves from estimate to progress to result. Batch is a mode inside supported recipes, not a separate entry.
 

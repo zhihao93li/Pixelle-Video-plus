@@ -25,18 +25,13 @@ function template(): ProductionTemplate {
     template_tags: [],
     input_requirements: ["script"],
     quality_tier: "basic",
-    pipeline_id: "standard",
-    entry: "script",
+    pipeline_id: "script_to_video",
+    drafting: null,
     fixed_params: {},
     required_capabilities: [],
     user_selectable_runtime: false,
     user_selectable_providers: [],
     enabled: true,
-    retired: false,
-    migration_status: "ready",
-    product_entry: "generate",
-    streamlit_source: null,
-    migration_notes: "",
     allowed_user_params: [],
     passthrough_input_fields: [],
   }
@@ -45,8 +40,7 @@ function template(): ProductionTemplate {
 function task(patch: Partial<GenerationTask> = {}): GenerationTask {
   return {
     task_id: "task-1",
-    pipeline_id: "standard",
-    entry: "script",
+    pipeline_id: "script_to_video",
     status: "running",
     progress: {
       stage: "compose",
@@ -80,8 +74,7 @@ test("single run adapter owns status and cancel semantics", () => {
 test("completed video result becomes the shared artifact view model", () => {
   const result: GenerationResult = {
     task_id: "task-1",
-    pipeline_id: "standard",
-    entry: "script",
+    pipeline_id: "script_to_video",
     status: "completed",
     artifact_type: "video",
     artifacts: [],

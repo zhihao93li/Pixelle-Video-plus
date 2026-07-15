@@ -1,6 +1,6 @@
 """项目（品牌级内容线）管理 API。
 
-项目是控制台的全局作用域维度：管默认生产配方、语言 + 每语言音色、
+项目是控制台的全局作用域维度：管默认生产模板、语言 + 每语言音色、
 发布平台预选。"当前项目"是前端状态；这些接口显式接收/返回 project_id。
 校验失败一律返回 400，中文信息并给出下一步动作。
 """
@@ -12,7 +12,7 @@ from pixelle_video.content.projects import (
     Project,
     archive_project,
     create_project,
-    ensure_migrated,
+    ensure_default_project,
     list_projects,
     restore_project,
     set_default_project,
@@ -78,13 +78,13 @@ def _list_response() -> ProjectListResponse:
 
 @router.get("", response_model=ProjectListResponse)
 async def list_all_projects():
-    ensure_migrated()
+    ensure_default_project()
     return _list_response()
 
 
 @router.post("", response_model=Project)
 async def create_new_project(request: ProjectCreateRequest):
-    ensure_migrated()
+    ensure_default_project()
     name = request.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="项目名称不能为空。")
@@ -108,7 +108,7 @@ async def create_new_project(request: ProjectCreateRequest):
 # 注意路由顺序：/default 必须在 /{project_id} 之前，否则会被后者吞掉。
 @router.put("/default", response_model=ProjectListResponse)
 async def set_default(request: SetDefaultProjectRequest):
-    ensure_migrated()
+    ensure_default_project()
     if not set_default_project(request.project_id):
         raise HTTPException(
             status_code=400,
@@ -119,7 +119,7 @@ async def set_default(request: SetDefaultProjectRequest):
 
 @router.put("/{project_id}", response_model=Project)
 async def edit_project(project_id: str, request: ProjectUpdateRequest):
-    ensure_migrated()
+    ensure_default_project()
     if request.name is not None and not request.name.strip():
         raise HTTPException(status_code=400, detail="项目名称不能为空。")
     if request.languages is not None and not [
@@ -140,7 +140,7 @@ async def edit_project(project_id: str, request: ProjectUpdateRequest):
 
 @router.post("/{project_id}/archive", response_model=ProjectListResponse)
 async def archive(project_id: str):
-    ensure_migrated()
+    ensure_default_project()
     default_id, projects = list_projects()
     target = next((p for p in projects if p.project_id == project_id), None)
     if target is None:
@@ -162,7 +162,7 @@ async def archive(project_id: str):
 
 @router.post("/{project_id}/restore", response_model=ProjectListResponse)
 async def restore(project_id: str):
-    ensure_migrated()
+    ensure_default_project()
     if not restore_project(project_id):
         raise HTTPException(status_code=404, detail="项目不存在。")
     return _list_response()

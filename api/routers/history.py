@@ -1,7 +1,7 @@
 """
 History API routes.
 
-These endpoints expose the existing HistoryManager to non-Streamlit clients.
+These endpoints expose persisted generation history to the React console.
 """
 
 from typing import Any, Literal

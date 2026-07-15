@@ -7,6 +7,7 @@ export const SETTINGS_VIEWS = [
   "generation",
   "publish-storage",
   "recipes",
+  "prompts",
   "help",
 ] as const
 

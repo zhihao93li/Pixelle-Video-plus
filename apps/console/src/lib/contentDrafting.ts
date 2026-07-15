@@ -37,16 +37,17 @@ export async function generateDraftsForItems(
   items: ContentItem[],
   toast: ToastFn,
   onChanged: () => void,
-  _options: { projectId?: string } = {}
+  options: { recipeId: string }
 ) {
-  void _options
   const draftable = items.filter(
     (item) => item.kind === "text" && item.status === "idea"
   )
   if (draftable.length === 0) return
 
   const operations = await Promise.all(
-    draftable.map((item) => startContentDraft(item.item_id))
+    draftable.map((item) =>
+      startContentDraft(item.item_id, { recipeId: options.recipeId })
+    )
   )
   toast({
     title: `开始为 ${operations.length} 个选题起草…`,
@@ -63,7 +64,10 @@ export async function generateDraftsForItems(
         (operation) => operation.status === "failed"
       )
       if (failed.length === 0) {
-        toast({ title: `${completed} 组草稿已生成，待确认`, variant: "success" })
+        toast({
+          title: `${completed} 组草稿已生成，待确认`,
+          variant: "success",
+        })
       } else if (completed > 0) {
         toast({
           title: `${completed} 组草稿已生成，${failed.length} 条起草失败已退回选题池`,

@@ -3,50 +3,37 @@ import test from "node:test"
 
 import {
   addRunninghubWorkflow,
-  cancelGenerationBatch,
   cancelGenerationTask,
   checkPublishConfiguration,
-  createGenerationBatch,
   createGenerationTemplateTask,
-  createScriptReviewDraftSet,
   fetchBufferChannels,
   generateMediaPreview,
   getFrameTemplateParams,
-  getScriptReviewDraftSet,
   getHelpFaq,
   getHistoryTaskDetail,
-  getGenerationBatch,
   getPublishRecord,
   getSettingsConfig,
   getSettingsDiagnostics,
-  getTemplateDraftingConfig,
   listResourceBgm,
   listImageProviderResources,
   listResourceMediaWorkflows,
   listResourceTemplates,
   listResourceTtsWorkflows,
   listRunninghubWorkflows,
-  listGenerationBatches,
   listHistoryTasks,
   listPublishTimezones,
-  listScriptReviewDraftSets,
-  listScriptReviewTemplates,
+  listPromptTemplates,
   loadLlmModels,
   publishTask,
   renderFramePreview,
   resetSettingsConfig,
-  resetTemplateDraftingConfig,
-  retryGenerationBatchItem,
   setTemplateEnabled,
-  submitScriptReviewDraftSetTasks,
   synthesizeTtsPreview,
   testComfyuiConnection,
   testLlmConnection,
   uploadGenerationAssets,
   uploadResourceBgm,
-  updateScriptReviewDraftSet,
   updateSettingsConfig,
-  updateTemplateDraftingConfig,
   templatesForManagement,
   type ProductionTemplate,
 } from "../src/lib/generationApi.ts"
@@ -62,7 +49,7 @@ test("management template view combines launchable and Codex-only recipes", () =
   const combined = templatesForManagement({
     default_template: "standard",
     templates: [launchable],
-    codex_templates: [codexOnly],
+    agent_templates: [codexOnly],
   })
 
   assert.deepEqual(
@@ -79,10 +66,15 @@ test("recipe image provider discovery uses the redacted resource endpoint", asyn
 
   await listImageProviderResources()
 
-  assert.equal(
-    calls[0].url,
-    "/api/resources/image-providers"
-  )
+  assert.equal(calls[0].url, "/api/resources/image-providers")
+})
+
+test("prompt template discovery uses the drafting endpoint", async () => {
+  const calls = installFetchMock({ templates: [] })
+
+  await listPromptTemplates()
+
+  assert.equal(calls[0].url, "/api/drafting/prompt-templates")
 })
 
 function installFetchMock(responseBody: unknown, status = 200) {
@@ -131,10 +123,7 @@ test("history detail and publish record APIs use task-scoped routes", async () =
   await getPublishRecord("task-1")
 
   assert.equal(calls[0].url, "/api/history/tasks/task-1")
-  assert.equal(
-    calls[1].url,
-    "/api/publish/tasks/task-1/record"
-  )
+  assert.equal(calls[1].url, "/api/publish/tasks/task-1/record")
 })
 
 test("publish APIs send selected platforms and copy without provider choices", async () => {
@@ -181,14 +170,8 @@ test("resource APIs read BGM templates and workflows", async () => {
 
   assert.equal(calls[0].url, "/api/resources/bgm")
   assert.equal(calls[1].url, "/api/resources/templates")
-  assert.equal(
-    calls[2].url,
-    "/api/resources/workflows/media"
-  )
-  assert.equal(
-    calls[3].url,
-    "/api/resources/workflows/tts"
-  )
+  assert.equal(calls[2].url, "/api/resources/workflows/media")
+  assert.equal(calls[3].url, "/api/resources/workflows/tts")
 })
 
 test("preview APIs call existing TTS and frame endpoints", async () => {
@@ -350,14 +333,8 @@ test("settings action APIs call real backend utilities", async () => {
     calls[2].init?.body,
     JSON.stringify({ comfyui_url: "http://127.0.0.1:8188" })
   )
-  assert.equal(
-    calls[3].url,
-    "/api/settings/runninghub/workflows"
-  )
-  assert.equal(
-    calls[4].url,
-    "/api/settings/runninghub/workflows"
-  )
+  assert.equal(calls[3].url, "/api/settings/runninghub/workflows")
+  assert.equal(calls[4].url, "/api/settings/runninghub/workflows")
   assert.equal(
     calls[4].init?.body,
     JSON.stringify({
@@ -367,15 +344,9 @@ test("settings action APIs call real backend utilities", async () => {
       overwrite: true,
     })
   )
-  assert.equal(
-    calls[5].url,
-    "/api/settings/buffer/channels"
-  )
+  assert.equal(calls[5].url, "/api/settings/buffer/channels")
   assert.equal(calls[5].init?.body, JSON.stringify({ api_key: "buffer-key" }))
-  assert.equal(
-    calls[6].url,
-    "/api/help/faq?language=zh_CN"
-  )
+  assert.equal(calls[6].url, "/api/help/faq?language=zh_CN")
 })
 
 test("asset upload API sends multipart form data without JSON content type", async () => {
@@ -414,37 +385,30 @@ test("generic production template task API sends asset template input and metada
 
   await createGenerationTemplateTask(
     "pipeline_asset_based_base_v1",
+    "asset_based",
     {
       assets: ["/tmp/cat.jpg"],
       video_title: "猫咪日常",
       intent: "用用户素材包装成小红书短视频",
       duration: 30,
     },
-    {
-      source: "react_production_studio",
-      uploaded_assets: [{ path: "/tmp/cat.jpg", kind: "image" }],
-    }
+    "project-1"
   )
 
-  assert.equal(
-    calls[0].url,
-    "/api/generation/templates/pipeline_asset_based_base_v1/tasks"
-  )
-  assert.equal(
-    calls[0].init?.body,
-    JSON.stringify({
-      input: {
-        assets: ["/tmp/cat.jpg"],
-        video_title: "猫咪日常",
-        intent: "用用户素材包装成小红书短视频",
-        duration: 30,
-      },
-      metadata: {
-        source: "react_production_studio",
-        uploaded_assets: [{ path: "/tmp/cat.jpg", kind: "image" }],
-      },
-    })
-  )
+  assert.equal(calls[0].url, "/api/production-tasks")
+  const body = JSON.parse(String(calls[0].init?.body))
+  assert.equal(body.project_id, "project-1")
+  assert.equal(body.pipeline_id, "asset_based")
+  assert.equal(body.recipe_id, "pipeline_asset_based_base_v1")
+  assert.deepEqual(body.input, {
+    assets: ["/tmp/cat.jpg"],
+    video_title: "猫咪日常",
+    intent: "用用户素材包装成小红书短视频",
+    duration: 30,
+  })
+  assert.equal(body.source, "react")
+  assert.equal(body.client_name, "react-console")
+  assert.match(body.request_id, /^production:/)
 })
 
 test("special template task API preserves recipe input and current project identity", async () => {
@@ -455,34 +419,25 @@ test("special template task API preserves recipe input and current project ident
 
   await createGenerationTemplateTask(
     "my_digital_human",
+    "digital_human",
     {
       character_assets: ["/tmp/character.png"],
       script: "Hello",
       mode: "customize",
     },
-    { source: "react_special_pipeline", template_use_case: "digital_human" },
     "project-42"
   )
 
-  assert.equal(
-    calls[0].url,
-    "/api/generation/templates/my_digital_human/tasks"
-  )
-  assert.equal(
-    calls[0].init?.body,
-    JSON.stringify({
-      input: {
-        character_assets: ["/tmp/character.png"],
-        script: "Hello",
-        mode: "customize",
-      },
-      metadata: {
-        source: "react_special_pipeline",
-        template_use_case: "digital_human",
-        project_id: "project-42",
-      },
-    })
-  )
+  assert.equal(calls[0].url, "/api/production-tasks")
+  const body = JSON.parse(String(calls[0].init?.body))
+  assert.equal(body.project_id, "project-42")
+  assert.equal(body.pipeline_id, "digital_human")
+  assert.equal(body.recipe_id, "my_digital_human")
+  assert.deepEqual(body.input, {
+    character_assets: ["/tmp/character.png"],
+    script: "Hello",
+    mode: "customize",
+  })
 })
 
 test("generation task cancel API uses task-scoped delete route", async () => {
@@ -490,39 +445,8 @@ test("generation task cancel API uses task-scoped delete route", async () => {
 
   await cancelGenerationTask("task-1")
 
-  assert.equal(
-    calls[0].url,
-    "/api/generation/tasks/task-1"
-  )
+  assert.equal(calls[0].url, "/api/generation/tasks/task-1")
   assert.equal(calls[0].init?.method, "DELETE")
-})
-
-test("recipe drafting config APIs use the recipe-scoped contract", async () => {
-  const calls = installFetchMock({
-    template_id: "recipe-1",
-    drafting: {},
-    is_overridden: true,
-  })
-  const drafting = {
-    script_template_name: "Short Oral Script",
-    split_template_name: "Copy-Safe Scene Split",
-    script_model: "writer",
-    split_model: "splitter",
-    language_script_models: { English: "writer-en" },
-  }
-
-  await getTemplateDraftingConfig("recipe-1")
-  await updateTemplateDraftingConfig("recipe-1", drafting)
-  await resetTemplateDraftingConfig("recipe-1")
-
-  const url =
-    "/api/generation/templates/recipe-1/drafting-config"
-  assert.equal(calls[0].url, url)
-  assert.equal(calls[1].url, url)
-  assert.equal(calls[1].init?.method, "PUT")
-  assert.equal(calls[1].init?.body, JSON.stringify({ drafting }))
-  assert.equal(calls[2].url, url)
-  assert.equal(calls[2].init?.method, "DELETE")
 })
 
 test("template enabled API PUTs the toggle to the enabled route", async () => {
@@ -539,166 +463,4 @@ test("template enabled API PUTs the toggle to the enabled route", async () => {
   )
   assert.equal(calls[0].init?.method, "PUT")
   assert.equal(calls[0].init?.body, JSON.stringify({ enabled: false }))
-})
-
-test("generation batch APIs persist real task batches", async () => {
-  const calls = installFetchMock({
-    batches: [],
-    batch_id: "batch-1",
-    items: [],
-  })
-
-  await createGenerationBatch({
-    templateId: "pipeline_standard_base_v1",
-    items: [
-      {
-        input: { script: "Cats need clean water daily." },
-        metadata: { row: 1 },
-      },
-    ],
-    metadata: { source: "react_batch" },
-    idempotencyKey: "batch-key",
-  })
-  await getGenerationBatch("batch-1")
-  await cancelGenerationBatch("batch-1")
-  await retryGenerationBatchItem("batch-1", 2)
-  await listGenerationBatches()
-
-  assert.equal(calls[0].url, "/api/generation/batches")
-  assert.equal(
-    calls[0].init?.body,
-    JSON.stringify({
-      template_id: "pipeline_standard_base_v1",
-      items: [
-        {
-          input: { script: "Cats need clean water daily." },
-          metadata: { row: 1 },
-          idempotency_key: null,
-        },
-      ],
-      metadata: { source: "react_batch" },
-      idempotency_key: "batch-key",
-    })
-  )
-  assert.equal(
-    calls[1].url,
-    "/api/generation/batches/batch-1"
-  )
-  assert.equal(
-    calls[2].url,
-    "/api/generation/batches/batch-1"
-  )
-  assert.equal(calls[2].init?.method, "DELETE")
-  assert.equal(
-    calls[3].url,
-    "/api/generation/batches/batch-1/items/2/retry"
-  )
-  assert.equal(calls[3].init?.method, "POST")
-  assert.equal(calls[4].url, "/api/generation/batches")
-})
-
-test("script review APIs persist drafts and submit reviewed tasks", async () => {
-  const calls = installFetchMock({
-    default_languages: ["Chinese", "English"],
-    draft_set_id: "draft-set-1",
-    draft_sets: [],
-    drafts: [],
-    batch: { batch_id: "batch-1", items: [] },
-  })
-
-  await listScriptReviewTemplates()
-  await createScriptReviewDraftSet({
-    topics: ["Cat hydration"],
-    languages: ["English"],
-    scriptTemplateName: "Short Oral Script",
-    splitTemplateName: "Copy-Safe Scene Split",
-    scriptModel: "model-a",
-    splitModel: "model-b",
-    languageScriptTemplates: { English: "English prompt" },
-    languageScriptModels: { English: "model-en" },
-    metadata: { source: "react_script_review" },
-    idempotencyKey: "draft-key",
-  })
-  await listScriptReviewDraftSets()
-  await getScriptReviewDraftSet("draft-set-1")
-  await updateScriptReviewDraftSet("draft-set-1", {
-    drafts: [{ topic: "Cat hydration", selected_for_generation: true }],
-    metadata: { reviewed: true },
-  })
-  await submitScriptReviewDraftSetTasks("draft-set-1", {
-    drafts: [{ topic: "Cat hydration", selected_for_generation: true }],
-    baseParams: { frame_template: "1080x1920/image_default.html" },
-    languageTtsOverrides: {
-      English: {
-        tts_inference_mode: "fish",
-        tts_voice: "voice-en",
-        tts_speed: 1,
-      },
-    },
-    metadata: { source: "react_script_review_submit" },
-    idempotencyKey: "submit-key",
-  })
-
-  assert.equal(
-    calls[0].url,
-    "/api/generation/script-review/templates"
-  )
-  assert.equal(
-    calls[1].url,
-    "/api/generation/script-review/draft-sets"
-  )
-  assert.equal(
-    calls[1].init?.body,
-    JSON.stringify({
-      topics: ["Cat hydration"],
-      languages: ["English"],
-      project_id: null,
-      template_id: null,
-      script_template_name: "Short Oral Script",
-      split_template_name: "Copy-Safe Scene Split",
-      script_model: "model-a",
-      split_model: "model-b",
-      language_script_templates: { English: "English prompt" },
-      language_script_models: { English: "model-en" },
-      metadata: { source: "react_script_review" },
-      idempotency_key: "draft-key",
-    })
-  )
-  assert.equal(
-    calls[2].url,
-    "/api/generation/script-review/draft-sets"
-  )
-  assert.equal(
-    calls[3].url,
-    "/api/generation/script-review/draft-sets/draft-set-1"
-  )
-  assert.equal(calls[4].init?.method, "PUT")
-  assert.equal(
-    calls[4].init?.body,
-    JSON.stringify({
-      drafts: [{ topic: "Cat hydration", selected_for_generation: true }],
-      metadata: { reviewed: true },
-    })
-  )
-  assert.equal(
-    calls[5].url,
-    "/api/generation/script-review/draft-sets/draft-set-1/tasks"
-  )
-  assert.equal(
-    calls[5].init?.body,
-    JSON.stringify({
-      drafts: [{ topic: "Cat hydration", selected_for_generation: true }],
-      template_id: null,
-      base_params: { frame_template: "1080x1920/image_default.html" },
-      language_tts_overrides: {
-        English: {
-          tts_inference_mode: "fish",
-          tts_voice: "voice-en",
-          tts_speed: 1,
-        },
-      },
-      metadata: { source: "react_script_review_submit" },
-      idempotency_key: "submit-key",
-    })
-  )
 })

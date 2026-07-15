@@ -48,6 +48,4 @@ To mirror the Docker or Windows bundle, build React and let FastAPI serve it fro
 ./start_web.sh
 ```
 
-The legacy Streamlit surface is frozen and may only be started manually for migration diagnostics. It is no longer a default or production entry point.
-
 API documentation is available at `http://127.0.0.1:8000/docs` by default.

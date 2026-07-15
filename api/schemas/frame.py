@@ -25,7 +25,7 @@ class FrameRenderRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "template": "1080x1920/default.html",
+                "template": "1080x1920/image_default.html",
                 "title": "Sample Title",
                 "text": "This is a sample text for the frame.",
                 "image": "resources/example.png",
@@ -36,7 +36,7 @@ class FrameRenderRequest(BaseModel):
 
     template: str = Field(
         ...,
-        description="Template key (e.g., '1080x1920/default.html'). Can also be just filename (e.g., 'default.html') to use default size.",
+        description="Template key (e.g., '1080x1920/image_default.html'). Can also be just a filename (e.g., 'image_default.html') to use the default size.",
     )
     title: Optional[str] = Field(None, description="Frame title (optional)")
     text: str = Field(..., description="Frame text content")

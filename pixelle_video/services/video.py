@@ -689,7 +689,6 @@ class VideoService:
         bgm_volume: float = 0.3,
         loop: bool = True,
         fade_in: float = 0.0,
-        fade_out: float = 0.0,
     ) -> str:
         """
         Add background music to video
@@ -701,7 +700,6 @@ class VideoService:
             bgm_volume: BGM volume relative to original (0.0 to 1.0+)
             loop: If True, loop BGM to match video duration
             fade_in: BGM fade-in duration in seconds
-            fade_out: BGM fade-out duration in seconds (not yet implemented)
         
         Returns:
             Path to the output video file
@@ -732,12 +730,6 @@ class VideoService:
             # Apply fade effects if specified
             if fade_in > 0:
                 bgm_audio = bgm_audio.filter('afade', type='in', duration=fade_in)
-            # Note: fade_out at the end requires knowing the duration, which is complex
-            # For now, we skip fade_out in this implementation
-            # A more advanced implementation would need to:
-            # 1. Get video duration
-            # 2. Calculate fade_out start time
-            # 3. Apply fade filter with specific start_time
             
             # Mix original audio with BGM
             mixed_audio = ffmpeg.filter(

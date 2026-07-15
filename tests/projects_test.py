@@ -3,8 +3,6 @@ from pathlib import Path
 import pytest
 
 import pixelle_video.content.projects as projects
-import pixelle_video.content.store as content_store
-from pixelle_video.content.models import new_content_item
 
 
 @pytest.fixture(autouse=True)
@@ -13,7 +11,6 @@ def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(
         projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts))
     )
-    monkeypatch.setattr(content_store, "CONTENT_ITEMS_DIR", tmp_path / "content-items")
     yield
 
 
@@ -80,45 +77,16 @@ def test_cannot_set_archived_project_as_default():
     assert projects.set_default_project(first.project_id) is False
 
 
-# ---------------------------------------------------------------------------
-# 迁移（幂等 + content-items 改写）
-# ---------------------------------------------------------------------------
-
-
-def test_migration_creates_native_default_project():
-    projects.ensure_migrated()
+def test_default_project_is_created_for_new_installation():
+    projects.ensure_default_project()
     default_id, all_projects = projects.list_projects()
     assert len(all_projects) == 1
     assert all_projects[0].name == "PetWoods"
     assert default_id == all_projects[0].project_id
 
 
-def test_migration_is_idempotent():
-    projects.ensure_migrated()
-    projects.ensure_migrated()
+def test_default_project_creation_is_idempotent():
+    projects.ensure_default_project()
+    projects.ensure_default_project()
     _, all_projects = projects.list_projects()
     assert len(all_projects) == 1
-
-
-def test_migration_rewrites_legacy_content_items():
-    legacy = new_content_item(title="旧条目")  # project 默认 "PetWoods"
-    content_store.save_item(legacy)
-    assert legacy.project == "PetWoods"
-
-    projects.ensure_migrated()
-    default_id = projects.default_project_id()
-
-    reloaded = content_store.load_item(legacy.item_id)
-    assert reloaded.project == default_id
-    assert default_id not in (None, "PetWoods")
-
-
-def test_migration_leaves_valid_project_ids_untouched():
-    projects.ensure_migrated()
-    default_id = projects.default_project_id()
-    item = new_content_item(title="已归属条目", project=default_id)
-    content_store.save_item(item)
-
-    # 再次迁移是 no-op，不应改写已合法的 project
-    projects.ensure_migrated()
-    assert content_store.load_item(item.item_id).project == default_id

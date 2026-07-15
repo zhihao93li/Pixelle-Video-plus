@@ -37,14 +37,14 @@ const ProjectDetailPage = lazy(() =>
     default: module.ProjectDetailPage,
   }))
 )
+const ProductionTaskDetailPage = lazy(() =>
+  import("@/components/ProductionTaskDetailPage").then((module) => ({
+    default: module.ProductionTaskDetailPage,
+  }))
+)
 const RecipeDetailPage = lazy(() =>
   import("@/components/RecipeDetailPage").then((module) => ({
     default: module.RecipeDetailPage,
-  }))
-)
-const ScriptReviewWorkspace = lazy(() =>
-  import("@/components/ScriptReviewWorkspace").then((module) => ({
-    default: module.ScriptReviewWorkspace,
   }))
 )
 const SettingsWorkspace = lazy(() =>
@@ -55,11 +55,6 @@ const SettingsWorkspace = lazy(() =>
 const SpecialPipelinesWorkspace = lazy(() =>
   import("@/components/SpecialPipelinesWorkspace").then((module) => ({
     default: module.SpecialPipelinesWorkspace,
-  }))
-)
-const TaskCenterWorkspace = lazy(() =>
-  import("@/components/TaskCenterWorkspace").then((module) => ({
-    default: module.TaskCenterWorkspace,
   }))
 )
 const WorkbenchBoard = lazy(() =>
@@ -99,12 +94,20 @@ function renderRoute(route: ResolvedRoute): ReactNode {
           key={route.params.itemId}
         />
       )
+    case "board-task":
+      return (
+        <ProductionTaskDetailPage
+          key={route.params.taskId}
+          taskId={route.params.taskId}
+        />
+      )
     case "create":
       return <CreateGallery />
     case "create-generate":
       return (
         <GenerateWorkspace
           key={route.params.templateId}
+          remakeTaskId={route.query.get("remake")}
           templateId={route.params.templateId}
         />
       )
@@ -123,10 +126,6 @@ function renderRoute(route: ResolvedRoute): ReactNode {
           templateId={route.params.templateId}
         />
       )
-    case "create-script-review":
-      return <ScriptReviewWorkspace />
-    case "tasks":
-      return <TaskCenterWorkspace />
     case "library":
       return (
         <HistoryWorkspace

@@ -19,17 +19,13 @@ from pixelle_video.generation.schemas import (
     GenerationResult,
     GenerationTask,
     InputFieldSpec,
-    PipelineEntrySpec,
+    PipelineInputSpec,
     PipelineManifest,
     PipelineOutputSpec,
     PipelineStageSpec,
 )
-from pixelle_video.generation.service import (
-    GenerationService,
-    generation_request_from_legacy_video_request,
-)
+from pixelle_video.generation.service import GenerationService
 from pixelle_video.generation.templates import (
-    DraftingSpec,
     ProductionTemplate,
     ProductionTemplateError,
     ProductionTemplateRegistry,
@@ -46,13 +42,12 @@ __all__ = [
     "GenerationResult",
     "GenerationService",
     "GenerationTask",
-    "DraftingSpec",
     "ComposeRuntimeContext",
     "ComposeRuntimeError",
     "ComposeRuntimeRegistry",
     "ComposeRuntimeResult",
     "InputFieldSpec",
-    "PipelineEntrySpec",
+    "PipelineInputSpec",
     "PipelineManifest",
     "PipelineOutputSpec",
     "PipelineRegistry",
@@ -67,6 +62,5 @@ __all__ = [
     "build_base_production_template_registry",
     "build_pipeline_registry",
     "detect_available_generation_capabilities",
-    "generation_request_from_legacy_video_request",
     "render_with_compose_runtime",
 ]

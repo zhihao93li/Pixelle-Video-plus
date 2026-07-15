@@ -1,7 +1,7 @@
 from pixelle_video.generation.registry import PipelineRegistry, build_pipeline_registry
 from pixelle_video.generation.schemas import (
     InputFieldSpec,
-    PipelineEntrySpec,
+    PipelineInputSpec,
     PipelineManifest,
     PipelineOutputSpec,
     PipelineStageSpec,
@@ -22,13 +22,43 @@ def _field(
     )
 
 
+def _input(
+    *,
+    description: str,
+    required: list[InputFieldSpec],
+    optional: list[InputFieldSpec] | None = None,
+) -> PipelineInputSpec:
+    return PipelineInputSpec(
+        description=description,
+        required_fields=required,
+        optional_fields=optional or [],
+    )
+
+
+def _stage(
+    stage_id: str,
+    name: str,
+    setting_keys: list[str] | None = None,
+    *,
+    actor: str = "system",
+) -> PipelineStageSpec:
+    return PipelineStageSpec(
+        id=stage_id,
+        name=name,
+        setting_keys=setting_keys or [],
+        actor=actor,
+    )
+
+
 def build_default_pipeline_manifests() -> list[PipelineManifest]:
     return [
-        _standard_manifest(),
+        _topic_to_video_manifest(),
+        _script_to_video_manifest(),
         _codex_scene_video_manifest(),
-        _custom_manifest(),
         _asset_based_manifest(),
+        _topic_to_image_post_manifest(),
         _image_post_manifest(),
+        _topic_to_long_form_manifest(),
         _long_form_manifest(),
         _i2v_manifest(),
         _action_transfer_manifest(),
@@ -36,57 +66,8 @@ def build_default_pipeline_manifests() -> list[PipelineManifest]:
     ]
 
 
-def _codex_scene_video_manifest() -> PipelineManifest:
-    return PipelineManifest(
-        id="codex_scene_video",
-        name="Agent Scene Video",
-        description=(
-            "Compose a user-confirmed Agent storyboard and Agent-generated images into a video."
-        ),
-        category="agent",
-        default_entry="scenes",
-        access_scope="agent",
-        required_capabilities=["tts", "ffmpeg", "persistence"],
-        entries=[
-            PipelineEntrySpec(
-                id="scenes",
-                name="Confirmed scenes",
-                description="One to twenty user-confirmed scenes with existing image files.",
-                required_fields=[
-                    _field(
-                        "scenes",
-                        "array",
-                        "Confirmed scenes containing scene_id, narration, image_prompt, image_path, and optional duration",
-                    )
-                ],
-                optional_fields=[_field("title", description="Optional video title")],
-                start_stage="validate_scenes",
-            )
-        ],
-        stages=[
-            PipelineStageSpec(id="validate_scenes", name="Validate Confirmed Scenes"),
-            PipelineStageSpec(id="generate_tts", name="Generate TTS"),
-            PipelineStageSpec(id="compose_video", name="Compose Video"),
-            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
-        ],
-        outputs=_standard_outputs(),
-    )
-
-
 def build_default_pipeline_registry() -> PipelineRegistry:
     return build_pipeline_registry(build_default_pipeline_manifests())
-
-
-def _standard_stages() -> list[PipelineStageSpec]:
-    return [
-        PipelineStageSpec(id="generate_script", name="Generate Script"),
-        PipelineStageSpec(id="split_scenes", name="Split Scenes"),
-        PipelineStageSpec(id="generate_image_prompts", name="Generate Image Prompts"),
-        PipelineStageSpec(id="generate_tts", name="Generate TTS"),
-        PipelineStageSpec(id="generate_media", name="Generate Media"),
-        PipelineStageSpec(id="compose_video", name="Compose Video"),
-        PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
-    ]
 
 
 def _standard_outputs() -> list[PipelineOutputSpec]:
@@ -101,92 +82,214 @@ def _standard_outputs() -> list[PipelineOutputSpec]:
     ]
 
 
-def _standard_manifest() -> PipelineManifest:
+def _video_production_stages() -> list[PipelineStageSpec]:
+    return [
+        _stage(
+            "split_scenes",
+            "分镜",
+            ["split_template_name", "split_prompt", "split_provider_id", "split_model"],
+        ),
+        _stage(
+            "generate_image_prompts",
+            "视觉提示",
+            [
+                "prompt_prefix",
+                "image_prompt_visual_context",
+                "image_prompt_generation_rules",
+            ],
+        ),
+        _stage(
+            "generate_tts",
+            "配音",
+            [
+                "tts_inference_mode",
+                "tts_workflow",
+                "tts_voice",
+                "tts_speed",
+                "ref_audio",
+            ],
+        ),
+        _stage(
+            "generate_media",
+            "画面",
+            [
+                "image_provider",
+                "image_model",
+                "media_workflow",
+                "frame_template",
+                "template_params",
+                "media_width",
+                "media_height",
+            ],
+        ),
+        _stage(
+            "compose_video",
+            "合成",
+            ["compose_runtime", "bgm_path", "bgm_volume", "bgm_mode"],
+        ),
+        _stage("save_artifacts", "保存产物"),
+    ]
+
+
+def _topic_to_video_manifest() -> PipelineManifest:
     return PipelineManifest(
-        id="standard",
-        name="Standard Video Generation",
-        description="General-purpose video pipeline for topic-to-video or script-to-video flows.",
+        id="topic_to_video",
+        name="主题生成视频",
+        description="从主题起草文案，经人工确认后继续生成完整视频。",
         category="general",
-        default_entry="topic",
-        required_capabilities=["llm", "tts", "media", "ffmpeg", "persistence"],
-        entries=[
-            PipelineEntrySpec(
-                id="topic",
-                name="Topic",
-                description="Generate narrations from a topic, then produce the video.",
-                required_fields=[_field("topic", description="Topic or idea to turn into video")],
-                optional_fields=[
-                    _field("n_scenes", "integer", "Target scene count", 5),
-                    _field("title", description="Optional user-provided title"),
-                    _field("frame_template", description="Frame template path"),
-                    _field("tts_voice", description="TTS voice identifier"),
+        product_family="口播视频",
+        input=_input(
+            description="提供一个主题，由 Pixelle 起草并等待人工确认。",
+            required=[_field("topic", description="Topic or idea to turn into video")],
+            optional=[_field("title", description="Optional user-provided title")],
+        ),
+        stages=[
+            _stage(
+                "generate_script",
+                "写稿",
+                [
+                    "script_template_name",
+                    "script_prompt",
+                    "script_provider_id",
+                    "script_model",
+                    "language_script_models",
                 ],
-                start_stage="generate_script",
             ),
-            PipelineEntrySpec(
-                id="script",
-                name="Script",
-                description="Use a confirmed script and split it into scenes for video production.",
-                required_fields=[_field("script", description="Confirmed narration script")],
-                optional_fields=[
-                    _field("title", description="Optional user-provided title"),
-                    _field("split_mode", description="Script splitting mode", default="paragraph"),
-                    _field("frame_template", description="Frame template path"),
-                    _field("tts_voice", description="TTS voice identifier"),
-                ],
-                start_stage="split_scenes",
-                skipped_stages=["generate_script"],
-            ),
+            _stage("review_script", "确认文案", actor="user"),
+            *_video_production_stages(),
         ],
-        stages=_standard_stages(),
+        quick_setting_keys=[
+            "frame_template",
+            "tts_voice",
+            "tts_speed",
+            "bgm_path",
+        ],
         outputs=_standard_outputs(),
+        required_capabilities=["llm", "tts", "media", "ffmpeg", "persistence"],
+        launch_surfaces=["react", "agent", "batch"],
     )
 
 
-def _custom_manifest() -> PipelineManifest:
+def _script_to_video_manifest() -> PipelineManifest:
     return PipelineManifest(
-        id="custom",
-        name="Custom Template Pipeline",
-        description="Template-oriented script pipeline for project-specific video logic.",
-        category="custom",
-        default_entry="script",
-        required_capabilities=["llm", "tts", "media", "ffmpeg", "persistence"],
-        entries=[
-            PipelineEntrySpec(
-                id="script",
-                name="Script",
-                description="Use a script as the source content for custom video production.",
-                required_fields=[_field("script", description="Script text")],
-                optional_fields=[
-                    _field("custom_param_example", description="Custom pipeline parameter"),
-                    _field("frame_template", description="Frame template path"),
-                    _field("tts_voice", description="TTS voice identifier"),
-                    _field("bgm_path", description="Background music file path"),
-                ],
-                start_stage="process_content",
-                skipped_stages=["generate_script"],
-            )
-        ],
-        stages=[
-            PipelineStageSpec(id="process_content", name="Process Content"),
-            PipelineStageSpec(id="generate_title", name="Generate Title"),
-            PipelineStageSpec(id="generate_image_prompts", name="Generate Image Prompts"),
-            PipelineStageSpec(id="generate_tts", name="Generate TTS"),
-            PipelineStageSpec(id="generate_media", name="Generate Media"),
-            PipelineStageSpec(id="compose_video", name="Compose Video"),
-            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+        id="script_to_video",
+        name="文案生成视频",
+        description="从已经准备好的完整文案生成视频，不再经过写稿。",
+        category="general",
+        product_family="口播视频",
+        input=_input(
+            description="提供可直接用于生产的完整文案。",
+            required=[_field("script", description="Confirmed narration script")],
+            optional=[_field("title", description="Optional user-provided title")],
+        ),
+        stages=_video_production_stages(),
+        quick_setting_keys=[
+            "frame_template",
+            "tts_voice",
+            "tts_speed",
+            "bgm_path",
         ],
         outputs=_standard_outputs(),
+        required_capabilities=["llm", "tts", "media", "ffmpeg", "persistence"],
+        launch_surfaces=["react", "agent", "batch"],
+    )
+
+
+def _codex_scene_video_manifest() -> PipelineManifest:
+    return PipelineManifest(
+        id="codex_scene_video",
+        name="Agent 配图视频",
+        description="将用户确认的分镜和 Agent 生成图片合成为视频。",
+        category="agent",
+        product_family="Agent 创作",
+        access_scope="agent",
+        launch_surfaces=["agent"],
+        input=_input(
+            description="一到二十个已确认、图片齐全的分镜。",
+            required=[
+                _field(
+                    "scenes",
+                    "array",
+                    "Confirmed scenes containing scene_id, narration, image_prompt, image_path, and optional duration",
+                )
+            ],
+            optional=[_field("title", description="Optional video title")],
+        ),
+        stages=[
+            _stage("plan_scenes", "Agent 规划分镜", actor="agent"),
+            _stage("review_scenes", "确认分镜", actor="user"),
+            _stage(
+                "generate_agent_images",
+                "Agent 生成图片",
+                [
+                    "prompt_prefix",
+                    "image_prompt_visual_context",
+                    "image_prompt_generation_rules",
+                ],
+                actor="agent",
+            ),
+            _stage("validate_scenes", "校验已确认分镜"),
+            _stage(
+                "generate_tts",
+                "配音",
+                ["tts_inference_mode", "tts_workflow", "tts_voice", "tts_speed", "ref_audio"],
+            ),
+            _stage(
+                "compose_video",
+                "合成",
+                [
+                    "frame_template",
+                    "template_params",
+                    "compose_runtime",
+                    "bgm_path",
+                    "bgm_volume",
+                    "bgm_mode",
+                ],
+            ),
+            _stage("save_artifacts", "保存产物"),
+        ],
+        quick_setting_keys=[
+            "frame_template",
+            "tts_voice",
+            "tts_speed",
+            "bgm_path",
+        ],
+        outputs=_standard_outputs(),
+        required_capabilities=["tts", "ffmpeg", "persistence"],
     )
 
 
 def _asset_based_manifest() -> PipelineManifest:
     return PipelineManifest(
         id="asset_based",
-        name="Asset-Based Video Pipeline",
-        description="Marketing video pipeline that starts from user-provided image or video assets.",
+        name="素材生成视频",
+        description="分析用户上传的图片或视频素材并生成营销视频。",
         category="asset_based",
-        default_entry="assets",
+        product_family="素材创作",
+        input=_input(
+            description="提供图片或视频素材。",
+            required=[_field("assets", "array", "Image or video file paths")],
+            optional=[
+                _field("video_title", description="Video title"),
+                _field("intent", description="Marketing or creative intent"),
+                _field("duration", "integer", "Target duration in seconds", 30),
+                _field("source", description="Analysis workflow source", default="runninghub"),
+            ],
+        ),
+        stages=[
+            _stage("analyze_assets", "分析素材", ["source"]),
+            _stage("generate_script", "生成文案"),
+            _stage("match_assets", "匹配素材"),
+            _stage("generate_tts", "配音", ["voice_id", "tts_speed"]),
+            _stage(
+                "compose_video",
+                "合成",
+                ["compose_runtime", "bgm_path", "bgm_volume", "bgm_mode"],
+            ),
+            _stage("save_artifacts", "保存产物"),
+        ],
+        quick_setting_keys=["voice_id", "tts_speed", "bgm_path"],
+        outputs=_standard_outputs(),
         required_capabilities=[
             "llm",
             "tts",
@@ -195,67 +298,49 @@ def _asset_based_manifest() -> PipelineManifest:
             "ffmpeg",
             "persistence",
         ],
-        entries=[
-            PipelineEntrySpec(
-                id="assets",
-                name="Assets",
-                description="Use provided images or videos as the source material.",
-                required_fields=[_field("assets", "array", "Image or video file paths")],
-                optional_fields=[
-                    _field("video_title", description="Video title"),
-                    _field("intent", description="Marketing or creative intent"),
-                    _field("duration", "integer", "Target duration in seconds", 30),
-                    _field("source", description="Analysis workflow source", default="runninghub"),
-                    _field("bgm_path", description="Background music file path"),
-                ],
-                start_stage="analyze_assets",
-            )
-        ],
-        stages=[
-            PipelineStageSpec(id="analyze_assets", name="Analyze Assets"),
-            PipelineStageSpec(id="generate_script", name="Generate Script"),
-            PipelineStageSpec(id="match_assets", name="Match Assets"),
-            PipelineStageSpec(id="generate_tts", name="Generate TTS"),
-            PipelineStageSpec(id="compose_video", name="Compose Video"),
-            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
-        ],
-        outputs=_standard_outputs(),
+        launch_surfaces=["react", "batch"],
     )
 
 
 def _image_post_manifest() -> PipelineManifest:
     return PipelineManifest(
         id="image_post",
-        name="Xiaohongshu Image Post",
-        description="Turn a confirmed script into a cover + one image per scene line as an image-set post.",
+        name="图文图集",
+        description="把确认稿排成封面和逐页图片。",
         category="image_post",
-        default_entry="script",
-        required_capabilities=["llm", "media", "persistence"],
-        entries=[
-            PipelineEntrySpec(
-                id="script",
-                name="Script",
-                description="Use a confirmed script; each line becomes one page image.",
-                required_fields=[_field("script", description="Confirmed script (one line per page)")],
-                optional_fields=[
-                    _field("title", description="Optional cover title"),
-                    _field("split_mode", description="Pagination mode", default="line"),
-                    _field("frame_template", description="Page layout template path"),
-                    _field("media_workflow", description="Per-page image workflow"),
-                    _field("image_provider", description="Direct image provider"),
-                    _field("image_model", description="Direct image model"),
-                ],
-                start_stage="paginate",
-                skipped_stages=["generate_script"],
-            )
-        ],
+        product_family="图文内容",
+        input=_input(
+            description="提供按页拆分的完整文案。",
+            required=[_field("script", description="Confirmed script (one line per page)")],
+            optional=[
+                _field("title", description="Optional cover title"),
+                _field("split_mode", description="Pagination mode", default="line"),
+            ],
+        ),
         stages=[
-            PipelineStageSpec(id="paginate", name="Paginate Script"),
-            PipelineStageSpec(id="generate_image_prompts", name="Generate Image Prompts"),
-            PipelineStageSpec(id="generate_media", name="Generate Page Images"),
-            PipelineStageSpec(id="compose_pages", name="Compose Pages"),
-            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+            _stage("paginate", "分页", ["split_mode"]),
+            _stage(
+                "generate_image_prompts",
+                "视觉提示",
+                [
+                    "prompt_prefix",
+                    "image_prompt_visual_context",
+                    "image_prompt_generation_rules",
+                ],
+            ),
+            _stage(
+                "generate_media",
+                "每页配图",
+                ["image_provider", "image_model", "media_workflow", "source"],
+            ),
+            _stage(
+                "compose_pages",
+                "版式成图",
+                ["frame_template", "template_params", "media_width", "media_height"],
+            ),
+            _stage("save_artifacts", "保存产物"),
         ],
+        quick_setting_keys=["frame_template", "image_provider", "image_model"],
         outputs=[
             PipelineOutputSpec(kind="image", role="cover", description="Cover image"),
             PipelineOutputSpec(kind="image", role="page", description="Per-scene page image"),
@@ -266,45 +351,148 @@ def _image_post_manifest() -> PipelineManifest:
                 required=False,
             ),
         ],
+        required_capabilities=["llm", "media", "persistence"],
+        launch_surfaces=["react", "agent", "batch"],
+    )
+
+
+def _topic_to_image_post_manifest() -> PipelineManifest:
+    return PipelineManifest(
+        id="topic_to_image_post",
+        name="主题生成图文",
+        description="从主题生成图文文案，确认后分页，再确认分页并生成图集。",
+        category="image_post",
+        product_family="图文内容",
+        input=_input(
+            description="提供一个图文主题或创作方向。",
+            required=[_field("topic", description="Topic or idea for the image post")],
+            optional=[_field("title", description="Optional cover title")],
+        ),
+        stages=[
+            _stage(
+                "generate_script",
+                "写图文文案",
+                [
+                    "script_template_name",
+                    "script_prompt",
+                    "script_provider_id",
+                    "script_model",
+                    "language_script_models",
+                ],
+            ),
+            _stage("review_script", "确认图文文案", actor="user"),
+            _stage(
+                "paginate",
+                "分页",
+                ["split_template_name", "split_prompt", "split_provider_id", "split_model"],
+            ),
+            _stage("review_pages", "确认分页", actor="user"),
+            _stage(
+                "generate_image_prompts",
+                "视觉提示",
+                [
+                    "prompt_prefix",
+                    "image_prompt_visual_context",
+                    "image_prompt_generation_rules",
+                ],
+            ),
+            _stage(
+                "generate_media",
+                "每页配图",
+                ["image_provider", "image_model", "media_workflow", "source"],
+            ),
+            _stage(
+                "compose_pages",
+                "版式成图",
+                ["frame_template", "template_params", "media_width", "media_height"],
+            ),
+            _stage("save_artifacts", "保存产物"),
+        ],
+        quick_setting_keys=["frame_template", "image_provider", "image_model"],
+        outputs=[
+            PipelineOutputSpec(kind="image", role="cover", description="Cover image"),
+            PipelineOutputSpec(kind="image", role="page", description="Per-scene page image"),
+            PipelineOutputSpec(
+                kind="metadata",
+                role="caption",
+                description="Publish caption text",
+                required=False,
+            ),
+        ],
+        required_capabilities=["llm", "media", "persistence"],
+        launch_surfaces=["react", "agent", "batch"],
     )
 
 
 def _long_form_manifest() -> PipelineManifest:
     return PipelineManifest(
         id="long_form",
-        name="Long-form Article",
-        description="Expand a confirmed script into a structured long-form markdown article (LLM only).",
+        name="长文",
+        description="把确认稿扩写成结构化长文。",
         category="long_form",
-        default_entry="script",
-        required_capabilities=["llm", "persistence"],
-        entries=[
-            PipelineEntrySpec(
-                id="script",
-                name="Script",
-                description="Use a confirmed script; expand it into one long-form article per language.",
-                required_fields=[_field("script", description="Confirmed script to expand")],
-                optional_fields=[
-                    _field("title", description="Optional article title"),
-                    _field("language", description="Target language"),
-                    _field("long_form_prompt", description="Long-form writing prompt (must include {script})"),
-                    _field("word_count", "integer", "Target word count", 1800),
-                    _field("llm_model", description="Writing model (blank = system default)"),
-                ],
-                start_stage="write_article",
-                skipped_stages=["generate_script"],
-            )
-        ],
+        product_family="图文内容",
+        input=_input(
+            description="提供用于扩写的完整文案。",
+            required=[_field("script", description="Confirmed script to expand")],
+            optional=[
+                _field("title", description="Optional article title"),
+                _field("language", description="Target language"),
+            ],
+        ),
         stages=[
-            PipelineStageSpec(id="write_article", name="Write Article"),
-            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+            _stage(
+                "write_article",
+                "长文改写",
+                ["long_form_prompt", "word_count", "llm_provider_id", "llm_model"],
+            ),
+            _stage("save_artifacts", "保存产物"),
         ],
+        quick_setting_keys=["word_count", "llm_model"],
         outputs=[
             PipelineOutputSpec(
                 kind="metadata",
                 role="article",
                 description="Long-form markdown article",
-            ),
+            )
         ],
+        required_capabilities=["llm", "persistence"],
+        launch_surfaces=["react", "agent", "batch"],
+    )
+
+
+def _topic_to_long_form_manifest() -> PipelineManifest:
+    return PipelineManifest(
+        id="topic_to_long_form",
+        name="主题生成长文",
+        description="从主题直接生成结构化长文，产出后由用户检查。",
+        category="long_form",
+        product_family="图文内容",
+        input=_input(
+            description="提供一个长文主题或写作方向。",
+            required=[_field("topic", description="Topic or writing direction")],
+            optional=[
+                _field("title", description="Optional article title"),
+                _field("language", description="Target language"),
+            ],
+        ),
+        stages=[
+            _stage(
+                "write_article",
+                "生成长文",
+                ["long_form_prompt", "word_count", "llm_provider_id", "llm_model"],
+            ),
+            _stage("save_artifacts", "保存产物"),
+        ],
+        quick_setting_keys=["word_count", "llm_model"],
+        outputs=[
+            PipelineOutputSpec(
+                kind="metadata",
+                role="article",
+                description="Long-form markdown article",
+            )
+        ],
+        required_capabilities=["llm", "persistence"],
+        launch_surfaces=["react", "agent", "batch"],
     )
 
 
@@ -323,103 +511,86 @@ def _workflow_video_outputs() -> list[PipelineOutputSpec]:
 def _i2v_manifest() -> PipelineManifest:
     return PipelineManifest(
         id="i2v",
-        name="Image-to-Video Pipeline",
-        description="Workflow-driven video generation from an uploaded image and prompt.",
+        name="图片生成视频",
+        description="从一张图片和运动提示词生成视频片段。",
         category="workflow_video",
-        default_entry="assets",
-        required_capabilities=["media", "persistence"],
-        entries=[
-            PipelineEntrySpec(
-                id="assets",
-                name="Image and Prompt",
-                description="Use an uploaded image and prompt to generate a video clip.",
-                required_fields=[
-                    _field("assets", "array", "Image file paths"),
-                    _field("prompt", description="Image-to-video prompt"),
-                ],
-                optional_fields=[
-                    _field("title", description="Optional video title"),
-                    _field("workflow_key", description="Fixed workflow key"),
-                ],
-                start_stage="execute_workflow",
-            )
-        ],
+        product_family="素材创作",
+        input=_input(
+            description="提供图片和运动提示词。",
+            required=[
+                _field("assets", "array", "Image file paths"),
+                _field("prompt", description="Image-to-video prompt"),
+            ],
+            optional=[_field("title", description="Optional video title")],
+        ),
         stages=[
-            PipelineStageSpec(id="execute_workflow", name="Execute Workflow"),
-            PipelineStageSpec(id="download_video", name="Save Video"),
-            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+            _stage("execute_workflow", "生成视频", ["workflow_key", "source"]),
+            _stage("download_video", "保存视频"),
+            _stage("save_artifacts", "保存产物"),
         ],
         outputs=_workflow_video_outputs(),
+        required_capabilities=["media", "persistence"],
+        launch_surfaces=["react"],
     )
 
 
 def _action_transfer_manifest() -> PipelineManifest:
     return PipelineManifest(
         id="action_transfer",
-        name="Action Transfer Pipeline",
-        description="Workflow-driven video generation from a reference video, target image, and prompt.",
+        name="动作迁移",
+        description="把参考视频中的动作迁移到目标人物图。",
         category="workflow_video",
-        default_entry="video",
-        required_capabilities=["media", "persistence"],
-        entries=[
-            PipelineEntrySpec(
-                id="video",
-                name="Reference Video and Target Image",
-                description="Transfer action from a reference video to a target image.",
-                required_fields=[
-                    _field("reference_video", description="Reference action video path"),
-                    _field("assets", "array", "Target image file paths"),
-                    _field("prompt", description="Action transfer prompt"),
-                ],
-                optional_fields=[
-                    _field("duration", "integer", "Target duration in seconds"),
-                    _field("workflow_key", description="Fixed workflow key"),
-                ],
-                start_stage="execute_workflow",
-            )
-        ],
+        product_family="素材创作",
+        input=_input(
+            description="提供参考视频、目标人物图和提示词。",
+            required=[
+                _field("reference_video", description="Reference action video path"),
+                _field("assets", "array", "Target image file paths"),
+                _field("prompt", description="Action transfer prompt"),
+            ],
+            optional=[_field("duration", "integer", "Target duration in seconds")],
+        ),
         stages=[
-            PipelineStageSpec(id="execute_workflow", name="Execute Workflow"),
-            PipelineStageSpec(id="download_video", name="Save Video"),
-            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+            _stage("execute_workflow", "迁移动作", ["workflow_key", "source"]),
+            _stage("download_video", "保存视频"),
+            _stage("save_artifacts", "保存产物"),
         ],
         outputs=_workflow_video_outputs(),
+        required_capabilities=["media", "persistence"],
+        launch_surfaces=["react"],
     )
 
 
 def _digital_human_manifest() -> PipelineManifest:
     return PipelineManifest(
         id="digital_human",
-        name="Digital Human Pipeline",
-        description="Workflow-driven presenter video generation from character imagery and copy.",
+        name="数字人口播",
+        description="从人物形象和口播文案生成数字人视频。",
         category="workflow_video",
-        default_entry="assets",
-        required_capabilities=["tts", "media", "persistence"],
-        entries=[
-            PipelineEntrySpec(
-                id="assets",
-                name="Character Assets and Script",
-                description="Generate a presenter video from character image, product assets, and script.",
-                required_fields=[
-                    _field("character_assets", "array", "Character image file paths"),
-                ],
-                optional_fields=[
-                    _field("script", description="Presenter script or product copy"),
-                    _field("goods_assets", "array", "Product image file paths"),
-                    _field("goods_title", description="Product title"),
-                    _field("mode", description="digital or customize", default="customize"),
-                    _field("workflow_paths", "object", "Fixed workflow paths"),
-                    _field("tts_voice", description="TTS voice or Fish reference id"),
-                ],
-                start_stage="generate_tts",
-            )
-        ],
+        product_family="素材创作",
+        input=_input(
+            description="提供人物形象和口播内容。",
+            required=[_field("character_assets", "array", "Character image file paths")],
+            optional=[
+                _field("script", description="Presenter script or product copy"),
+                _field("goods_assets", "array", "Product image file paths"),
+                _field("goods_title", description="Product title"),
+                _field("mode", description="digital or customize", default="customize"),
+            ],
+        ),
         stages=[
-            PipelineStageSpec(id="compose_image", name="Compose Presenter Image"),
-            PipelineStageSpec(id="generate_tts", name="Generate TTS"),
-            PipelineStageSpec(id="execute_workflow", name="Execute Workflow"),
-            PipelineStageSpec(id="download_video", name="Save Video"),
-            PipelineStageSpec(id="save_artifacts", name="Save Artifacts"),
+            _stage("compose_image", "合成人物画面"),
+            _stage(
+                "generate_tts",
+                "配音",
+                ["tts_inference_mode", "tts_workflow", "tts_voice", "tts_speed"],
+            ),
+            _stage("execute_workflow", "生成数字人", ["workflow_key"]),
+            _stage("download_video", "保存视频"),
+            _stage("save_artifacts", "保存产物"),
         ],
+        quick_setting_keys=["tts_voice", "tts_speed"],
         outputs=_workflow_video_outputs(),
+        required_capabilities=["tts", "media", "persistence"],
+        launch_surfaces=["react"],
     )

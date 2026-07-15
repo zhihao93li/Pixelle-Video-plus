@@ -6,10 +6,8 @@ from pixelle_video.generation import build_default_production_template_registry,
 from pixelle_video.generation.template_overrides import (
     TemplateOverrideError,
     load_all_enabled,
-    load_drafting,
     load_enabled,
     load_overrides,
-    save_drafting,
     save_enabled,
     save_overrides,
     validate_overrides,
@@ -49,12 +47,23 @@ def test_validate_rejects_wrong_type():
         validate_overrides({"tts_speed": "fast"}, allowed_user_params=_allowed_params())
 
 
-def test_validate_drops_empty_values():
+def test_validate_distinguishes_explicit_clear_from_reset():
     cleaned = validate_overrides(
-        {"tts_voice": "", "tts_speed": 1.5},
+        {"bgm_path": "", "compose_runtime": "", "tts_speed": 1.5},
         allowed_user_params=_allowed_params(),
     )
-    assert cleaned == {"tts_speed": 1.5}
+    assert cleaned == {"bgm_path": "", "tts_speed": 1.5}
+
+
+def test_explicit_clear_survives_persistence_and_registry_merge(isolated_overrides):
+    save_overrides(
+        TEMPLATE_ID,
+        validate_overrides({"bgm_path": ""}, allowed_user_params=_allowed_params()),
+    )
+    assert load_overrides(TEMPLATE_ID) == {"bgm_path": ""}
+    assert (
+        build_default_production_template_registry().get(TEMPLATE_ID).fixed_params["bgm_path"] == ""
+    )
 
 
 def test_validate_accepts_reference_audio_for_recipe_defaults():
@@ -112,16 +121,6 @@ def test_compile_request_uses_override(isolated_overrides):
     registry = build_default_production_template_registry()
     request = registry.compile_request(TEMPLATE_ID, input={"script": "测试文案"})
     assert request.params["tts_voice"] == "zh-CN-XiaoxiaoNeural"
-
-
-def test_legacy_flat_format_still_parses(isolated_overrides):
-    # 旧扁平格式（无 overrides/enabled 包裹）向后兼容
-    isolated_overrides.write_text(
-        json.dumps({TEMPLATE_ID: {"tts_voice": "legacy-voice"}}),
-        encoding="utf-8",
-    )
-    registry = build_default_production_template_registry()
-    assert registry.get(TEMPLATE_ID).fixed_params["tts_voice"] == "legacy-voice"
 
 
 def test_validate_rejects_unknown_workflow_key():
@@ -237,26 +236,49 @@ def test_disabled_override_disables_builtin_template(isolated_overrides):
     assert registry.get(TEMPLATE_ID).enabled is False
 
 
-def test_drafting_config_is_recipe_owned_and_preserves_other_overrides(isolated_overrides):
-    save_overrides(TEMPLATE_ID, {"tts_speed": 1.2})
-    save_drafting(
-        TEMPLATE_ID,
-        {
-            "script_template_name": "Short Oral Script",
-            "split_template_name": "Copy-Safe Scene Split",
-            "script_model": "writer-model",
-            "split_model": "splitter-model",
-            "language_script_models": {"English": "writer-en"},
-        },
+def test_writing_and_scene_settings_share_the_generation_config(isolated_overrides):
+    topic_template_id = "pipeline_topic_to_video_base_v1"
+    allowed = (
+        build_default_production_template_registry().get(topic_template_id).allowed_user_params
+    )
+    save_overrides(
+        topic_template_id,
+        validate_overrides(
+            {
+                "tts_speed": 1.2,
+                "script_template_name": "Short Oral Script",
+                "split_template_name": "Copy-Safe Scene Split",
+                "script_model": "writer-model",
+                "script_prompt": "围绕 {topic} 写一段可直接口播的文案。",
+                "split_model": "splitter-model",
+                "split_prompt": "把 {Content} 按画面变化拆成分镜。",
+                "language_script_models": {
+                    "English": {"provider_id": "aihubmix", "model": "writer-en"}
+                },
+            },
+            allowed_user_params=allowed,
+        ),
     )
 
     registry = build_default_production_template_registry()
-    drafting = registry.get(TEMPLATE_ID).drafting
-    assert drafting.script_model == "writer-model"
-    assert drafting.language_script_models == {"English": "writer-en"}
-    assert load_overrides(TEMPLATE_ID) == {"tts_speed": 1.2}
-    assert load_drafting(TEMPLATE_ID)["split_model"] == "splitter-model"
+    params = registry.get(topic_template_id).fixed_params
+    assert params["script_model"] == "writer-model"
+    assert params["script_prompt"] == "围绕 {topic} 写一段可直接口播的文案。"
+    assert params["split_model"] == "splitter-model"
+    assert params["split_prompt"] == "把 {Content} 按画面变化拆成分镜。"
+    assert params["language_script_models"] == {
+        "English": {"provider_id": "aihubmix", "model": "writer-en"}
+    }
+    assert load_overrides(topic_template_id)["tts_speed"] == 1.2
 
-    save_drafting(TEMPLATE_ID, None)
-    assert load_drafting(TEMPLATE_ID) is None
-    assert load_overrides(TEMPLATE_ID) == {"tts_speed": 1.2}
+
+def test_direct_prompt_overrides_require_content_placeholders():
+    allowed = (
+        build_default_production_template_registry()
+        .get("pipeline_topic_to_video_base_v1")
+        .allowed_user_params
+    )
+    with pytest.raises(TemplateOverrideError, match="topic"):
+        validate_overrides({"script_prompt": "写一段文案"}, allowed_user_params=allowed)
+    with pytest.raises(TemplateOverrideError, match="正文占位符"):
+        validate_overrides({"split_prompt": "拆成分镜"}, allowed_user_params=allowed)

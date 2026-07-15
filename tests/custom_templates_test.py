@@ -15,12 +15,8 @@ SOURCE_TEMPLATE_ID = "pipeline_standard_base_v1"
 def isolated_storage(tmp_path, monkeypatch):
     custom_path = tmp_path / "production-templates-custom.json"
     overrides_path = tmp_path / "production-template-overrides.json"
-    monkeypatch.setattr(
-        custom_templates, "_custom_templates_path", lambda: str(custom_path)
-    )
-    monkeypatch.setattr(
-        template_overrides, "_overrides_path", lambda: str(overrides_path)
-    )
+    monkeypatch.setattr(custom_templates, "_custom_templates_path", lambda: str(custom_path))
+    monkeypatch.setattr(template_overrides, "_overrides_path", lambda: str(overrides_path))
     yield
 
 
@@ -49,9 +45,7 @@ def test_clone_appears_in_template_list():
 
 def test_clone_applies_fixed_params_patch():
     client = TestClient(app)
-    response = _clone(
-        client, fixed_params_patch={"tts_voice": "zh-CN-XiaoxiaoNeural"}
-    )
+    response = _clone(client, fixed_params_patch={"tts_voice": "zh-CN-XiaoxiaoNeural"})
     assert response.status_code == 200, response.text
     assert response.json()["fixed_params"]["tts_voice"] == "zh-CN-XiaoxiaoNeural"
 
@@ -85,7 +79,7 @@ def test_clone_can_be_compiled():
     request = registry.compile_request(
         "petwoods_xhs_daily_copy", input={"script": "克隆模板出片测试"}
     )
-    assert request.pipeline_id == "standard"
+    assert request.pipeline_id == "script_to_video"
     assert request.input == {"script": "克隆模板出片测试"}
 
 

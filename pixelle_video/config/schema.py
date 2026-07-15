@@ -23,12 +23,58 @@ from pydantic import BaseModel, Field, model_validator
 AIHUBMIX_BASE_URL = "https://aihubmix.com/v1"
 
 
+class LLMProviderConfig(BaseModel):
+    """One real LLM connection, with its own credentials and request path."""
+
+    name: str = ""
+    provider_type: Literal[
+        "aihubmix",
+        "openai",
+        "aliyun_bailian",
+        "volcengine_ark",
+        "custom_openai",
+    ] = "custom_openai"
+    enabled: bool = True
+    api_key: str = ""
+    base_url: str = ""
+    default_model: str = ""
+
+
 class LLMConfig(BaseModel):
-    """LLM configuration"""
+    """LLM connections plus legacy fields retained for config migration."""
 
     api_key: str = Field(default="", description="LLM API Key")
     base_url: str = Field(default=AIHUBMIX_BASE_URL, description="LLM API Base URL")
     model: str = Field(default="", description="LLM Model Name")
+    default_provider_id: str = ""
+    providers: dict[str, LLMProviderConfig] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def migrate_legacy_connection(self):
+        if not self.providers and (self.api_key or self.model):
+            self.providers["aihubmix"] = LLMProviderConfig(
+                name="AiHubMix",
+                provider_type="aihubmix",
+                enabled=True,
+                api_key=self.api_key,
+                base_url=self.base_url or AIHUBMIX_BASE_URL,
+                default_model=self.model,
+            )
+            self.default_provider_id = "aihubmix"
+        elif self.providers and self.default_provider_id not in self.providers:
+            self.default_provider_id = next(iter(self.providers))
+        return self
+
+    def active_provider(self, provider_id: str | None = None) -> tuple[str, LLMProviderConfig]:
+        selected_id = provider_id or self.default_provider_id
+        provider = self.providers.get(selected_id)
+        if provider is None:
+            raise ValueError(f"LLM 服务不存在：{selected_id or '未设置'}")
+        if not provider.enabled:
+            raise ValueError(f"LLM 服务未启用：{provider.name or selected_id}")
+        if not provider.api_key.strip() or not provider.base_url.strip():
+            raise ValueError(f"LLM 服务配置不完整：{provider.name or selected_id}")
+        return selected_id, provider
 
 
 class TTSLocalConfig(BaseModel):
@@ -112,29 +158,6 @@ class TTSSubConfig(BaseModel):
     fish_audio: TTSFishAudioConfig = Field(
         default_factory=TTSFishAudioConfig, description="Fish Audio TTS configuration"
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_legacy_default_workflow(cls, data):
-        """Move legacy tts.default_workflow into tts.comfyui.default_workflow."""
-        if not isinstance(data, dict):
-            return data
-
-        legacy_workflow = data.get("default_workflow")
-        if legacy_workflow:
-            data = dict(data)
-            comfyui_config = dict(data.get("comfyui") or {})
-            comfyui_config.setdefault("default_workflow", legacy_workflow)
-            data["comfyui"] = comfyui_config
-
-        return data
-
-    # Backward compatibility: keep default_workflow at top level
-    @property
-    def default_workflow(self) -> Optional[str]:
-        """Get default workflow (for backward compatibility)"""
-        return self.comfyui.default_workflow
-
 
 class ImageSubConfig(BaseModel):
     """Image-specific configuration (under comfyui.image)"""
@@ -224,7 +247,7 @@ class TemplateConfig(BaseModel):
     """Template configuration"""
 
     default_template: str = Field(
-        default="1080x1920/default.html", description="Default frame template path"
+        default="1080x1920/image_default.html", description="Default frame template path"
     )
 
 
@@ -279,19 +302,16 @@ class PixelleVideoConfig(BaseModel):
 
     def is_llm_configured(self) -> bool:
         """Check if LLM is properly configured"""
-        return bool(
-            self.llm.api_key
-            and self.llm.api_key.strip()
-            and self.llm.base_url
-            and self.llm.base_url.strip()
-            and self.llm.model
-            and self.llm.model.strip()
-        )
+        try:
+            _, provider = self.llm.active_provider()
+        except ValueError:
+            return False
+        return bool(provider.default_model.strip())
 
     def validate_required(self) -> bool:
         """Validate required configuration"""
         return self.is_llm_configured()
 
     def to_dict(self) -> dict:
-        """Convert to dictionary (for backward compatibility)"""
+        """Convert the validated configuration to a plain dictionary."""
         return self.model_dump()

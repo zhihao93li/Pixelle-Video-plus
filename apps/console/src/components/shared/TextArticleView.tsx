@@ -45,7 +45,7 @@ export function TextArticleView({
 
   return (
     <div className="flex flex-col gap-2">
-      <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 font-mono text-xs leading-5">
+      <pre className="max-h-96 overflow-y-auto rounded-md border bg-muted/30 p-3 font-mono text-xs leading-5 whitespace-pre-wrap">
         {article}
       </pre>
       <div className="flex items-center justify-between gap-2">

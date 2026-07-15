@@ -8,7 +8,6 @@ from typing import Callable
 from pixelle_video.generation.quality import build_asset_manifest, run_quality_review
 from pixelle_video.generation.registry import PipelineRegistry
 from pixelle_video.generation.schemas import (
-    EntryId,
     GenerationArtifact,
     GenerationError,
     GenerationProgress,
@@ -38,7 +37,7 @@ class GenerationService:
         self._idempotency_index: dict[str, str] = {}
         self._progress_callbacks: dict[str, Callable[[GenerationTask], None]] = {}
         self._storage_dir = storage_dir
-        self._surface = "agent" if surface == "codex" else surface
+        self._surface = surface
         self._shutting_down = False
         self._restore_tasks()
 
@@ -55,13 +54,12 @@ class GenerationService:
         self._validate_request(request, surface=surface)
 
         task_id = self._task_id_factory()
-        entry_spec = self.pipeline_registry.get_manifest(request.pipeline_id).entry(request.entry)
+        manifest = self.pipeline_registry.get_manifest(request.pipeline_id)
         task = GenerationTask(
             task_id=task_id,
             pipeline_id=request.pipeline_id,
-            entry=request.entry,
             request=request,
-            progress=GenerationProgress(stage=entry_spec.start_stage, percentage=0.0),
+            progress=GenerationProgress(stage=manifest.stages[0].id, percentage=0.0),
         )
         self._tasks[task_id] = task
         self._persist_task(task)
@@ -127,23 +125,20 @@ class GenerationService:
         except KeyError:
             raise ValueError(f"Unknown pipeline: {request.pipeline_id}") from None
 
-        effective_surface = "agent" if surface == "codex" else (surface or self._surface)
+        effective_surface = surface or self._surface
         if manifest.access_scope == "agent" and effective_surface != "agent":
             raise ValueError(f"Pipeline {request.pipeline_id!r} is only available through an Agent")
 
-        try:
-            entry = manifest.entry(request.entry)
-        except KeyError:
-            raise ValueError(
-                f"Pipeline {request.pipeline_id!r} does not support entry {request.entry!r}"
-            ) from None
-
-        missing = [field.name for field in entry.required_fields if field.name not in request.input]
+        missing = [
+            field.name
+            for field in manifest.input.required_fields
+            if field.name not in request.input or request.input[field.name] in (None, "", [])
+        ]
         if missing:
             fields = ", ".join(missing)
             raise ValueError(
-                f"Generation request for pipeline {request.pipeline_id!r} entry "
-                f"{request.entry!r} is missing required field(s): {fields}"
+                f"Generation request for pipeline {request.pipeline_id!r} "
+                f"is missing required field(s): {fields}"
             )
 
         if self.pipeline_registry.get_pipeline(request.pipeline_id) is None:
@@ -187,26 +182,71 @@ class GenerationService:
 
     def _build_pipeline_kwargs(self, request: GenerationRequest) -> dict:
         params = dict(request.params)
+        # Route selection is structural; runtime params cannot override it.
+        params.pop("mode", None)
 
-        if request.entry == "topic":
-            return {
-                "text": request.input["topic"],
-                "mode": params.pop("mode", "generate"),
+        if request.pipeline_id == "topic_to_video":
+            confirmed_script = request.metadata.get("confirmed_script")
+            if not isinstance(confirmed_script, str) or not confirmed_script.strip():
+                raise ValueError(
+                    "topic_to_video must complete writing and human confirmation before production"
+                )
+            kwargs = {
+                "text": confirmed_script,
                 **params,
+                "_split_language": request.metadata.get("language") or "Chinese",
+                "_split_topic": request.input["topic"],
             }
+            if request.metadata.get("confirmed_scenes"):
+                kwargs["_confirmed_scenes"] = request.metadata["confirmed_scenes"]
+            return kwargs
 
-        if request.entry == "script":
+        if request.pipeline_id == "topic_to_image_post":
+            confirmed_script = request.metadata.get("confirmed_script")
+            if not isinstance(confirmed_script, str) or not confirmed_script.strip():
+                raise ValueError(
+                    "topic_to_image_post must complete writing and human confirmation before production"
+                )
+            page_text = request.metadata.get("confirmed_scenes")
+            text = (
+                "\n".join(str(page).strip() for page in page_text if str(page).strip())
+                if isinstance(page_text, list)
+                else confirmed_script
+            )
+            return {"text": text, **params}
+
+        if request.pipeline_id == "image_post":
+            return {"text": request.input["script"], **params}
+
+        if request.pipeline_id == "script_to_video":
             kwargs = {
                 "text": request.input["script"],
                 **params,
+                **(
+                    {
+                        "_split_language": request.metadata.get("language") or "Chinese",
+                        "_split_topic": request.metadata.get("topic") or "",
+                    }
+                    if request.pipeline_id == "script_to_video"
+                    else {}
+                ),
             }
-            if request.pipeline_id == "standard":
-                kwargs.setdefault("mode", "fixed")
+            if request.metadata.get("confirmed_scenes"):
+                kwargs["_confirmed_scenes"] = request.metadata["confirmed_scenes"]
             return kwargs
 
-        if request.entry == "assets":
+        if request.pipeline_id == "topic_to_long_form":
             return {
-                **request.input,
+                "text": request.input["topic"],
+                **({"title": request.input["title"]} if request.input.get("title") else {}),
+                **params,
+            }
+
+        if request.pipeline_id == "long_form":
+            return {
+                "text": request.input["script"],
+                **({"title": request.input["title"]} if request.input.get("title") else {}),
+                **({"language": request.input["language"]} if request.input.get("language") else {}),
                 **params,
             }
 
@@ -236,6 +276,11 @@ class GenerationService:
 
     def _notify_progress(self, task: GenerationTask) -> None:
         self._persist_task(task)
+        if task.request.metadata.get("production_task_id"):
+            from pixelle_video.content.production_tasks import sync_generation_task
+
+            manifest = self.pipeline_registry.get_manifest(task.pipeline_id)
+            sync_generation_task(task, manifest)
         callback = self._progress_callbacks.get(task.task_id)
         if callback:
             callback(task)
@@ -315,7 +360,6 @@ class GenerationService:
         return GenerationResult(
             task_id=task.task_id,
             pipeline_id=task.pipeline_id,
-            entry=task.entry,
             artifact_type="text",
             artifacts=[artifact],
             primary_video=None,
@@ -359,7 +403,6 @@ class GenerationService:
         return GenerationResult(
             task_id=task.task_id,
             pipeline_id=task.pipeline_id,
-            entry=task.entry,
             artifact_type="image_set",
             artifacts=artifacts,
             primary_video=None,
@@ -414,7 +457,6 @@ class GenerationService:
         return GenerationResult(
             task_id=task.task_id,
             pipeline_id=task.pipeline_id,
-            entry=task.entry,
             artifacts=[primary_video],
             primary_video=primary_video,
             duration=duration,
@@ -455,6 +497,12 @@ class GenerationService:
                     "retryable": exc.retryable,
                 },
             )
+        if isinstance(exc, (KeyError, TypeError, ValueError)):
+            return GenerationError(
+                layer="input",
+                message=str(exc),
+                exception_type=type(exc).__name__,
+            )
         return GenerationError(
             layer="runtime",
             message=str(exc),
@@ -465,56 +513,3 @@ class GenerationService:
         if isinstance(pipeline_result, dict):
             return pipeline_result.get(field)
         return getattr(pipeline_result, field, None)
-
-
-def generation_request_from_legacy_video_request(request_body) -> GenerationRequest:
-    entry: EntryId = "topic" if request_body.mode == "generate" else "script"
-    input_payload = (
-        {"topic": request_body.text} if entry == "topic" else {"script": request_body.text}
-    )
-
-    params = {
-        "title": request_body.title,
-        "n_scenes": request_body.n_scenes,
-        "min_narration_words": request_body.min_narration_words,
-        "max_narration_words": request_body.max_narration_words,
-        "min_image_prompt_words": request_body.min_image_prompt_words,
-        "max_image_prompt_words": request_body.max_image_prompt_words,
-        "media_workflow": request_body.media_workflow,
-        "video_fps": request_body.video_fps,
-        "frame_template": request_body.frame_template,
-        "template_params": request_body.template_params,
-        "prompt_prefix": request_body.prompt_prefix,
-        "image_prompt_visual_context": request_body.image_prompt_visual_context,
-        "image_prompt_generation_rules": request_body.image_prompt_generation_rules,
-        "bgm_path": request_body.bgm_path,
-        "bgm_volume": request_body.bgm_volume,
-        "split_mode": request_body.split_mode,
-    }
-
-    if request_body.frame_template:
-        from pixelle_video.services.frame_html import HTMLFrameGenerator
-        from pixelle_video.utils.template_util import resolve_template_path
-
-        template_path = resolve_template_path(request_body.frame_template)
-        media_width, media_height = HTMLFrameGenerator(template_path).get_media_size()
-        params["media_width"] = media_width
-        params["media_height"] = media_height
-
-    optional_params = {
-        "tts_inference_mode": request_body.tts_inference_mode,
-        "tts_speed": request_body.tts_speed,
-        "tts_workflow": request_body.tts_workflow,
-        "ref_audio": request_body.ref_audio,
-        "voice_id": request_body.voice_id,
-    }
-    params.update({key: value for key, value in optional_params.items() if value is not None})
-    params = {key: value for key, value in params.items() if value is not None}
-
-    return GenerationRequest(
-        pipeline_id="standard",
-        entry=entry,
-        input=input_payload,
-        params=params,
-        metadata={"source_api": "video.generate.async"},
-    )

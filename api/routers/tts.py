@@ -37,7 +37,7 @@ async def tts_synthesize(
     - **text**: Text to synthesize
     - **workflow**: TTS workflow key (optional, uses default if not specified)
     - **ref_audio**: Reference audio for voice cloning (optional)
-    - **voice_id**: (Deprecated) Voice ID for legacy compatibility
+    - **voice_id**: Voice ID for the selected TTS provider
 
     Returns path to generated audio file and duration.
 

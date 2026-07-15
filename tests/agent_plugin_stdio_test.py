@@ -75,6 +75,11 @@ async def test_agent_plugin_stdio_initializes_lists_tools_and_reads_capabilities
     names = {tool.name for tool in tools}
     assert "get_capabilities" in names
     assert "submit_scene_manifest" in names
-    assert "confirm_item" not in names
+    assert "confirm_pending_item" in names
+    assert "edit_pending_review" in names
+    assert "regenerate_pending_review" in names
+    assert "add_topics" not in names
+    assert "draft_items" not in names
+    assert "produce_item" not in names
     assert result.data["authenticated"] is True
-    assert result.data["tool_surface_version"] == "1.0"
+    assert result.data["tool_surface_version"] == "1.2"

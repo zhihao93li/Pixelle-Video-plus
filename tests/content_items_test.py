@@ -1,15 +1,12 @@
-import json
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-import api.routers.content_items as content_items_router
 import pixelle_video.content.projects as projects
 import pixelle_video.content.store as content_store
 import pixelle_video.generation.task_store as task_store
 from api.app import app
-from api.dependencies import get_pixelle_video
 from pixelle_video.generation.schemas import (
     GenerationError,
     GenerationProgress,
@@ -21,32 +18,9 @@ from pixelle_video.generation.task_store import save_generation_task
 BASE = "/api/content-items"
 
 
-class FakeHistory:
-    async def get_task_list(self, page=1, page_size=20, status=None, **kwargs):
-        return {"tasks": [{"task_id": "task-1", "title": "历史成片作品", "status": "completed"}]}
-
-
-class FakePublish:
-    async def load_publish_record(self, task_id):
-        return None
-
-
-class FakePixelleVideoCore:
-    def __init__(self):
-        self.history = FakeHistory()
-        self.publish = FakePublish()
-
-
-async def get_fake_core():
-    return FakePixelleVideoCore()
-
-
 @pytest.fixture(autouse=True)
 def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(content_store, "CONTENT_ITEMS_DIR", tmp_path / "content-items")
-    monkeypatch.setattr(
-        content_items_router, "SCRIPT_REVIEW_DIR", tmp_path / "script-review-drafts"
-    )
     # 隔离项目存储；首次读取会创建本地原生默认项目。
     monkeypatch.setattr(projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts)))
     monkeypatch.setattr(task_store, "GENERATION_TASK_DIR", tmp_path / "generation-tasks")
@@ -56,38 +30,6 @@ def isolated_storage(tmp_path, monkeypatch):
 @pytest.fixture
 def client():
     return TestClient(app)
-
-
-def _write_sample_draft_set(monkeypatch, tmp_dir):
-    directory = tmp_dir
-    directory.mkdir(parents=True, exist_ok=True)
-    draft_set = {
-        "draft_set_id": "ds-1",
-        "status": "drafted",
-        "created_at": "2026-07-01T10:00:00",
-        "updated_at": "2026-07-01T10:00:00",
-        "topics": ["猫咪为什么不爱喝水"],
-        "languages": ["Chinese"],
-        "drafts": [
-            {
-                "topic": "猫咪为什么不爱喝水",
-                "title": "猫咪不喝水怎么办",
-                "index": 1,
-                "selected_languages": ["Chinese"],
-                "language_drafts": {
-                    "Chinese": {
-                        "title": "猫咪不喝水怎么办",
-                        "script": "第一段。第二段。",
-                        "narrations": ["第一段。", "第二段。"],
-                    }
-                },
-            }
-        ],
-        "submissions": [],
-    }
-    (directory / "ds-1.json").write_text(
-        json.dumps(draft_set, ensure_ascii=False), encoding="utf-8"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +173,6 @@ def test_producing_item_reconciles_from_persisted_completed_tasks(client):
         f"{BASE}/{item['item_id']}",
         json={"links": {"task_ids": [task.task_id], "batch_ids": [batch_id]}},
     )
-
     reconciled = client.get(f"{BASE}/{item['item_id']}").json()
     assert reconciled["status"] == "produced"
     assert reconciled["events"][-1]["type"] == "produced"
@@ -260,13 +201,11 @@ def test_failed_production_returns_to_confirmed_with_visible_error(client):
 def _generation_task(task_id: str, batch_id: str, status: str) -> GenerationTask:
     return GenerationTask(
         task_id=task_id,
-        pipeline_id="standard",
-        entry="script",
+        pipeline_id="script_to_video",
         status=status,
         progress=GenerationProgress(stage=status, percentage=100),
         request=GenerationRequest(
-            pipeline_id="standard",
-            entry="script",
+            pipeline_id="script_to_video",
             input={"script": "test"},
             metadata={"batch_id": batch_id},
         ),
@@ -276,27 +215,3 @@ def _generation_task(task_id: str, batch_id: str, status: str) -> GenerationTask
             else None
         ),
     )
-
-
-# ---------------------------------------------------------------------------
-# Import existing (幂等)
-# ---------------------------------------------------------------------------
-
-
-def test_import_existing_is_idempotent(client, monkeypatch, tmp_path):
-    _write_sample_draft_set(monkeypatch, tmp_path / "script-review-drafts")
-    app.dependency_overrides[get_pixelle_video] = get_fake_core
-    try:
-        first = client.post(f"{BASE}/import-existing")
-        assert first.status_code == 200, first.text
-        assert first.json()["created"] == 2  # 1 draft + 1 history task
-
-        listing = client.get(BASE).json()
-        statuses = {item["title"]: item["status"] for item in listing}
-        assert statuses["猫咪不喝水怎么办"] == "pending_review"
-        assert statuses["历史成片作品"] == "produced"
-
-        second = client.post(f"{BASE}/import-existing")
-        assert second.json()["created"] == 0
-    finally:
-        app.dependency_overrides.clear()

@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 /**
  * 画面模板图选网格：预览图直接作为选择器，点图即选。
  * inline 渲染（弹层白名单锁定，禁止做成 Dialog/Sheet）；无预览图的模板显示名字卡。
- * 三处共用：生成页「每镜画面」、配方详情页 frame_template 零件、出片面板专家覆盖。
+ * 三处共用：生成页「每镜画面」、模板详情页 frame_template 零件、出片面板专家覆盖。
  */
 
 const ORIENTATION_LABELS: Record<string, string> = {
@@ -26,13 +26,13 @@ export function FrameTemplatePicker({
   value,
   onChange,
   allowDefault = false,
-  defaultLabel = "配方默认",
+  defaultLabel = "模板默认",
 }: {
   templates: ResourceTemplate[]
-  /** 当前选中模板 key；allowDefault 场景下空串表示「跟随配方默认」。 */
+  /** 当前选中模板 key；allowDefault 场景下空串表示「跟随模板默认」。 */
   value: string
   onChange: (key: string) => void
-  /** 顶部加一张「配方默认」卡（出片面板覆盖场景），选中回传空串。 */
+  /** 顶部加一张「模板默认」卡（出片面板覆盖场景），选中回传空串。 */
   allowDefault?: boolean
   defaultLabel?: string
 }) {
@@ -185,7 +185,7 @@ function PickerCard({
         {label}
       </span>
       {selected && (
-        <span className="absolute right-1.5 top-1.5 rounded-full bg-primary p-0.5 text-primary-foreground">
+        <span className="absolute top-1.5 right-1.5 rounded-full bg-primary p-0.5 text-primary-foreground">
           <Check className="size-3" />
         </span>
       )}

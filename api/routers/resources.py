@@ -131,35 +131,12 @@ async def list_media_workflows(pixelle_video: PixelleVideoDep):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Keep old endpoint for backward compatibility
-@router.get("/workflows/image", response_model=WorkflowListResponse)
-async def list_image_workflows(pixelle_video: PixelleVideoDep):
-    """
-    List available image workflows (deprecated, use /workflows/media instead)
-
-    This endpoint is kept for backward compatibility but will filter to image_ workflows only.
-    """
-    try:
-        all_workflows = pixelle_video.media.list_workflows()
-
-        # Filter to image workflows only (filename starts with "image_")
-        image_workflows = [
-            WorkflowInfo(**wf) for wf in all_workflows if wf["name"].startswith("image_")
-        ]
-
-        return WorkflowListResponse(workflows=image_workflows)
-
-    except Exception as e:
-        logger.error(f"List image workflows error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 _PREVIEW_EXTENSIONS = (".jpg", ".png", ".webp")
 
 
 def _template_preview_url(key: str) -> str | None:
     """
-    静态预览图查找：docs/images/{size}/{stem}.jpg|png|webp（Streamlit 原版同源图库）。
+    静态预览图查找：docs/images/{size}/{stem}.jpg|png|webp。
     找不到返回 None，前端据此隐藏预览。
     """
     parts = key.split("/")
@@ -202,14 +179,14 @@ async def list_templates():
     {
         "templates": [
             {
-                "name": "default.html",
-                "display_name": "default.html",
+                "name": "image_default.html",
+                "display_name": "image_default.html",
                 "size": "1080x1920",
                 "width": 1080,
                 "height": 1920,
                 "orientation": "portrait",
-                "path": "templates/1080x1920/default.html",
-                "key": "1080x1920/default.html"
+                "path": "templates/1080x1920/image_default.html",
+                "key": "1080x1920/image_default.html"
             }
         ]
     }

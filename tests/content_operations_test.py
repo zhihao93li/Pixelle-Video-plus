@@ -5,7 +5,7 @@ import pytest
 import pixelle_video.content.operations as operations
 import pixelle_video.content.store as content_store
 import pixelle_video.generation.task_store as task_store
-from pixelle_video.content.models import new_content_item
+from pixelle_video.content.models import ContentVariant, new_content_item
 from pixelle_video.generation.schemas import (
     GenerationProgress,
     GenerationRequest,
@@ -23,7 +23,13 @@ def isolated_storage(tmp_path, monkeypatch):
 def test_recovery_completes_persisted_draft_and_rolls_back_empty_draft():
     recovered_item = new_content_item(title="有结果")
     recovered_item.status = "pending_review"
-    recovered_item.links["draft_set_id"] = "draft-set-1"
+    recovered_item.variants["Chinese"] = ContentVariant(
+        language="Chinese",
+        status="pending",
+        title="有结果",
+        script="已生成草稿",
+        narrations=["已生成草稿"],
+    )
     content_store.save_item(recovered_item)
     recovered, _ = operations.begin_operation(
         request_id="draft-recovered",
@@ -32,7 +38,6 @@ def test_recovery_completes_persisted_draft_and_rolls_back_empty_draft():
         item_id=recovered_item.item_id,
         prior_status="idea",
     )
-    recovered.draft_set_id = "draft-set-1"
     recovered.phase = "external_completed"
     operations.save_operation(recovered)
 
@@ -67,9 +72,8 @@ def test_recovery_links_existing_production_task_without_resubmission():
     )
     task = GenerationTask(
         task_id="task-existing",
-        pipeline_id="standard",
-        entry="script",
-        request=GenerationRequest(pipeline_id="standard", entry="script", input={"script": "x"}),
+        pipeline_id="script_to_video",
+        request=GenerationRequest(pipeline_id="script_to_video", input={"script": "x"}),
         progress=GenerationProgress(stage="queued"),
     )
     task_store.save_generation_task(task)

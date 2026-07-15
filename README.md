@@ -7,10 +7,10 @@ Pixelle 是面向单人内容运营的 AI 内容生产工作台。它把选题�
 - 项目与内容生命周期管理
 - 普通视频、素材视频、图集、长文和批量生成
 - 图生视频、动作迁移和数字人专用生成
-- 多语言草稿审核与统一生产提交
-- 任务进度、失败恢复和逐项重试
+- 主题起稿、人工确认与自动继续生产
+- 统一生产工作台、失败证据和不覆盖历史的重试
 - 作品预览、发布准备与发布状态
-- 项目、AI、语音、生成引擎、存储和配方设置
+- 项目、AI、语音、生成引擎、存储和模板设置
 
 ## 代码结构
 
@@ -21,7 +21,6 @@ Pixelle 是面向单人内容运营的 AI 内容生产工作台。它把选题�
 | `pixelle_video` | 内容生成、生产模板、管线和媒体服务 |
 | `pixelle_video/content` | 项目、内容条目与可恢复操作状态 |
 | `agent_plugin` | Codex、Claude Code、Cursor 共用的 Agent MCP 操作接口 |
-| `web` | 冻结中的 legacy Streamlit 界面，等待兼容验收后删除 |
 | `tests` | Python 单元与集成测试 |
 
 产品与架构边界见 [当前产品合同](docs/zh/product/current-product.md)，控制台设计与实现规范见 [DESIGN.md](apps/console/DESIGN.md)。
@@ -57,9 +56,6 @@ npm run dev
 ```bash
 ./start_web.sh
 ```
-
-`web/app.py` 只保留为迁移期 legacy 工具，不再承接新功能，也不应与 React
-控制台同时修改配置。
 
 ## 验证
 

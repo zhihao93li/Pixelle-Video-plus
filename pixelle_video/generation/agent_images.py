@@ -66,10 +66,9 @@ def save_agent_image(
     root = storage_root or Path(get_data_path("uploads", "generation-assets"))
     destination_dir = Path(root) / safe_experiment_id
     destination_dir.mkdir(parents=True, exist_ok=True)
-    destination = destination_dir / f"{safe_scene_id}{suffix}"
     sidecar = destination_dir / f"{safe_scene_id}.json"
 
-    existing = _find_existing_scene_image(destination_dir, safe_scene_id)
+    existing = _find_existing_scene_image(destination_dir, safe_scene_id, sidecar)
     if existing is not None:
         existing_sha256 = hashlib.sha256(existing.read_bytes()).hexdigest()
         if existing_sha256 == sha256:
@@ -106,9 +105,12 @@ def save_agent_image(
                 f"Scene {scene_id!r} already has a different image; use replace=true to replace it"
             )
 
+    destination = (
+        destination_dir / f"{safe_scene_id}{suffix}"
+        if existing is None
+        else destination_dir / f"{safe_scene_id}-{sha256[:16]}{suffix}"
+    )
     _atomic_write(destination, content)
-    if existing is not None and existing != destination:
-        existing.unlink(missing_ok=True)
 
     _write_sidecar(
         sidecar=sidecar,
@@ -224,12 +226,30 @@ def _inspect_image(content: bytes) -> tuple[str, int, int]:
     return image_format, width, height
 
 
-def _find_existing_scene_image(directory: Path, safe_scene_id: str) -> Path | None:
-    for suffix in (".png", ".jpg", ".webp"):
-        candidate = directory / f"{safe_scene_id}{suffix}"
-        if candidate.is_file():
-            return candidate
-    return None
+def _find_existing_scene_image(directory: Path, safe_scene_id: str, sidecar: Path) -> Path | None:
+    """Return the current image while retaining every prior image version."""
+
+    try:
+        metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+        current = Path(str(metadata.get("path") or "")).resolve()
+        current.relative_to(directory.resolve())
+        if current.is_file():
+            return current
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+
+    candidates = [
+        candidate
+        for pattern in (
+            f"{safe_scene_id}.png",
+            f"{safe_scene_id}.jpg",
+            f"{safe_scene_id}.webp",
+            f"{safe_scene_id}-*",
+        )
+        for candidate in directory.glob(pattern)
+        if candidate.is_file() and candidate.suffix.lower() in {".png", ".jpg", ".webp"}
+    ]
+    return max(candidates, key=lambda candidate: candidate.stat().st_mtime_ns, default=None)
 
 
 def _safe_component(value: str, field_name: str) -> str:

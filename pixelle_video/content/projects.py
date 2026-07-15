@@ -1,7 +1,7 @@
 """项目（Project）：品牌级内容线实体，是控制台的全局作用域维度。
 
-一个项目 = 一个品牌/内容线（发布渠道挂在项目下），管三类默认：默认生产配方、
-语言集 + 每语言 TTS 音色、发布平台预选。写稿规则属于生产配方。存储
+一个项目 = 一个品牌/内容线（发布渠道挂在项目下），管三类默认：默认生产模板、
+语言集 + 每语言 TTS 音色、发布平台预选。写稿规则属于生产模板。存储
 ``data/projects.json``：``{"default_project_id": str|None, "projects": {id: {...}}}``。
 
 实现使用 pydantic + tmp+os.replace + threading.Lock，并保留可 monkeypatch 的
@@ -217,23 +217,8 @@ def set_default_project(project_id: str) -> bool:
     return True
 
 
-# ---------------------------------------------------------------------------
-# 迁移（幂等）
-# ---------------------------------------------------------------------------
-
-
-def _migrate_content_items(default_project_id_value: str, valid_ids: set[str]) -> None:
-    """把 project 字段不是任何合法 project_id 的存量条目改写为默认项目。幂等。"""
-    from pixelle_video.content.store import list_items, save_item
-
-    for item in list_items(limit=1_000_000):
-        if item.project not in valid_ids:
-            item.project = default_project_id_value
-            save_item(item)
-
-
 def _bootstrap_default_project() -> None:
-    """Create the first native project and attach legacy unscoped items."""
+    """Create the first project for a new local installation."""
     from pixelle_video.generation.templates import (
         build_default_production_template_registry,
     )
@@ -241,83 +226,12 @@ def _bootstrap_default_project() -> None:
     registry = build_default_production_template_registry()
     template_id = registry.default_template_id(project="PetWoods", channel="xiaohongshu")
 
-    project = create_project(
+    create_project(
         name="PetWoods",
         description="",
         default_production_template_id=template_id,
     )
-
-    _, projects = list_projects()
-    valid_ids = {p.project_id for p in projects}
-    _migrate_content_items(project.project_id, valid_ids)
-
-
-# 退役模板 → 骨架替代品（主力 static_subtitle 迁往迁移生成的自定义模板）
-_MIGRATED_STATIC_SUBTITLE = "migrated_static_subtitle_v1"
-_STANDARD_SKELETON = "pipeline_standard_base_v1"
-_ASSET_SKELETON = "pipeline_asset_based_base_v1"
-_RETIRED_TEMPLATE_REPLACEMENT = {
-    "petwoods_xhs_static_subtitle_v1": _MIGRATED_STATIC_SUBTITLE,
-    "petwoods_xhs_daily_v1": _STANDARD_SKELETON,
-    "petwoods_xhs_topic_to_video_v1": _STANDARD_SKELETON,
-    "petwoods_xhs_quality_explainer_v1": _STANDARD_SKELETON,
-    "petwoods_xhs_asset_enhanced_v1": _ASSET_SKELETON,
-    "petwoods_xhs_real_material_montage_v1": _ASSET_SKELETON,
-}
-
-
-def _ensure_migrated_static_subtitle() -> None:
-    """把主力 static_subtitle 的生效参数迁成自定义模板「静态字幕快出」。幂等。"""
-    from pixelle_video.generation.custom_templates import (
-        custom_template_ids,
-        save_custom_template,
-    )
-    from pixelle_video.generation.templates import (
-        ProductionTemplateError,
-        build_default_production_template_registry,
-    )
-
-    if _MIGRATED_STATIC_SUBTITLE in custom_template_ids():
-        return
-    registry = build_default_production_template_registry()
-    try:
-        source = registry.get("petwoods_xhs_static_subtitle_v1")
-    except ProductionTemplateError:
-        return
-    clone = source.model_copy(deep=True)
-    clone.id = _MIGRATED_STATIC_SUBTITLE
-    clone.display_name = "静态字幕快出"
-    clone.description = "静态画面 + 字幕配音，适合快速批量出片。"
-    clone.project = None
-    clone.channel = None
-    clone.is_custom = True
-    clone.enabled = True
-    clone.migration_notes = "由 static_subtitle 主力迁移生成，保留其当时的生效参数。"
-    save_custom_template(clone)
-
-
-def _repoint_project_default_templates() -> None:
-    """把项目默认模板从退役/不存在的模板重指到骨架（含 archived）。幂等。"""
-    from pixelle_video.generation.templates import (
-        build_default_production_template_registry,
-    )
-
-    valid_ids = {t.id for t in build_default_production_template_registry().list()}
-    _, projects = list_projects()
-    for project in projects:
-        current = project.default_production_template_id
-        if not current:
-            continue
-        target = _RETIRED_TEMPLATE_REPLACEMENT.get(current)
-        if target is None and current not in valid_ids:
-            target = _STANDARD_SKELETON  # 指向不存在的模板 → 重指标准骨架
-        if target and target != current:
-            update_project(project.project_id, {"default_production_template_id": target})
-
-
-def ensure_migrated() -> None:
-    """幂等迁移：无项目时建默认项目并归拢条目；完成骨架化模板迁移。"""
+def ensure_default_project() -> None:
+    """Ensure a new local installation always has one usable project."""
     if not _load_raw()["projects"]:
         _bootstrap_default_project()
-    _ensure_migrated_static_subtitle()
-    _repoint_project_default_templates()

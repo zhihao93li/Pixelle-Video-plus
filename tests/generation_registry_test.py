@@ -5,78 +5,70 @@ from pixelle_video.generation import (
     build_default_pipeline_manifests,
     build_default_pipeline_registry,
 )
-from pixelle_video.generation.schemas import PipelineManifest
 
 
 def _field_names(fields):
     return [field.name for field in fields]
 
 
-def test_default_pipeline_manifests_describe_current_pipeline_entries():
+def test_default_pipeline_manifests_have_one_input_contract_each():
     manifests = build_default_pipeline_manifests()
 
     assert [manifest.id for manifest in manifests] == [
-        "standard",
+        "topic_to_video",
+        "script_to_video",
         "codex_scene_video",
-        "custom",
         "asset_based",
+        "topic_to_image_post",
         "image_post",
+        "topic_to_long_form",
         "long_form",
         "i2v",
         "action_transfer",
         "digital_human",
     ]
 
-    standard = next(manifest for manifest in manifests if manifest.id == "standard")
-    assert standard.default_entry == "topic"
-    assert {entry.id for entry in standard.entries} == {"topic", "script"}
+    topic = next(item for item in manifests if item.id == "topic_to_video")
+    assert _field_names(topic.input.required_fields) == ["topic"]
+    assert topic.stages[0].id == "generate_script"
+    assert any(stage.actor == "user" for stage in topic.stages)
 
-    topic_entry = standard.entry("topic")
-    assert _field_names(topic_entry.required_fields) == ["topic"]
-    assert topic_entry.start_stage == "generate_script"
+    script = next(item for item in manifests if item.id == "script_to_video")
+    assert _field_names(script.input.required_fields) == ["script"]
+    assert script.stages[0].id == "split_scenes"
+    assert all(stage.id != "generate_script" for stage in script.stages)
+    assert script.quick_setting_keys == [
+        "frame_template",
+        "tts_voice",
+        "tts_speed",
+        "bgm_path",
+    ]
+    assert set(script.quick_setting_keys) <= {
+        key for stage in script.stages for key in stage.setting_keys
+    }
 
-    script_entry = standard.entry("script")
-    assert _field_names(script_entry.required_fields) == ["script"]
-    assert script_entry.start_stage == "split_scenes"
-    assert "generate_script" in script_entry.skipped_stages
-
-    codex_scene_video = next(
-        manifest for manifest in manifests if manifest.id == "codex_scene_video"
-    )
-    assert codex_scene_video.default_entry == "scenes"
-    assert codex_scene_video.access_scope == "agent"
-    assert _field_names(codex_scene_video.entry("scenes").required_fields) == ["scenes"]
-    assert _field_names(codex_scene_video.entry("scenes").optional_fields) == ["title"]
+    codex = next(item for item in manifests if item.id == "codex_scene_video")
+    assert codex.access_scope == "agent"
+    assert codex.launch_surfaces == ["agent"]
+    assert _field_names(codex.input.required_fields) == ["scenes"]
+    assert _field_names(codex.input.optional_fields) == ["title"]
     assert all(
         field.name != "n_scenes"
-        for field in (
-            codex_scene_video.entry("scenes").required_fields
-            + codex_scene_video.entry("scenes").optional_fields
-        )
+        for field in codex.input.required_fields + codex.input.optional_fields
     )
 
-    asset_based = next(manifest for manifest in manifests if manifest.id == "asset_based")
-    assert asset_based.default_entry == "assets"
-    assert {entry.id for entry in asset_based.entries} == {"assets"}
-    assert _field_names(asset_based.entry("assets").required_fields) == ["assets"]
-
-    i2v = next(manifest for manifest in manifests if manifest.id == "i2v")
-    assert i2v.default_entry == "assets"
-    assert _field_names(i2v.entry("assets").required_fields) == ["assets", "prompt"]
-
-    action_transfer = next(manifest for manifest in manifests if manifest.id == "action_transfer")
-    assert action_transfer.default_entry == "video"
-    assert _field_names(action_transfer.entry("video").required_fields) == [
-        "reference_video",
-        "assets",
-        "prompt",
-    ]
-
-    digital_human = next(manifest for manifest in manifests if manifest.id == "digital_human")
-    assert digital_human.default_entry == "assets"
-    assert _field_names(digital_human.entry("assets").required_fields) == [
-        "character_assets",
-    ]
+    assert _field_names(
+        next(item for item in manifests if item.id == "asset_based").input.required_fields
+    ) == ["assets"]
+    assert _field_names(
+        next(item for item in manifests if item.id == "i2v").input.required_fields
+    ) == ["assets", "prompt"]
+    assert _field_names(
+        next(item for item in manifests if item.id == "action_transfer").input.required_fields
+    ) == ["reference_video", "assets", "prompt"]
+    assert _field_names(
+        next(item for item in manifests if item.id == "digital_human").input.required_fields
+    ) == ["character_assets"]
 
 
 def test_pipeline_registry_lists_manifests_and_rejects_duplicate_ids():
@@ -85,40 +77,40 @@ def test_pipeline_registry_lists_manifests_and_rejects_duplicate_ids():
 
     registry.register(manifest, pipeline=object())
 
-    assert registry.pipeline_ids() == ["standard"]
-    assert registry.get_manifest("standard") is manifest
-    assert registry.get_pipeline("standard") is not None
+    assert registry.pipeline_ids() == ["topic_to_video"]
+    assert registry.get_manifest("topic_to_video") is manifest
+    assert registry.get_pipeline("topic_to_video") is not None
     assert registry.list_manifests() == [manifest]
 
-    with pytest.raises(ValueError, match="standard"):
+    with pytest.raises(ValueError, match="topic_to_video"):
         registry.register(manifest)
+
+
+def test_pipeline_manifest_rejects_quick_settings_outside_stage_contract():
+    manifest = build_default_pipeline_manifests()[0]
+    payload = manifest.model_dump()
+    payload["quick_setting_keys"] = ["invented_setting"]
+
+    with pytest.raises(ValueError, match="outside its stage contract"):
+        type(manifest)(**payload)
 
 
 def test_default_pipeline_registry_can_be_built_without_running_generation():
     registry = build_default_pipeline_registry()
 
     assert registry.pipeline_ids() == [
-        "standard",
+        "topic_to_video",
+        "script_to_video",
         "codex_scene_video",
-        "custom",
         "asset_based",
+        "topic_to_image_post",
         "image_post",
+        "topic_to_long_form",
         "long_form",
         "i2v",
         "action_transfer",
         "digital_human",
     ]
-    assert registry.get_manifest("custom").default_entry == "script"
-    assert registry.get_pipeline("custom") is None
-
-
-def test_legacy_pipeline_access_scope_is_normalized_to_agent():
-    manifest = next(
-        entry for entry in build_default_pipeline_manifests() if entry.id == "codex_scene_video"
-    )
-    payload = manifest.model_dump(mode="json")
-    payload["access_scope"] = "codex"
-    assert PipelineManifest.model_validate(payload).access_scope == "agent"
 
 
 @pytest.mark.asyncio
@@ -128,23 +120,23 @@ async def test_pixelle_core_registers_pipeline_instances_and_manifests():
     core = PixelleVideoCore()
     await core.initialize()
 
-    assert core.pipeline_registry.pipeline_ids() == [
-        "standard",
+    expected = {
+        "topic_to_video",
+        "script_to_video",
         "codex_scene_video",
-        "custom",
         "asset_based",
+        "topic_to_image_post",
         "image_post",
+        "topic_to_long_form",
         "long_form",
         "i2v",
         "action_transfer",
         "digital_human",
-    ]
+    }
+    assert set(core.pipeline_registry.pipeline_ids()) == expected
     assert set(core.pipeline_registry.pipeline_ids()) == set(core.pipelines.keys())
-    assert core.pipeline_registry.get_pipeline("standard") is core.pipelines["standard"]
+    assert core.pipeline_registry.get_pipeline("topic_to_video") is core.pipelines["topic_to_video"]
     assert (
-        core.pipeline_registry.get_pipeline("codex_scene_video")
-        is core.pipelines["codex_scene_video"]
+        core.pipeline_registry.get_pipeline("script_to_video") is core.pipelines["script_to_video"]
     )
-    assert core.pipeline_registry.get_manifest("asset_based").default_entry == "assets"
     assert core.pipeline_registry.get_pipeline("i2v") is core.pipelines["i2v"]
-    assert core.pipeline_registry.get_manifest("digital_human").default_entry == "assets"

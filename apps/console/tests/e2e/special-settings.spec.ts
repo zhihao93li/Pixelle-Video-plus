@@ -1,0 +1,121 @@
+import { expect, test } from "playwright/test"
+
+import { preparePage } from "./fixtures/app"
+import { fixtureIds, installApiFixtures } from "./fixtures/api"
+
+test.describe("专用生产", () => {
+  test("保留精确模板身份，切换模式不带入旧草稿", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page)
+    await preparePage(page)
+    await page.goto(
+      `/#/create/special/image_to_video/${fixtureIds.i2vTemplate}`,
+      { waitUntil: "networkidle" }
+    )
+
+    await page.getByLabel("运动描述").fill("让猫咪缓慢望向镜头")
+    await page.getByRole("link", { name: "动作迁移" }).click()
+
+    await expect(page).toHaveURL(
+      new RegExp(
+        `#/create/special/action_transfer/${fixtureIds.actionTemplate}$`
+      )
+    )
+    await expect(
+      page.getByRole("heading", { name: "动作迁移 视频", exact: true })
+    ).toBeVisible()
+    await expect(page.getByLabel("效果描述")).toHaveValue("")
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("模式与模板不匹配时不静默回落", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page)
+    await preparePage(page)
+    await page.goto(
+      `/#/create/special/action_transfer/${fixtureIds.i2vTemplate}`,
+      { waitUntil: "networkidle" }
+    )
+
+    await expect(page.getByText("模板与生产模式不匹配")).toBeVisible()
+    await expect(
+      page.getByText("不会自动改用其他模板", { exact: false })
+    ).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("模板刷新失败时保留当前工作区", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page, {
+      productionState: "stale",
+    })
+    await preparePage(page)
+    await page.goto(
+      `/#/create/special/image_to_video/${fixtureIds.i2vTemplate}`,
+      { waitUntil: "networkidle" }
+    )
+
+    await page.getByRole("button", { name: "刷新专用模板" }).click()
+    await expect(page.getByText("专用模板可能不是最新状态")).toBeVisible()
+    await expect(page.getByLabel("运动描述")).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("专用任务复用统一结果预览与发布入口", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page, {
+      submissionState: "completed",
+    })
+    await preparePage(page)
+    await page.goto(
+      `/#/create/special/image_to_video/${fixtureIds.i2vTemplate}`,
+      { waitUntil: "networkidle" }
+    )
+
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "cat.png",
+      mimeType: "image/png",
+      buffer: Buffer.from("phase-4-special-image"),
+    })
+    await page.getByLabel("运动描述").fill("让猫咪缓慢望向镜头")
+    await page.getByRole("button", { name: "开始生成" }).first().click()
+
+    await expect(page.getByLabel("图生视频视频预览")).toBeVisible()
+    await expect(page.getByRole("link", { name: "下载视频" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "前往发布" })).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+})
+
+test.describe("设置中心", () => {
+  test("诊断服务失败不阻断设置表单", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page, {
+      settingsDiagnosticsState: "error",
+    })
+    await preparePage(page)
+    await page.goto("/#/settings?view=overview", { waitUntil: "networkidle" })
+
+    await expect(page.getByText("系统概览")).toBeVisible()
+    await expect(page.getByText("设置诊断服务暂时不可用。")).toBeVisible()
+    await page
+      .getByRole("navigation", { name: "设置分区" })
+      .getByRole("link", { name: /AI 与语音/ })
+      .click()
+    await expect(page.getByRole("heading", { name: "LLM 服务" })).toBeVisible()
+    await expect(page.getByLabel("API Key").first()).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("项目分区保存失败在当前分区显示", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page)
+    await preparePage(page)
+    await page.goto(`/#/settings/projects/${fixtureIds.project}`, {
+      waitUntil: "networkidle",
+    })
+
+    await page.getByLabel("名称", { exact: true }).fill("")
+    const basicSection = page.locator("section").filter({ hasText: "基本信息" })
+    await basicSection.getByRole("button", { name: "保存" }).click()
+    await expect(basicSection.getByText("项目名称不能为空。")).toBeVisible()
+    await expect(
+      basicSection.getByText("保存失败", { exact: true })
+    ).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+})

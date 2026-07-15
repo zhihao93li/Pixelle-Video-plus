@@ -79,9 +79,9 @@ class DetailedProgressPipeline:
         return _video_result()
 
 
-def _service_for_pipeline(pipeline, storage_dir=None):
-    manifest = build_default_pipeline_manifests()[0]
-    registry = build_pipeline_registry([manifest], pipelines={"standard": pipeline})
+def _service_for_pipeline(pipeline, storage_dir=None, pipeline_id="script_to_video"):
+    manifest = next(item for item in build_default_pipeline_manifests() if item.id == pipeline_id)
+    registry = build_pipeline_registry([manifest], pipelines={pipeline_id: pipeline})
     return GenerationService(
         pipeline_registry=registry,
         task_id_factory=lambda: "gen-task-1",
@@ -91,26 +91,65 @@ def _service_for_pipeline(pipeline, storage_dir=None):
 
 def _service_for_asset_pipeline(pipeline):
     manifest = next(
-        manifest
-        for manifest in build_default_pipeline_manifests()
-        if manifest.id == "asset_based"
+        manifest for manifest in build_default_pipeline_manifests() if manifest.id == "asset_based"
     )
     registry = build_pipeline_registry([manifest], pipelines={"asset_based": pipeline})
     return GenerationService(pipeline_registry=registry, task_id_factory=lambda: "gen-task-1")
 
 
+def test_text_and_image_routes_translate_content_input_to_runtime_text():
+    service = _service_for_pipeline(SuccessfulPipeline())
+
+    image_kwargs = service._build_pipeline_kwargs(
+        GenerationRequest(
+            pipeline_id="image_post",
+            input={"script": "第一页\n第二页"},
+        )
+    )
+    topic_image_kwargs = service._build_pipeline_kwargs(
+        GenerationRequest(
+            pipeline_id="topic_to_image_post",
+            input={"topic": "猫为什么喜欢纸箱"},
+            metadata={
+                "confirmed_script": "完整图文文案",
+                "confirmed_scenes": ["第一页", "第二页"],
+            },
+        )
+    )
+    long_form_kwargs = service._build_pipeline_kwargs(
+        GenerationRequest(
+            pipeline_id="long_form",
+            input={"script": "写作材料", "title": "标题"},
+        )
+    )
+    topic_long_form_kwargs = service._build_pipeline_kwargs(
+        GenerationRequest(
+            pipeline_id="topic_to_long_form",
+            input={"topic": "长文主题"},
+        )
+    )
+
+    assert image_kwargs["text"] == "第一页\n第二页"
+    assert topic_image_kwargs["text"] == "第一页\n第二页"
+    assert long_form_kwargs == {"text": "写作材料", "title": "标题"}
+    assert topic_long_form_kwargs == {"text": "长文主题"}
+
+
 @pytest.mark.asyncio
 async def test_generation_service_runs_pipeline_and_returns_structured_result():
     pipeline = SuccessfulPipeline()
-    service = _service_for_pipeline(pipeline)
+    service = _service_for_pipeline(pipeline, pipeline_id="topic_to_video")
 
     task = service.submit(
         GenerationRequest(
-            pipeline_id="standard",
-            entry="topic",
+            pipeline_id="topic_to_video",
             input={"topic": "How to keep cats hydrated"},
             params={"frame_template": "1080x1920/image_default.html"},
-            metadata={"experiment_id": "exp-1"},
+            metadata={
+                "experiment_id": "exp-1",
+                "confirmed_script": "Confirmed hydration script.",
+                "language": "English",
+            },
         )
     )
 
@@ -130,9 +169,10 @@ async def test_generation_service_runs_pipeline_and_returns_structured_result():
     assert completed.error is None
     assert pipeline.calls == [
         {
-            "text": "How to keep cats hydrated",
-            "mode": "generate",
+            "text": "Confirmed hydration script.",
             "frame_template": "1080x1920/image_default.html",
+            "_split_language": "English",
+            "_split_topic": "How to keep cats hydrated",
             "progress_callback": pipeline.calls[0]["progress_callback"],
         }
     ]
@@ -151,12 +191,12 @@ async def test_generation_result_exposes_persisted_storyboard_path(tmp_path):
         async def __call__(self, **kwargs):
             return _video_result(str(video_path))
 
-    service = _service_for_pipeline(PersistedStoryboardPipeline())
+    service = _service_for_pipeline(PersistedStoryboardPipeline(), pipeline_id="topic_to_video")
     task = service.submit(
         GenerationRequest(
-            pipeline_id="standard",
-            entry="topic",
+            pipeline_id="topic_to_video",
             input={"topic": "storyboard contract"},
+            metadata={"confirmed_script": "Confirmed storyboard script."},
         )
     )
     completed = await service.wait_for_task(task.task_id)
@@ -167,10 +207,29 @@ async def test_generation_result_exposes_persisted_storyboard_path(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_topic_pipeline_cannot_bypass_writing_and_human_confirmation():
+    pipeline = SuccessfulPipeline()
+    service = _service_for_pipeline(pipeline, pipeline_id="topic_to_video")
+
+    task = service.submit(
+        GenerationRequest(
+            pipeline_id="topic_to_video",
+            input={"topic": "Unconfirmed topic"},
+        )
+    )
+    completed = await service.wait_for_task(task.task_id)
+
+    assert completed.status == "failed"
+    assert completed.error is not None
+    assert completed.error.layer == "input"
+    assert "human confirmation" in completed.error.message
+    assert pipeline.calls == []
+
+
+@pytest.mark.asyncio
 async def test_generation_service_restores_completed_tasks_and_idempotency(tmp_path):
     request = GenerationRequest(
-        pipeline_id="standard",
-        entry="script",
+        pipeline_id="script_to_video",
         input={"script": "Scene one."},
         idempotency_key="stable-request",
     )
@@ -188,8 +247,7 @@ async def test_generation_service_marks_inflight_tasks_interrupted_after_restart
     first = _service_for_pipeline(SuccessfulPipeline(), tmp_path)
     task = first.submit(
         GenerationRequest(
-            pipeline_id="standard",
-            entry="script",
+            pipeline_id="script_to_video",
             input={"script": "Scene one."},
         )
     )
@@ -206,8 +264,7 @@ async def test_generation_service_marks_inflight_tasks_interrupted_on_graceful_s
     service = _service_for_pipeline(SuccessfulPipeline(), tmp_path)
     task = service.submit(
         GenerationRequest(
-            pipeline_id="standard",
-            entry="script",
+            pipeline_id="script_to_video",
             input={"script": "Scene one."},
         )
     )
@@ -226,8 +283,7 @@ async def test_generation_service_records_structured_runtime_error():
 
     task = service.submit(
         GenerationRequest(
-            pipeline_id="standard",
-            entry="script",
+            pipeline_id="script_to_video",
             input={"script": "Scene one.\nScene two."},
         )
     )
@@ -249,8 +305,7 @@ async def test_generation_service_preserves_provider_progress_detail():
 
     task = service.submit(
         GenerationRequest(
-            pipeline_id="standard",
-            entry="script",
+            pipeline_id="script_to_video",
             input={"script": "Scene one."},
         ),
         progress_callback=lambda task: progress_snapshots.append(task.model_copy(deep=True)),
@@ -276,36 +331,33 @@ async def test_generation_service_preserves_provider_progress_detail():
     }
 
 
-def test_generation_service_rejects_missing_required_entry_field():
+def test_generation_service_rejects_missing_required_input_field():
     service = _service_for_pipeline(SuccessfulPipeline())
 
-    with pytest.raises(ValueError, match="topic"):
+    with pytest.raises(ValueError, match="script"):
         service.submit(
             GenerationRequest(
-                pipeline_id="standard",
-                entry="topic",
+                pipeline_id="script_to_video",
                 input={},
             )
         )
 
 
-def test_generation_service_requires_known_pipeline_and_entry():
+def test_generation_service_requires_known_pipeline_and_input_contract():
     service = _service_for_pipeline(SuccessfulPipeline())
 
     with pytest.raises(ValueError, match="missing"):
         service.submit(
             GenerationRequest(
                 pipeline_id="missing",
-                entry="topic",
                 input={"topic": "Topic"},
             )
         )
 
-    with pytest.raises(ValueError, match="assets"):
+    with pytest.raises(ValueError, match="script"):
         service.submit(
             GenerationRequest(
-                pipeline_id="standard",
-                entry="assets",
+                pipeline_id="script_to_video",
                 input={"assets": [str(Path("asset.png"))]},
             )
         )
@@ -354,8 +406,7 @@ async def test_generation_result_includes_quality_review_and_asset_manifest(tmp_
     service = _service_for_pipeline(AssetTrackingPipeline())
     task = service.submit(
         GenerationRequest(
-            pipeline_id="standard",
-            entry="script",
+            pipeline_id="script_to_video",
             input={"script": "Scene one."},
             params={"bgm_path": str(bgm_path), "quality_profile": "basic"},
         )
@@ -406,7 +457,6 @@ async def test_generation_service_accepts_asset_pipeline_context_final_video_pat
     task = service.submit(
         GenerationRequest(
             pipeline_id="asset_based",
-            entry="assets",
             input={"assets": ["/tmp/petwoods.jpg"]},
         )
     )

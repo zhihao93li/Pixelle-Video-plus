@@ -16,8 +16,8 @@ Long-form Article Pipeline
 全系统最薄的管线：LLM-only，无配图、无 TTS、无合成。把确认稿（或其分镜行 join）
 扩写成结构化的 markdown 长文，产物纯文本（article.md）。每语言一个任务。
 
-长文风格是配方的资产——写作 Prompt 走模板参数 ``long_form_prompt``（含 {script}
-占位），克隆配方即复制风格。
+长文风格是模板的资产——写作 Prompt 走模板参数 ``long_form_prompt``（含 {script}
+占位），克隆模板即复制风格。
 """
 
 import os
@@ -81,7 +81,7 @@ class LongFormPipeline(BasePipeline):
         progress_callback: Optional[Callable[[ProgressEvent], None]] = None,
         **kwargs,
     ) -> LongFormResult:
-        from pixelle_video.generation.script_review import _call_llm_retrying_empty
+        from pixelle_video.generation.drafting_support import _call_llm_retrying_empty
 
         params = kwargs
         script = (text or "").strip()
@@ -92,6 +92,7 @@ class LongFormPipeline(BasePipeline):
         language = params.get("language") or "中文"
         word_count = int(params.get("word_count") or 1800)
         llm_model = params.get("llm_model") or None
+        llm_provider_id = params.get("llm_provider_id") or None
         prompt_template = params.get("long_form_prompt") or DEFAULT_LONG_FORM_PROMPT
         if "{script}" not in prompt_template:
             raise ValueError("长文提示词缺少 {script} 占位符，确认稿将无法注入。")
@@ -109,6 +110,7 @@ class LongFormPipeline(BasePipeline):
         markdown = await _call_llm_retrying_empty(
             self.llm,
             prompt=assembled_prompt,
+            provider_id=llm_provider_id,
             model=llm_model,
             temperature=0.7,
             max_tokens=max_tokens,

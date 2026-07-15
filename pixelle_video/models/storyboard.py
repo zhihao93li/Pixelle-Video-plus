@@ -30,7 +30,7 @@ class StoryboardConfig:
     # Task isolation
     task_id: Optional[str] = None  # Task ID for file isolation (auto-generated if None)
 
-    n_storyboard: int = 5  # Number of storyboard frames
+    n_storyboard: int = 0  # Actual frame count; pipelines set it after planning
     min_narration_words: int = 5  # Min narration word count
     max_narration_words: int = 20  # Max narration word count
     min_image_prompt_words: int = 30  # Min image prompt word count
@@ -57,7 +57,7 @@ class StoryboardConfig:
 
     # Frame template (includes size information in path)
     frame_template: str = (
-        "1080x1920/default.html"  # Template path with size (e.g., "1080x1920/default.html")
+        "1080x1920/image_default.html"  # Template path with size (e.g., "1080x1920/image_default.html")
     )
     template_params: Optional[Dict[str, Any]] = (
         None  # Custom template parameters (e.g., {"accent_color": "#ff0000"})

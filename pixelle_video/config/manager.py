@@ -67,7 +67,7 @@ class ConfigManager:
         except FileNotFoundError as e:
             logger.warning(
                 f"Configured default template '{template_path}' not found. "
-                f"Will fall back to '1080x1920/default.html' if needed. Error: {e}"
+                f"Will fall back to '1080x1920/image_default.html' if needed. Error: {e}"
             )
     
     def reload(self):
@@ -101,7 +101,7 @@ class ConfigManager:
         self.config = PixelleVideoConfig(**merged)
     
     def get(self, key: str, default: Any = None) -> Any:
-        """Dict-like access (for backward compatibility)"""
+        """Read a top-level configuration section as a plain value."""
         return self.config.to_dict().get(key, default)
     
     def validate(self) -> bool:
@@ -109,20 +109,25 @@ class ConfigManager:
         return self.config.validate_required()
     
     def get_llm_config(self) -> dict:
-        """Get LLM configuration as dict"""
-        return {
-            "api_key": self.config.llm.api_key,
-            "base_url": self.config.llm.base_url,
-            "model": self.config.llm.model,
-        }
+        """Get the active real LLM connection as a plain dict."""
+        provider_id, provider = self.config.llm.active_provider()
+        return {"provider_id": provider_id, **provider.model_dump()}
     
     def set_llm_config(self, api_key: str, base_url: str, model: str):
-        """Set LLM configuration"""
+        """Legacy helper: configure the real AiHubMix connection."""
         self.update({
             "llm": {
-                "api_key": api_key,
-                "base_url": base_url,
-                "model": model,
+                "default_provider_id": "aihubmix",
+                "providers": {
+                    "aihubmix": {
+                        "name": "AiHubMix",
+                        "provider_type": "aihubmix",
+                        "enabled": True,
+                        "api_key": api_key,
+                        "base_url": base_url,
+                        "default_model": model,
+                    }
+                },
             }
         })
     
@@ -140,7 +145,6 @@ class ConfigManager:
                 "local": self.config.comfyui.tts.local.model_dump(),
                 "comfyui": self.config.comfyui.tts.comfyui.model_dump(),
                 "fish_audio": self.config.comfyui.tts.fish_audio.model_dump(),
-                "default_workflow": self.config.comfyui.tts.default_workflow,
             },
             "image": {
                 "default_workflow": self.config.comfyui.image.default_workflow,

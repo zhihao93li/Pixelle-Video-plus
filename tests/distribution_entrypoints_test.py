@@ -7,22 +7,6 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_default_distribution_entrypoints_do_not_start_streamlit():
-    entrypoints = [
-        "Dockerfile",
-        "docker-compose.yml",
-        ".devcontainer/postStart.sh",
-        "start_web.sh",
-        "start_web.bat",
-        "packaging/windows/templates/start.bat",
-    ]
-
-    for relative_path in entrypoints:
-        content = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8").lower()
-        assert "streamlit" not in content, relative_path
-        assert "8501" not in content, relative_path
-
-
 def test_docker_has_one_application_service_on_port_8000():
     compose = yaml.safe_load((PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     assert set(compose["services"]) == {"init", "api"}

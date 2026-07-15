@@ -10,6 +10,8 @@ export type ArtifactKind = "video" | "image_set" | "text"
 
 const PIPELINE_ARTIFACT: Record<string, ArtifactKind> = {
   image_post: "image_set",
+  topic_to_image_post: "image_set",
+  topic_to_long_form: "text",
   long_form: "text",
 }
 

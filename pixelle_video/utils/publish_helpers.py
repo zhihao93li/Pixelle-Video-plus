@@ -49,11 +49,7 @@ def build_default_title(metadata: dict, max_title_chars: int = 100) -> str:
 def build_default_caption(metadata: dict, max_text_chars: int = 500) -> str:
     """Build a conservative default caption from persisted task metadata."""
     input_params = metadata.get("input", {}) if metadata else {}
-    title = (input_params.get("title") or "").strip()
     text = (input_params.get("text") or "").strip()
-    if not title and input_params.get("mode") == "fixed":
-        _, text = _split_first_nonempty_line(text)
-
     if len(text) > max_text_chars:
         text = text[:max_text_chars].rstrip() + "..."
 

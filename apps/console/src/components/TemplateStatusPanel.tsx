@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  Archive,
-  ChevronRight,
   Copy,
   Loader2,
   PanelsTopLeft,
@@ -9,7 +7,6 @@ import {
   SlidersHorizontal,
   Trash2,
 } from "lucide-react"
-import { Collapsible as CollapsiblePrimitive } from "radix-ui"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -55,27 +52,16 @@ import {
 } from "@/lib/generationApi"
 import {
   isCodexOnlyTemplate,
-  isDedicatedEntry as isDedicatedEntryTemplate,
-  isRetiredTemplate,
+  isSpecialPipelineTemplate,
   pipelineChipLabel,
 } from "@/lib/templatePresentation"
 
-/** 配方库存与可用性管理。 */
+/** 模板库存与可用性管理。 */
 
 type LoadState = "loading" | "ready" | "error" | "stale"
 
-function statusLabel(status: ProductionTemplate["migration_status"]) {
-  const labels = {
-    ready: "可用",
-    partial: "部分能力可用",
-    legacy_only: "不可用",
-    planned: "未开放",
-  }
-  return labels[status]
-}
-
 /** 从现有生产模板克隆一条自定义风格线（专家模式）。
- * id 自动生成（与 CreateGallery「新建配方」对齐，不再暴露内部「模板 ID」概念）。 */
+ * id 自动生成（与 CreateGallery「新建模板」对齐，不再暴露内部「模板 ID」概念）。 */
 function TemplateCloneSheet({
   template,
   onCloned,
@@ -112,7 +98,7 @@ function TemplateCloneSheet({
         displayName: displayName.trim(),
         description: description.trim() || undefined,
       })
-      toast({ title: "已克隆配方", variant: "success" })
+      toast({ title: "已克隆模板", variant: "success" })
       setOpen(false)
       onCloned()
     } catch (cloneError) {
@@ -130,15 +116,15 @@ function TemplateCloneSheet({
       </Button>
       <SheetContent className="flex flex-col gap-4">
         <SheetHeader>
-          <SheetTitle>克隆生产配方</SheetTitle>
+          <SheetTitle>克隆生产模板</SheetTitle>
           <SheetDescription>
-            {`以「${template.display_name}」为基础新建一条风格线；画面、声音等默认继承源配方，可在设置里调整默认配置。`}
+            {`以「${template.display_name}」为基础新建一条风格线；画面、声音等默认继承源模板，可在设置里调整默认配置。`}
           </SheetDescription>
         </SheetHeader>
 
         <div className="flex flex-col gap-4 px-4">
           <label className="flex flex-col gap-1.5 text-sm">
-            <span className="text-xs text-muted-foreground">配方名称</span>
+            <span className="text-xs text-muted-foreground">模板名称</span>
             <Input
               onChange={(event) => setDisplayName(event.target.value)}
               placeholder="给这条风格线起个名字"
@@ -186,7 +172,7 @@ function TemplateDeleteButton({
     setIsDeleting(true)
     try {
       await deleteProductionTemplate(template.id)
-      toast({ title: "已删除自定义配方", variant: "success" })
+      toast({ title: "已删除自定义模板", variant: "success" })
       onDeleted()
     } catch (deleteError) {
       toast({
@@ -209,7 +195,7 @@ function TemplateDeleteButton({
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>删除这条自定义配方？</AlertDialogTitle>
+          <AlertDialogTitle>删除这条自定义模板？</AlertDialogTitle>
           <AlertDialogDescription>
             {`删除后「${template.display_name}」会从所有列表消失，已用它生成的作品不受影响。此操作不可撤销。`}
           </AlertDialogDescription>
@@ -248,7 +234,7 @@ function TemplateEnabledControl({
     setIsSaving(true)
     try {
       await setTemplateEnabled(template.id, next)
-      toast({ title: next ? "已启用配方" : "已停用配方", variant: "success" })
+      toast({ title: next ? "已启用模板" : "已停用模板", variant: "success" })
       setConfirmOpen(false)
       onChanged()
     } catch (toggleError) {
@@ -268,7 +254,7 @@ function TemplateEnabledControl({
         {template.enabled ? "已启用" : "已停用"}
       </span>
       <Switch
-        aria-label={template.enabled ? "停用配方" : "启用配方"}
+        aria-label={template.enabled ? "停用模板" : "启用模板"}
         checked={template.enabled}
         disabled={isSaving || lockedByProject}
         onCheckedChange={(next) => {
@@ -293,8 +279,8 @@ function TemplateEnabledControl({
             </AlertDialogTitle>
             <AlertDialogDescription>
               {codexOnly
-                ? "停用后 Agent 将不再使用这份配方；已生成的作品与历史不受影响，随时可重新启用。"
-                : "停用后它不再出现在快速生产和各处配方选择里；已用它生成的作品与历史不受影响，随时可重新启用。"}
+                ? "停用后 Agent 将不再使用这份模板；已生成的作品与历史不受影响，随时可重新启用。"
+                : "停用后它不再出现在快速生产和各处模板选择里；已用它生成的作品与历史不受影响，随时可重新启用。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -309,60 +295,6 @@ function TemplateEnabledControl({
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-/** 已退役分组：只读并标注下线说明。 */
-function RetiredTemplatesGroup({
-  templates,
-}: {
-  templates: ProductionTemplate[]
-}) {
-  const [open, setOpen] = useState(false)
-  if (templates.length === 0) {
-    return null
-  }
-  return (
-    <CollapsiblePrimitive.Root
-      className="mt-5 rounded-lg border bg-muted/20"
-      onOpenChange={setOpen}
-      open={open}
-    >
-      <CollapsiblePrimitive.Trigger className="flex w-full items-center gap-1.5 px-4 py-3 text-sm font-medium">
-        <ChevronRight
-          className={cn("size-3.5 transition-transform", open && "rotate-90")}
-        />
-        <Archive className="size-3.5 text-muted-foreground" />
-        已退役配方
-        <Badge variant="outline">{templates.length}</Badge>
-        <span className="ml-1 text-xs font-normal text-muted-foreground">
-          只读 · 历史作品不受影响
-        </span>
-      </CollapsiblePrimitive.Trigger>
-      <CollapsiblePrimitive.Content>
-        <div className="grid gap-3 border-t p-4 lg:grid-cols-2">
-          {templates.map((template) => (
-            <div
-              className="scroll-mt-20 rounded-lg border bg-background/60 p-4"
-              id={template.id}
-              key={template.id}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="text-sm font-semibold text-muted-foreground">
-                  {template.display_name}
-                </div>
-                <Badge variant="outline">已退役</Badge>
-              </div>
-              {template.migration_notes && (
-                <div className="mt-3 rounded-lg bg-muted/40 p-3 text-sm leading-6 text-muted-foreground">
-                  {template.migration_notes}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </CollapsiblePrimitive.Content>
-    </CollapsiblePrimitive.Root>
   )
 }
 
@@ -411,20 +343,9 @@ export function TemplateStatusPanel() {
     void initialLoad()
   }, [reload])
 
-  const retiredTemplates = templates.filter(isRetiredTemplate)
-  const visibleTemplates = templates.filter(
-    (template) => !isRetiredTemplate(template)
-  )
-  const readyCount = visibleTemplates.filter(
-    (template) =>
-      template.enabled &&
-      (template.migration_status === "ready" ||
-        template.migration_status === "partial")
-  ).length
-  const unavailableCount = visibleTemplates.filter(
-    (template) =>
-      template.migration_status === "legacy_only" ||
-      template.migration_status === "planned"
+  const readyCount = templates.filter((template) => template.enabled).length
+  const unavailableCount = templates.filter(
+    (template) => !template.enabled
   ).length
 
   return (
@@ -432,14 +353,14 @@ export function TemplateStatusPanel() {
       <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
         <div>
           <h2 className="text-lg font-medium" id="recipes-heading">
-            配方管理
+            模板管理
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            启用、停用或克隆生产配方，并查看项目默认占用情况。
+            启用、停用或克隆生产模板，并查看项目默认占用情况。
           </p>
         </div>
         <Button
-          aria-label="刷新配方"
+          aria-label="刷新模板"
           disabled={isRefreshing}
           onClick={() => {
             setIsRefreshing(true)
@@ -455,9 +376,9 @@ export function TemplateStatusPanel() {
       {loadState === "loading" ? (
         <AsyncState
           className="mt-5"
-          description="正在同步配方与项目默认占用情况。"
+          description="正在同步模板与项目默认占用情况。"
           state="loading"
-          title="正在读取配方"
+          title="正在读取模板"
         />
       ) : null}
       {loadState === "error" ? (
@@ -477,7 +398,7 @@ export function TemplateStatusPanel() {
           className="mt-5"
           description={error}
           state="error"
-          title="配方读取失败"
+          title="模板读取失败"
         />
       ) : null}
       {loadState === "stale" ? (
@@ -497,7 +418,7 @@ export function TemplateStatusPanel() {
           className="mt-5"
           description={error}
           state="stale"
-          title="配方列表可能不是最新状态"
+          title="模板列表可能不是最新状态"
         />
       ) : null}
 
@@ -505,22 +426,22 @@ export function TemplateStatusPanel() {
       templates.length === 0 ? (
         <EmptyState
           className="mt-5"
-          description="当前服务没有返回可用配方。"
+          description="当前服务没有返回可用模板。"
           icon={PanelsTopLeft}
-          title="暂无配方"
+          title="暂无模板"
         />
       ) : null}
 
       {templates.length > 0 ? (
         <>
           <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3 border-b pb-4">
-            <Fact label="可用配方" value={`${readyCount} 个`} />
+            <Fact label="可用模板" value={`${readyCount} 个`} />
             <Fact label="暂不可用" value={`${unavailableCount} 个`} />
           </div>
 
           <div className="mt-5 grid gap-3 lg:grid-cols-2">
-            {visibleTemplates.map((template) => {
-              const isDedicatedEntry = isDedicatedEntryTemplate(template)
+            {templates.map((template) => {
+              const isSpecialPipeline = isSpecialPipelineTemplate(template)
               const codexOnly = isCodexOnlyTemplate(template)
               return (
                 <div
@@ -541,15 +462,8 @@ export function TemplateStatusPanel() {
                       {codexOnly ? (
                         <Badge variant="info">仅 Agent 发起</Badge>
                       ) : null}
-                      <Badge
-                        variant={
-                          template.migration_status === "ready" ||
-                          template.migration_status === "partial"
-                            ? "secondary"
-                            : "outline"
-                        }
-                      >
-                        {statusLabel(template.migration_status)}
+                      <Badge variant={template.enabled ? "secondary" : "outline"}>
+                        {template.enabled ? "可用" : "已停用"}
                       </Badge>
                     </div>
                   </div>
@@ -560,14 +474,14 @@ export function TemplateStatusPanel() {
                     <Badge variant="outline">
                       {pipelineChipLabel(template.pipeline_id)}
                     </Badge>
-                    {isDedicatedEntry && (
-                      <Badge variant="secondary">专用入口</Badge>
+                    {isSpecialPipeline && (
+                      <Badge variant="secondary">专用表单</Badge>
                     )}
                   </div>
                   {expertMode ? (
                     <TechDetails
                       items={[
-                        { label: "配方 ID", value: template.id },
+                        { label: "模板 ID", value: template.id },
                         {
                           label: "输入字段",
                           value: template.input_requirements.join(", "),
@@ -575,7 +489,7 @@ export function TemplateStatusPanel() {
                       ]}
                     />
                   ) : null}
-                  {!isDedicatedEntry && (
+                  {!isSpecialPipeline && (
                     <div className="mt-3">
                       <TemplateEnabledControl
                         onChanged={() => void reload()}
@@ -585,20 +499,19 @@ export function TemplateStatusPanel() {
                     </div>
                   )}
                   <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-                    {template.enabled &&
-                      template.product_entry === "generate" && (
-                        <Button
-                          onClick={() =>
-                            navigate(`/create/recipes/${template.id}`)
-                          }
-                          size="sm"
-                          variant="outline"
-                        >
-                          <SlidersHorizontal data-icon="inline-start" />
-                          调参数
-                        </Button>
-                      )}
-                    {expertMode && template.product_entry === "generate" && (
+                    {template.enabled && (
+                      <Button
+                        onClick={() =>
+                          navigate(`/create/recipes/${template.id}`)
+                        }
+                        size="sm"
+                        variant="outline"
+                      >
+                        <SlidersHorizontal data-icon="inline-start" />
+                        调参数
+                      </Button>
+                    )}
+                    {expertMode && (
                       <TemplateCloneSheet
                         onCloned={() => void reload()}
                         template={template}
@@ -615,7 +528,7 @@ export function TemplateStatusPanel() {
                         onClick={() => navigate(productionStartRoute(template))}
                         variant="outline"
                       >
-                        {isDedicatedEntry ? "打开专用入口" : "使用这套配方"}
+                        {isSpecialPipeline ? "打开专用表单" : "使用这套模板"}
                       </Button>
                     ) : null}
                   </div>
@@ -623,8 +536,6 @@ export function TemplateStatusPanel() {
               )
             })}
           </div>
-
-          <RetiredTemplatesGroup templates={retiredTemplates} />
         </>
       ) : null}
     </section>

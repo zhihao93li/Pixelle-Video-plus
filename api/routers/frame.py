@@ -36,7 +36,7 @@ async def render_frame(
     Generates a frame image by combining template, title, text, and image.
     This is useful for previewing templates or generating custom frames.
     
-    - **template**: Template key (e.g., '1080x1920/default.html')
+    - **template**: Template key (e.g., '1080x1920/image_default.html')
     - **title**: Optional title text
     - **text**: Frame text content
     - **image**: Image path (can be local path or URL)

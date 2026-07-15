@@ -9,18 +9,16 @@ import { useSyncExternalStore } from "react"
 
 const DEFAULT_PATH = "/create"
 
-export type RouteLayout =
-  "standard" | "wide" | "narrow" | "workspace"
+export type RouteLayout = "standard" | "wide" | "narrow" | "workspace"
 
 export type RouteId =
   | "board"
+  | "board-task"
   | "board-item"
   | "create"
   | "create-generate"
   | "create-recipe"
   | "create-special"
-  | "create-script-review"
-  | "tasks"
   | "library"
   | "settings"
   | "settings-project"
@@ -73,6 +71,19 @@ function exact(...expected: string[]) {
 
 export const ROUTE_MANIFEST: readonly RouteDefinition[] = [
   {
+    id: "board-task",
+    path: "/board/tasks/:taskId",
+    title: "生产任务",
+    layout: "standard",
+    projectScoped: true,
+    match: (segments) =>
+      segments.length === 3 &&
+      segments[0] === "board" &&
+      segments[1] === "tasks"
+        ? { taskId: segments[2] }
+        : null,
+  },
+  {
     id: "board-item",
     path: "/board/item/:itemId",
     title: "内容详情",
@@ -108,7 +119,7 @@ export const ROUTE_MANIFEST: readonly RouteDefinition[] = [
   {
     id: "create-recipe",
     path: "/create/recipes/:templateId",
-    title: "配方详情",
+    title: "模板详情",
     layout: "standard",
     projectScoped: true,
     match: (segments) =>
@@ -138,14 +149,6 @@ export const ROUTE_MANIFEST: readonly RouteDefinition[] = [
     },
   },
   {
-    id: "create-script-review",
-    path: "/create/script-review",
-    title: "多语言审核出片",
-    layout: "narrow",
-    projectScoped: true,
-    match: exact("create", "script-review"),
-  },
-  {
     id: "create",
     path: "/create",
     title: "快速生产",
@@ -155,21 +158,12 @@ export const ROUTE_MANIFEST: readonly RouteDefinition[] = [
     match: exact("create"),
   },
   {
-    id: "tasks",
-    path: "/tasks",
-    title: "任务",
-    layout: "wide",
-    projectScoped: true,
-    nav: { label: "任务", path: "/tasks", order: 3 },
-    match: exact("tasks"),
-  },
-  {
     id: "library",
     path: "/library",
     title: "作品库",
     layout: "wide",
     projectScoped: true,
-    nav: { label: "作品库", path: "/library", order: 4 },
+    nav: { label: "作品库", path: "/library", order: 3 },
     match: exact("library"),
   },
   {
@@ -191,7 +185,7 @@ export const ROUTE_MANIFEST: readonly RouteDefinition[] = [
     title: "设置",
     layout: "standard",
     projectScoped: false,
-    nav: { label: "设置", path: "/settings", order: 5 },
+    nav: { label: "设置", path: "/settings", order: 4 },
     match: exact("settings"),
   },
 ] as const

@@ -3,6 +3,7 @@ import type { Page, Route } from "playwright/test"
 const PROJECT_ID = "project-1"
 const CONTENT_ITEM_ID = "content-1"
 const VIDEO_TEMPLATE_ID = "template-video"
+const TOPIC_TEMPLATE_ID = "template-topic-video"
 const IMAGE_TEMPLATE_ID = "template-image"
 const TEXT_TEMPLATE_ID = "template-text"
 const ASSET_TEMPLATE_ID = "template-asset"
@@ -35,7 +36,6 @@ export type ApiFixtureOptions = {
   settingsState?: "ready" | "loading" | "error" | "stale"
   settingsDiagnosticsState?: "ready" | "error"
   helpState?: "ready" | "loading" | "empty" | "error"
-  scriptReviewState?: "ready" | "create-error" | "save-error" | "submit-error"
   includeBatch?: boolean
   enableBatchSubmission?: boolean
   batchSubmissionState?: "partial_failed" | "running"
@@ -54,6 +54,7 @@ export type ApiFixtureOptions = {
     | "submit-error"
     | "result-error"
   videoFixedParams?: Record<string, unknown>
+  imageProvidersReady?: boolean
   captureJsonRequests?: ApiFixtureRequest[]
 }
 
@@ -90,11 +91,12 @@ function productionTemplate(
     "action_transfer",
     "digital_human",
   ].includes(pipelineId)
+  const supportsDrafting = pipelineId === "topic_to_video"
   return {
     id,
     version: "1.0.0",
     display_name: displayName,
-    description: `${displayName}测试配方`,
+    description: `${displayName}测试模板`,
     project: PROJECT_ID,
     channel: "xiaohongshu",
     use_case: productEntry,
@@ -104,48 +106,101 @@ function productionTemplate(
     requires_user_assets: requiresAssets,
     advanced_controls_hidden: true,
     template_tags: ["测试"],
-    input_requirements: requiresAssets ? ["assets"] : ["script"],
+    input_requirements: requiresAssets
+      ? ["assets"]
+      : supportsDrafting
+        ? ["topic"]
+        : ["script"],
     quality_tier: "standard",
     pipeline_id: pipelineId,
-    entry: requiresAssets ? "assets" : "script",
-    drafting: {
-      script_template_name: "default-script",
-      split_template_name: "default-split",
-      script_model: "test-model",
-      split_model: "test-model",
-      language_script_models: {},
-    },
-    fixed_params:
-      pipelineId === "standard"
-        ? {
-            split_mode: "paragraph",
-            frame_template: "1080x1920/image_default.html",
-            tts_inference_mode: "local",
-            tts_voice: "zh-CN-YunjianNeural",
-          }
-        : {},
+    fixed_params: ["topic_to_video", "script_to_video"].includes(pipelineId)
+      ? {
+          ...(supportsDrafting
+            ? {
+                script_template_name: "default-script",
+                script_model: "test-model",
+                language_script_models: {},
+              }
+            : {}),
+          split_template_name: "default-split",
+          split_model: "test-model",
+          frame_template: "1080x1920/image_default.html",
+          tts_inference_mode: "local",
+          tts_voice: "zh-CN-YunjianNeural",
+        }
+      : {},
     required_capabilities: [],
     user_selectable_runtime: false,
     user_selectable_providers: [],
     enabled: true,
-    retired: false,
-    migration_status: "ready",
-    product_entry: productEntry,
-    streamlit_source: null,
-    migration_notes: "",
-    allowed_user_params: [
-      "split_mode",
-      "frame_template",
-      "tts_inference_mode",
-      "tts_voice",
-      "workflow_key",
-    ],
+    allowed_user_params: ["topic_to_video", "script_to_video"].includes(
+      pipelineId
+    )
+      ? [
+          "title",
+          ...(supportsDrafting
+            ? ["script_template_name", "script_model", "language_script_models"]
+            : []),
+          "split_template_name",
+          "split_model",
+          "frame_template",
+          "template_params",
+          "image_provider",
+          "image_model",
+          "media_workflow",
+          "media_width",
+          "media_height",
+          "prompt_prefix",
+          "image_prompt_visual_context",
+          "image_prompt_generation_rules",
+          "tts_inference_mode",
+          "tts_voice",
+          "tts_speed",
+          "bgm_path",
+          "bgm_volume",
+          "bgm_mode",
+          "compose_runtime",
+        ]
+      : pipelineId === "asset_based"
+        ? [
+            "voice_id",
+            "tts_speed",
+            "bgm_path",
+            "bgm_volume",
+            "bgm_mode",
+            "compose_runtime",
+          ]
+        : pipelineId === "long_form"
+          ? ["title", "long_form_prompt", "word_count", "llm_model"]
+          : pipelineId === "image_post"
+            ? [
+                "title",
+                "split_mode",
+                "frame_template",
+                "template_params",
+                "image_provider",
+                "image_model",
+                "media_workflow",
+                "media_width",
+                "media_height",
+                "prompt_prefix",
+                "image_prompt_visual_context",
+                "image_prompt_generation_rules",
+              ]
+            : [
+                "workflow_key",
+                "source",
+                "tts_inference_mode",
+                "tts_voice",
+                "tts_speed",
+              ],
     passthrough_input_fields: [],
   }
 }
 
 const templates = [
-  productionTemplate(VIDEO_TEMPLATE_ID, "图文口播视频", "standard"),
+  productionTemplate(TOPIC_TEMPLATE_ID, "主题口播视频", "topic_to_video"),
+  productionTemplate(VIDEO_TEMPLATE_ID, "图文口播视频", "script_to_video"),
   productionTemplate(IMAGE_TEMPLATE_ID, "小红书图文", "image_post"),
   productionTemplate(TEXT_TEMPLATE_ID, "长文", "long_form"),
   productionTemplate(ASSET_TEMPLATE_ID, "素材成片", "asset_based"),
@@ -161,6 +216,179 @@ const templates = [
     "数字人",
     "digital_human",
     "digital_human"
+  ),
+]
+
+function pipelineManifest(
+  id: string,
+  name: string,
+  requiredInput: string,
+  productFamily: string,
+  stages: Array<{ id: string; name: string; setting_keys: string[] }>
+) {
+  const quickSettingKeys: Record<string, string[]> = {
+    topic_to_video: ["frame_template", "tts_voice", "tts_speed", "bgm_path"],
+    script_to_video: ["frame_template", "tts_voice", "tts_speed", "bgm_path"],
+    image_post: ["frame_template", "image_provider", "image_model"],
+    long_form: ["word_count", "llm_model"],
+    asset_based: ["voice_id", "tts_speed", "bgm_path"],
+    digital_human: ["tts_voice", "tts_speed"],
+  }
+  return {
+    id,
+    name,
+    description: `${name}测试路线`,
+    category: "content",
+    product_family: productFamily,
+    input: {
+      description: "",
+      required_fields: [
+        {
+          name: requiredInput,
+          field_type: requiredInput === "assets" ? "array" : "string",
+          description: "",
+          default: null,
+        },
+      ],
+      optional_fields: [],
+    },
+    stages: stages.map((stage) => ({
+      ...stage,
+      description: "",
+      actor: stage.id.startsWith("review") ? "user" : "system",
+    })),
+    quick_setting_keys: quickSettingKeys[id] ?? [],
+    outputs: [
+      {
+        kind:
+          id === "image_post"
+            ? "image"
+            : id === "long_form"
+              ? "metadata"
+              : "video",
+        role:
+          id === "image_post"
+            ? "primary_images"
+            : id === "long_form"
+              ? "article"
+              : "primary_video",
+        description: "",
+        required: true,
+      },
+    ],
+    required_capabilities: [],
+    access_scope: "public",
+    launch_surfaces: ["react", "batch"],
+  }
+}
+
+const videoStages = [
+  {
+    id: "split_scenes",
+    name: "分镜",
+    setting_keys: ["split_template_name", "split_model"],
+  },
+  {
+    id: "generate_media",
+    name: "每镜画面",
+    setting_keys: [
+      "frame_template",
+      "image_provider",
+      "image_model",
+      "media_workflow",
+      "media_width",
+      "media_height",
+      "prompt_prefix",
+      "image_prompt_visual_context",
+      "image_prompt_generation_rules",
+    ],
+  },
+  {
+    id: "generate_tts",
+    name: "音色",
+    setting_keys: ["tts_inference_mode", "tts_voice", "tts_speed"],
+  },
+  {
+    id: "compose_video",
+    name: "合成",
+    setting_keys: ["bgm_path", "bgm_volume", "bgm_mode", "compose_runtime"],
+  },
+]
+
+const pipelineManifests = [
+  pipelineManifest("topic_to_video", "主题转视频", "topic", "图文口播", [
+    {
+      id: "generate_script",
+      name: "写稿",
+      setting_keys: [
+        "script_template_name",
+        "script_model",
+        "language_script_models",
+      ],
+    },
+    { id: "review_script", name: "确认文案", setting_keys: [] },
+    ...videoStages,
+  ]),
+  pipelineManifest(
+    "script_to_video",
+    "文案转视频",
+    "script",
+    "图文口播",
+    videoStages
+  ),
+  pipelineManifest("image_post", "图文帖", "script", "图文内容", [
+    { id: "split_pages", name: "分页", setting_keys: ["split_mode"] },
+    {
+      id: "render_pages",
+      name: "每页配图",
+      setting_keys: [
+        "frame_template",
+        "image_provider",
+        "image_model",
+        "media_workflow",
+        "media_width",
+        "media_height",
+        "prompt_prefix",
+        "image_prompt_visual_context",
+        "image_prompt_generation_rules",
+      ],
+    },
+  ]),
+  pipelineManifest("long_form", "长文", "script", "图文内容", [
+    {
+      id: "write_article",
+      name: "长文改写",
+      setting_keys: ["long_form_prompt", "word_count", "llm_model"],
+    },
+  ]),
+  pipelineManifest("asset_based", "素材成片", "assets", "素材创作", [
+    {
+      id: "compose_assets",
+      name: "素材制作",
+      setting_keys: [
+        "voice_id",
+        "tts_speed",
+        "bgm_path",
+        "bgm_volume",
+        "bgm_mode",
+        "compose_runtime",
+      ],
+    },
+  ]),
+  ...["i2v", "action_transfer", "digital_human"].map((id) =>
+    pipelineManifest(id, id, "assets", "素材创作", [
+      {
+        id: "generate",
+        name: "生成",
+        setting_keys: [
+          "workflow_key",
+          "source",
+          "tts_inference_mode",
+          "tts_voice",
+          "tts_speed",
+        ],
+      },
+    ])
   ),
 ]
 
@@ -220,6 +448,117 @@ const contentItem = {
   updated_at: "2026-07-10T08:00:00Z",
 }
 
+function workbenchCard(
+  state: "needs_user" | "in_progress" | "failed" | "produced"
+) {
+  return {
+    production_task_id: `production-${state}`,
+    content_item_id: CONTENT_ITEM_ID,
+    project_id: PROJECT_ID,
+    project_name: project.name,
+    state,
+    title: contentItem.title,
+    pipeline_id: "script_to_video",
+    recipe_id: VIDEO_TEMPLATE_ID,
+    artifact_type: "video",
+    source: "react",
+    stage: {
+      id: state,
+      label:
+        state === "needs_user"
+          ? "确认文案"
+          : state === "in_progress"
+            ? "正在合成"
+            : state === "failed"
+              ? "合成失败"
+              : "已保存产物",
+    },
+    progress:
+      state === "in_progress" ? { current: 2, total: 4, percentage: 50 } : null,
+    next_actor: state === "needs_user" ? "user" : "system",
+    action:
+      state === "needs_user"
+        ? { type: "confirm_script", label: "确认文案" }
+        : state === "failed"
+          ? { type: "view_error", label: "查看原因" }
+          : state === "produced"
+            ? { type: "view_artifacts", label: "查看产物" }
+            : null,
+    error:
+      state === "failed"
+        ? {
+            layer: "runtime",
+            code: "FixtureError",
+            message: "渲染节点暂时不可用。",
+          }
+        : null,
+    created_at: "2026-07-10T08:00:00Z",
+    updated_at: "2026-07-10T08:05:00Z",
+    state_since: "2026-07-10T08:05:00Z",
+    waiting_since: state === "needs_user" ? "2026-07-10T08:05:00Z" : null,
+    failed_at: state === "failed" ? "2026-07-10T08:05:00Z" : null,
+    produced_at: state === "produced" ? "2026-07-10T08:05:00Z" : null,
+  }
+}
+
+function productionTaskFixture(
+  state: "needs_user" | "in_progress" | "failed" | "produced",
+  taskId = `production-${state}`,
+  generationTaskIds: string[] = []
+) {
+  const card = workbenchCard(state)
+  return {
+    production_task_id: taskId,
+    content_item_id: card.content_item_id,
+    project_id: card.project_id,
+    pipeline_id: card.pipeline_id,
+    recipe_id: card.recipe_id,
+    recipe_version: "1.0.0",
+    title: card.title,
+    artifact_type: card.artifact_type,
+    source: card.source,
+    actor: "user",
+    client_name: "react-console",
+    agent_session_id: null,
+    batch_id: null,
+    state,
+    stage_id: card.stage.id,
+    stage_label: card.stage.label,
+    next_actor: card.next_actor,
+    progress_current: card.progress?.current ?? null,
+    progress_total: card.progress?.total ?? null,
+    progress_percentage: card.progress?.percentage ?? null,
+    action_type: card.action?.type ?? null,
+    action_label: card.action?.label ?? null,
+    input_snapshot: { script: "猫薄荷会让一部分猫咪短暂兴奋。" },
+    confirmed_version_refs: {},
+    effective_params: {},
+    request_id: `production:${state}`,
+    request_hash: `fixture:${state}`,
+    generation_task_ids: generationTaskIds,
+    operation_ids: [],
+    artifact_ids: [],
+    provider_job_ids: [],
+    attempts: [],
+    error: card.error
+      ? {
+          layer: card.error.layer,
+          message: card.error.message,
+          exception_type: card.error.code,
+          detail: {},
+        }
+      : null,
+    created_at: card.created_at,
+    updated_at: card.updated_at,
+    state_since: card.state_since,
+    waiting_since: card.waiting_since,
+    failed_at: card.failed_at,
+    produced_at: card.produced_at,
+    cancelled_at: null,
+    cancellation_request_id: null,
+  }
+}
+
 const settings = {
   project_name: "Pixelle",
   llm: {
@@ -227,6 +566,27 @@ const settings = {
     api_key_configured: true,
     base_url: "https://api.example.invalid/v1",
     model: "pixelle-test-model",
+    default_provider_id: "aihubmix",
+    providers: {
+      aihubmix: {
+        name: "AiHubMix 主账号",
+        provider_type: "aihubmix",
+        enabled: true,
+        api_key: "",
+        api_key_configured: true,
+        base_url: "https://aihubmix.com/v1",
+        default_model: "gpt-4.1",
+      },
+      openai: {
+        name: "OpenAI 直连",
+        provider_type: "openai",
+        enabled: true,
+        api_key: "",
+        api_key_configured: true,
+        base_url: "https://api.openai.com/v1",
+        default_model: "gpt-4.1",
+      },
+    },
   },
   comfyui: {
     comfyui_url: "http://127.0.0.1:8188",
@@ -591,8 +951,7 @@ function runTaskFixture(taskId: string) {
           : 38
   return {
     task_id: taskId,
-    pipeline_id: "standard",
-    entry: "script",
+    pipeline_id: "script_to_video",
     status: state,
     progress: generationProgress(percentage, `当前状态：${state}`, state),
     error:
@@ -620,8 +979,7 @@ function submittedTaskFixture(state: ApiFixtureOptions["submissionState"]) {
           : "completed"
   return {
     task_id: SUBMITTED_TASK_ID,
-    pipeline_id: "standard",
-    entry: "script",
+    pipeline_id: "script_to_video",
     status,
     progress: generationProgress(
       status === "completed" ? 100 : status === "failed" ? 62 : 38,
@@ -651,8 +1009,7 @@ function submittedTaskFixture(state: ApiFixtureOptions["submissionState"]) {
 function submittedVideoResult() {
   return {
     task_id: SUBMITTED_TASK_ID,
-    pipeline_id: "standard",
-    entry: "script",
+    pipeline_id: "script_to_video",
     status: "completed",
     artifact_type: "video",
     artifacts: [],
@@ -674,7 +1031,7 @@ function submittedVideoResult() {
   }
 }
 
-const scriptReviewTemplates = {
+const promptTemplates = {
   default_languages: ["Chinese"],
   script_templates: [
     {
@@ -690,38 +1047,6 @@ const scriptReviewTemplates = {
       source: "builtin",
     },
   ],
-}
-
-const scriptReviewDraftSet = {
-  draft_set_id: "draft-set-e2e-1",
-  status: "drafted",
-  created_at: "2026-07-10T08:00:00Z",
-  updated_at: "2026-07-10T08:01:00Z",
-  topics: ["猫咪夏天饮水少怎么办"],
-  languages: ["Chinese"],
-  metadata: { source: "e2e" },
-  draft_settings: {
-    project_id: PROJECT_ID,
-    production_template_id: VIDEO_TEMPLATE_ID,
-    production_template_name: "图文口播视频",
-  },
-  drafts: [
-    {
-      index: 0,
-      topic: "猫咪夏天饮水少怎么办",
-      selected_for_generation: true,
-      selected_languages: ["Chinese"],
-      language_drafts: {
-        Chinese: {
-          title: "夏天帮猫咪多喝水",
-          script: "用流动水、多水碗和湿粮增加猫咪的饮水量。",
-          narrations: ["准备流动水。", "在常用动线增加水碗。"],
-        },
-      },
-    },
-  ],
-  errors: [],
-  submissions: [],
 }
 
 const frameTemplate = {
@@ -803,13 +1128,72 @@ function responseFor(
     }
     return { body: contentItemForOptions(options) }
   }
+  if (method === "GET" && path === "/production-tasks") {
+    const count = requestCounts.get(`${method} ${path}`) ?? 1
+    if (
+      options.contentState === "error" ||
+      (options.contentState === "stale" && count > 4)
+    ) {
+      return { status: 503, body: { detail: "生产任务服务暂时不可用。" } }
+    }
+    const state = url.searchParams.get("state") as
+      "needs_user" | "in_progress" | "failed" | "produced" | "cancelled" | null
+    const empty = options.contentState === "empty"
+    return {
+      body: {
+        items:
+          !empty && state === "needs_user" ? [workbenchCard("needs_user")] : [],
+        counts: {
+          needs_user: empty ? 0 : 1,
+          in_progress: 0,
+          failed: 0,
+          produced: 0,
+          cancelled: 0,
+        },
+        next_cursor: null,
+      },
+    }
+  }
+  if (method === "GET" && path === "/production-tasks/production-needs_user") {
+    return { body: productionTaskFixture("needs_user") }
+  }
+  if (method === "POST" && path === "/production-tasks") {
+    if (options.submissionState === "submit-error") {
+      return { status: 503, body: { detail: "生成服务暂时不可用。" } }
+    }
+    return {
+      body: {
+        production_task_id: "production-submitted-1",
+        content_item_id: CONTENT_ITEM_ID,
+        state: "in_progress",
+        created: true,
+        task: productionTaskFixture("in_progress", "production-submitted-1", [
+          SUBMITTED_TASK_ID,
+        ]),
+      },
+    }
+  }
+  if (
+    method === "DELETE" &&
+    path === "/production-tasks/production-submitted-1"
+  ) {
+    return { body: { state: "cancelled" } }
+  }
+  if (method === "GET" && path === "/generation/pipelines") {
+    return {
+      body: {
+        default_pipeline: "script_to_video",
+        pipelines: pipelineManifests,
+      },
+    }
+  }
   if (method === "GET" && path === "/generation/templates") {
     const count = requestCounts.get(`${method} ${path}`) ?? 1
     if (
       options.productionState === "error" ||
       (options.productionState === "stale" && count > 2)
     ) {
-      return { status: 503, body: { detail: "配方服务暂时不可用。" } }
+      return { status: 503, body: { detail: "模板服务暂时不可用。" } }
     }
     if (options.productionState === "empty") {
       return { body: { default_template: null, templates: [] } }
@@ -831,7 +1215,7 @@ function responseFor(
       (options.configState === "partial-error" &&
         templateId === IMAGE_TEMPLATE_ID)
     ) {
-      return { status: 503, body: { detail: "配方默认值服务暂时不可用。" } }
+      return { status: 503, body: { detail: "模板默认值服务暂时不可用。" } }
     }
     const template = templatesForOptions(options).find(
       (item) => item.id === templateId
@@ -839,7 +1223,9 @@ function responseFor(
     return {
       body: {
         template_id: templateId,
-        overridable_keys: template?.allowed_user_params ?? [],
+        overridable_keys: (template?.allowed_user_params ?? []).filter(
+          (key) => !["title", "template_params", "voice_id"].includes(key)
+        ),
         overrides: {},
         base_params: template?.fixed_params ?? {},
         effective_params: template?.fixed_params ?? {},
@@ -857,47 +1243,15 @@ function responseFor(
     return {
       body: {
         template_id: templateId,
-        overridable_keys: template?.allowed_user_params ?? [],
+        overridable_keys: (template?.allowed_user_params ?? []).filter(
+          (key) => !["title", "template_params", "voice_id"].includes(key)
+        ),
         overrides: { media_workflow: "runninghub/image_flux.json" },
         base_params: template?.fixed_params ?? {},
         effective_params: {
           ...(template?.fixed_params ?? {}),
           media_workflow: "runninghub/image_flux.json",
         },
-      },
-    }
-  }
-  if (
-    ["GET", "PUT", "DELETE"].includes(method) &&
-    /^\/generation\/templates\/[^/]+\/drafting-config$/.test(path)
-  ) {
-    const templateId = path.split("/")[3]
-    const template = templatesForOptions(options).find(
-      (item) => item.id === templateId
-    )
-    return {
-      body: {
-        template_id: templateId,
-        drafting: template?.drafting,
-        is_overridden: method === "PUT",
-      },
-    }
-  }
-  if (
-    method === "POST" &&
-    /^\/generation\/templates\/[^/]+\/tasks$/.test(path) &&
-    options.submissionState
-  ) {
-    if (options.submissionState === "submit-error") {
-      return { status: 503, body: { detail: "生成服务暂时不可用。" } }
-    }
-    const task = submittedTaskFixture(options.submissionState)
-    return {
-      body: {
-        success: true,
-        message: "submitted",
-        generation_task_id: SUBMITTED_TASK_ID,
-        task,
       },
     }
   }
@@ -958,7 +1312,6 @@ function responseFor(
       body: {
         task_id: HISTORY_IMAGE_TASK_ID,
         pipeline_id: "image_post",
-        entry: "script",
         status: "completed",
         artifact_type: "image_set",
         artifacts: [
@@ -1000,8 +1353,7 @@ function responseFor(
       ? {
           body: {
             task_id: taskId,
-            pipeline_id: "standard",
-            entry: "script",
+            pipeline_id: "script_to_video",
             status: item.status,
             progress: item.progress,
             error: item.error,
@@ -1069,43 +1421,34 @@ function responseFor(
   ) {
     return { body: completedGenerationBatch }
   }
-  if (method === "GET" && path === "/generation/script-review/templates") {
-    return { body: scriptReviewTemplates }
+  if (method === "GET" && path === "/drafting/prompt-templates") {
+    return { body: promptTemplates }
   }
-  if (method === "GET" && path === "/generation/script-review/draft-sets") {
-    return { body: { draft_sets: [] } }
-  }
-  if (method === "POST" && path === "/generation/script-review/draft-sets") {
-    return options.scriptReviewState === "create-error"
-      ? { status: 503, body: { detail: "草稿生成服务暂时不可用。" } }
-      : { body: scriptReviewDraftSet }
-  }
-  if (
-    method === "PUT" &&
-    path ===
-      `/generation/script-review/draft-sets/${scriptReviewDraftSet.draft_set_id}`
-  ) {
-    return options.scriptReviewState === "save-error"
-      ? { status: 503, body: { detail: "审核草稿保存失败。" } }
-      : { body: scriptReviewDraftSet }
-  }
-  if (
-    method === "POST" &&
-    path ===
-      `/generation/script-review/draft-sets/${scriptReviewDraftSet.draft_set_id}/tasks`
-  ) {
-    return options.scriptReviewState === "submit-error"
-      ? { status: 503, body: { detail: "生产批次提交失败。" } }
-      : {
-          body: {
-            draft_set: {
-              ...scriptReviewDraftSet,
-              status: "submitted",
-              submissions: [{ batch_id: completedGenerationBatch.batch_id }],
-            },
-            batch: completedGenerationBatch,
+  if (method === "GET" && path === "/settings/llm/model-catalog") {
+    return {
+      body: {
+        configured: true,
+        providers: [
+          {
+            id: "openai",
+            label: "OpenAI 直连",
+            provider_type: "openai",
+            configured: true,
+            models: [
+              { id: "gpt-4.1", label: "gpt-4.1" },
+              { id: "gpt-4.1-mini", label: "gpt-4.1-mini" },
+            ],
           },
-        }
+          {
+            id: "aihubmix",
+            label: "AiHubMix 主账号",
+            provider_type: "aihubmix",
+            configured: true,
+            models: [{ id: "deepseek-v4", label: "deepseek-v4" }],
+          },
+        ],
+      },
+    }
   }
   if (method === "GET" && path === "/history/tasks") {
     const count = requestCounts.get(`${method} ${path}`) ?? 1
@@ -1220,7 +1563,19 @@ function responseFor(
     (path === "/settings/image-providers" ||
       path === "/resources/image-providers")
   ) {
-    return { body: imageProviders }
+    if (!options.imageProvidersReady) {
+      return { body: imageProviders }
+    }
+    return {
+      body: {
+        ...imageProviders,
+        providers: imageProviders.providers.map((provider) =>
+          provider.id === "aliyun_bailian"
+            ? { ...provider, enabled: true, configured: true }
+            : provider
+        ),
+      },
+    }
   }
   if (method === "GET" && path === "/settings/diagnostics") {
     if (options.settingsDiagnosticsState === "error") {
@@ -1345,11 +1700,11 @@ function responseFor(
                 {
                   question: "如何开始一次标准视频生产？",
                   answer:
-                    "## 从已确认的内容开始\n\n1. 在工作台确认选题与文案\n2. 选择 `图文口播视频` 配方\n3. 核对本次覆盖项后提交\n\n```text\n项目默认 → 配方默认 → 本次覆盖\n```",
+                    "## 从已确认的内容开始\n\n1. 在工作台确认选题与文案\n2. 选择 `图文口播视频` 模板\n3. 核对本次覆盖项后提交\n\n```text\n项目默认 → 模板默认 → 本次覆盖\n```",
                 },
                 {
                   question: "任务失败后应该从哪里恢复？",
-                  answer: `前往[任务](#/tasks)查看失败层级，批量生产可仅重试失败项。\n\n![图集产物示例](${STATIC_IMAGE_URLS[0]})`,
+                  answer: `前往[工作台](#/board)打开具体任务查看失败层级，并只重试失败任务。\n\n![图集产物示例](${STATIC_IMAGE_URLS[0]})`,
                 },
               ],
       },
@@ -1437,9 +1792,11 @@ export async function installApiFixtures(
 
     if (
       options.captureJsonRequests &&
-      method === "POST" &&
-      (/^\/generation\/templates\/[^/]+\/tasks$/.test(apiPath) ||
-        apiPath === "/generation/batches")
+      ((method === "POST" &&
+        (apiPath === "/production-tasks" ||
+          apiPath === "/generation/batches")) ||
+        (method === "PUT" &&
+          /^\/generation\/templates\/[^/]+\/generation-config$/.test(apiPath)))
     ) {
       options.captureJsonRequests.push({
         method,
@@ -1451,7 +1808,7 @@ export async function installApiFixtures(
     if (
       options.submissionDelayMs &&
       method === "POST" &&
-      /^\/generation\/templates\/[^/]+\/tasks$/.test(apiPath)
+      apiPath === "/production-tasks"
     ) {
       await new Promise((resolve) =>
         setTimeout(resolve, options.submissionDelayMs)
@@ -1509,7 +1866,7 @@ function shouldDelayFixture(
 ) {
   if (method !== "GET") return false
   if (options.projectState === "loading" && path === "/projects") return true
-  if (options.contentState === "loading" && path === "/content-items") {
+  if (options.contentState === "loading" && path === "/production-tasks") {
     return true
   }
   if (
@@ -1547,6 +1904,7 @@ export const fixtureIds = {
   project: PROJECT_ID,
   specialTemplate: I2V_TEMPLATE_ID,
   textTemplate: TEXT_TEMPLATE_ID,
+  topicTemplate: TOPIC_TEMPLATE_ID,
   videoTemplate: VIDEO_TEMPLATE_ID,
   submittedTask: SUBMITTED_TASK_ID,
 }

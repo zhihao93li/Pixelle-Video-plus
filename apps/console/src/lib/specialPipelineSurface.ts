@@ -61,10 +61,7 @@ export function templateMatchesSpecialMode(
   template: ProductionTemplate,
   mode: SpecialPipelineMode
 ) {
-  return (
-    template.product_entry === mode &&
-    template.pipeline_id === PIPELINE_BY_MODE[mode]
-  )
+  return template.pipeline_id === PIPELINE_BY_MODE[mode]
 }
 
 export function specialTemplatesForMode(
@@ -82,10 +79,8 @@ export function preferredSpecialTemplate(
 ) {
   const candidates = specialTemplatesForMode(templates, mode)
   return (
-    candidates.find(
-      (template) => template.enabled && !template.retired && !template.is_custom
-    ) ??
-    candidates.find((template) => template.enabled && !template.retired) ??
+    candidates.find((template) => template.enabled && !template.is_custom) ??
+    candidates.find((template) => template.enabled) ??
     null
   )
 }
@@ -102,7 +97,7 @@ export function resolveSpecialTemplate(
   if (!templateMatchesSpecialMode(template, mode)) {
     return { kind: "mode_mismatch", template, expectedMode: mode }
   }
-  if (!template.enabled || template.retired) {
+  if (!template.enabled) {
     return { kind: "unavailable", template }
   }
   return { kind: "ready", template }
@@ -141,7 +136,7 @@ export function validateSpecialSubmission({
   hasActiveTask = false,
 }: SpecialSubmissionSnapshot): SpecialSubmissionValidation {
   if (!templateEnabled) {
-    return { ok: false, reason: "当前配方暂不可用" }
+    return { ok: false, reason: "当前模板暂不可用" }
   }
   if (isSubmitting) {
     return { ok: false, reason: "正在提交" }
@@ -231,7 +226,6 @@ export function buildSpecialTaskInput({
   duration,
   script,
   goodsTitle,
-  voiceOverrides,
 }: {
   mode: SpecialPipelineMode
   digitalMode: DigitalHumanMode
@@ -244,7 +238,6 @@ export function buildSpecialTaskInput({
   duration: number
   script: string
   goodsTitle: string
-  voiceOverrides: Record<string, string | number>
 }): Record<string, unknown> {
   if (mode === "image_to_video") {
     return compactRecord({
@@ -272,7 +265,6 @@ export function buildSpecialTaskInput({
     goods_assets:
       digitalMode === "digital" ? goodsPaths.slice(0, 1) : undefined,
     goods_title: digitalMode === "digital" ? goodsTitle.trim() : undefined,
-    ...voiceOverrides,
   })
 }
 

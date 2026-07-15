@@ -13,7 +13,11 @@ test("quality summary marks failed checks as not publishable", () => {
     summary: "Video has no audio stream.",
     checks: [
       { id: "file_exists", status: "passed", message: "Video file exists." },
-      { id: "audio_present", status: "failed", message: "Video has no audio stream." },
+      {
+        id: "audio_present",
+        status: "failed",
+        message: "Video has no audio stream.",
+      },
     ],
   })
 
@@ -27,7 +31,11 @@ test("quality summary marks warning checks as requiring review", () => {
     status: "warning",
     summary: "Black-frame sampling was skipped.",
     checks: [
-      { id: "black_frame_sample", status: "warning", message: "ffmpeg is not available." },
+      {
+        id: "black_frame_sample",
+        status: "warning",
+        message: "ffmpeg is not available.",
+      },
     ],
   })
 
@@ -39,10 +47,30 @@ test("quality summary marks warning checks as requiring review", () => {
 test("asset items keep the user-facing roles visible", () => {
   const assets = buildAssetItems({
     assets: [
-      { role: "final_video", kind: "video", path: "output/task/final.mp4", status: "available" },
-      { role: "narration_audio", kind: "audio", path: "output/task/01.mp3", status: "available" },
-      { role: "primary_visual", kind: "image", path: "output/task/01.png", status: "missing" },
-      { role: "subtitle_text", kind: "subtitle", text: "Scene one.", status: "available" },
+      {
+        role: "final_video",
+        kind: "video",
+        path: "output/task/final.mp4",
+        status: "available",
+      },
+      {
+        role: "narration_audio",
+        kind: "audio",
+        path: "output/task/01.mp3",
+        status: "available",
+      },
+      {
+        role: "primary_visual",
+        kind: "image",
+        path: "output/task/01.png",
+        status: "missing",
+      },
+      {
+        role: "subtitle_text",
+        kind: "subtitle",
+        text: "Scene one.",
+        status: "available",
+      },
     ],
   })
 

@@ -54,7 +54,7 @@ def patched(monkeypatch, tmp_path):
         return await llm_service(**kwargs)
 
     monkeypatch.setattr(
-        "pixelle_video.generation.script_review._call_llm_retrying_empty", fake_retry
+        "pixelle_video.generation.drafting_support._call_llm_retrying_empty", fake_retry
     )
     monkeypatch.setattr(
         long_form_module,
@@ -74,6 +74,8 @@ async def test_long_form_writes_article_and_returns_text(patched):
         title="我的标题",
         language="中文",
         word_count=1500,
+        llm_provider_id="openai-direct",
+        llm_model="gpt-4.1",
         long_form_prompt="按 {word_count} 字写 {language} 长文，标题 {title}：\n{script}",
     )
 
@@ -86,6 +88,8 @@ async def test_long_form_writes_article_and_returns_text(patched):
     # 占位替换：script 注入了 prompt
     assert "确认稿第一句。" in core.llm.last_kwargs["prompt"]
     assert "{script}" not in core.llm.last_kwargs["prompt"]
+    assert core.llm.last_kwargs["provider_id"] == "openai-direct"
+    assert core.llm.last_kwargs["model"] == "gpt-4.1"
     # 落了长文 metadata
     assert core.persistence.metadata["result"]["artifact_type"] == "text"
 
@@ -128,7 +132,6 @@ def test_generation_result_text_allows_null_primary_video():
     result = GenerationResult(
         task_id="t",
         pipeline_id="long_form",
-        entry="script",
         artifact_type="text",
         artifacts=[
             GenerationArtifact(
@@ -147,14 +150,12 @@ def test_generation_result_text_allows_null_primary_video():
 def _long_form_task() -> GenerationTask:
     request = GenerationRequest(
         pipeline_id="long_form",
-        entry="script",
         input={"script": "确认稿。"},
         metadata={"production_template": {"id": LONG_FORM_SKELETON}},
     )
     return GenerationTask(
         task_id="task-1",
         pipeline_id="long_form",
-        entry="script",
         request=request,
         progress=GenerationProgress(stage="write_article"),
     )
@@ -185,11 +186,11 @@ def test_service_converts_long_form_result_to_text():
 # --- 注册（manifest + 骨架） ---
 
 
-def test_long_form_manifest_registered_with_script_entry():
+def test_long_form_manifest_registered_with_script_input():
     manifests = {m.id: m for m in build_default_pipeline_manifests()}
     assert "long_form" in manifests
     manifest = manifests["long_form"]
-    assert manifest.default_entry == "script"
+    assert [field.name for field in manifest.input.required_fields] == ["script"]
     assert manifest.required_capabilities == ["llm", "persistence"]
 
 
@@ -197,9 +198,7 @@ def test_long_form_skeleton_registered_and_compiles():
     registry = build_default_production_template_registry()
     template = registry.get(LONG_FORM_SKELETON)
     assert template.pipeline_id == "long_form"
-    assert template.entry == "script"
     assert template.enabled is True
-    assert template.product_entry == "generate"
     assert "ffmpeg" not in template.required_capabilities
     assert "tts" not in template.required_capabilities
     # 长文提示词默认含 {script} 占位
@@ -209,5 +208,4 @@ def test_long_form_skeleton_registered_and_compiles():
         LONG_FORM_SKELETON, input={"script": "确认稿。"}
     )
     assert request.pipeline_id == "long_form"
-    assert request.entry == "script"
     assert request.params["word_count"] == 1800

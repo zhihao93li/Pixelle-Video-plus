@@ -46,7 +46,7 @@ async def get_file(file_path: str):
     Examples:
     - "abc123.mp4" → output/abc123.mp4
     - "workflows/runninghub/image_flux.json" → workflows/runninghub/image_flux.json
-    - "templates/1080x1920/default.html" → templates/1080x1920/default.html
+    - "templates/1080x1920/image_default.html" → templates/1080x1920/image_default.html
     - "bgm/default.mp3" → bgm/default.mp3
     - "resources/example.png" → resources/example.png
     
@@ -64,14 +64,14 @@ async def get_file(file_path: str):
             "resources/",
         ]
         
-        # Check if path starts with allowed prefix, otherwise try output/
+        # Check if path starts with an allowed prefix; bare paths are output-relative.
         full_path = None
         for prefix in allowed_prefixes:
             if file_path.startswith(prefix):
                 full_path = file_path
                 break
         
-        # If no prefix matched, assume it's in output/ (backward compatibility)
+        # Generated artifact URLs intentionally omit the repeated output/ prefix.
         if full_path is None:
             full_path = f"output/{file_path}"
         

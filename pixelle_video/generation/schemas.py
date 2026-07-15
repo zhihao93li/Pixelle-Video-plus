@@ -1,9 +1,8 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EntryId = Literal["topic", "script", "scenes", "assets", "audio", "video"]
 GenerationStatus = Literal[
     "pending",
     "running",
@@ -34,16 +33,12 @@ class InputFieldSpec(BaseModel):
     default: object | None = None
 
 
-class PipelineEntrySpec(BaseModel):
+class PipelineInputSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: EntryId
-    name: str
     description: str = ""
     required_fields: list[InputFieldSpec] = Field(default_factory=list)
     optional_fields: list[InputFieldSpec] = Field(default_factory=list)
-    start_stage: str
-    skipped_stages: list[str] = Field(default_factory=list)
 
 
 class PipelineStageSpec(BaseModel):
@@ -52,6 +47,8 @@ class PipelineStageSpec(BaseModel):
     id: str
     name: str
     description: str = ""
+    setting_keys: list[str] = Field(default_factory=list)
+    actor: Literal["system", "user", "agent"] = "system"
 
 
 class PipelineOutputSpec(BaseModel):
@@ -70,42 +67,49 @@ class PipelineManifest(BaseModel):
     name: str
     description: str
     category: str
-    entries: list[PipelineEntrySpec]
+    input: PipelineInputSpec
     stages: list[PipelineStageSpec]
+    quick_setting_keys: list[str] = Field(default_factory=list)
     outputs: list[PipelineOutputSpec]
     required_capabilities: list[str] = Field(default_factory=list)
-    default_entry: EntryId | None = None
     access_scope: Literal["public", "agent"] = "public"
-
-    @field_validator("access_scope", mode="before")
-    @classmethod
-    def normalize_legacy_access_scope(cls, value):
-        return "agent" if value == "codex" else value
+    launch_surfaces: list[Literal["react", "agent", "batch"]] = Field(
+        default_factory=lambda: ["react"]
+    )
+    product_family: str = "other"
 
     @model_validator(mode="after")
-    def validate_entries(self):
-        entry_ids = [entry.id for entry in self.entries]
-        if len(entry_ids) != len(set(entry_ids)):
-            raise ValueError(f"Pipeline manifest {self.id!r} has duplicate entry ids")
-        if self.default_entry and self.default_entry not in entry_ids:
+    def validate_contract(self):
+        field_names = [
+            field.name for field in self.input.required_fields + self.input.optional_fields
+        ]
+        if len(field_names) != len(set(field_names)):
+            raise ValueError(f"Pipeline manifest {self.id!r} has duplicate input fields")
+        stage_ids = [stage.id for stage in self.stages]
+        if not stage_ids:
+            raise ValueError(f"Pipeline manifest {self.id!r} must declare at least one stage")
+        if len(stage_ids) != len(set(stage_ids)):
+            raise ValueError(f"Pipeline manifest {self.id!r} has duplicate stage ids")
+        if len(self.quick_setting_keys) != len(set(self.quick_setting_keys)):
+            raise ValueError(f"Pipeline manifest {self.id!r} has duplicate quick setting keys")
+        stage_setting_keys = {key for stage in self.stages for key in stage.setting_keys}
+        unknown_quick_keys = [
+            key for key in self.quick_setting_keys if key not in stage_setting_keys
+        ]
+        if unknown_quick_keys:
             raise ValueError(
-                f"Pipeline manifest {self.id!r} default_entry {self.default_entry!r} "
-                "is not declared in entries"
+                f"Pipeline manifest {self.id!r} declares quick settings outside its "
+                f"stage contract: {', '.join(unknown_quick_keys)}"
             )
+        if self.access_scope == "agent" and "react" in self.launch_surfaces:
+            raise ValueError(f"Agent-only pipeline {self.id!r} cannot be launched from React")
         return self
-
-    def entry(self, entry_id: EntryId) -> PipelineEntrySpec:
-        for entry in self.entries:
-            if entry.id == entry_id:
-                return entry
-        raise KeyError(f"Pipeline {self.id!r} does not support entry {entry_id!r}")
 
 
 class GenerationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     pipeline_id: str
-    entry: EntryId
     input: dict[str, Any]
     params: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -139,7 +143,6 @@ class GenerationResult(BaseModel):
 
     task_id: str
     pipeline_id: str
-    entry: EntryId
     status: Literal["completed"] = "completed"
     # 产物形态：video（默认，向后兼容——旧数据无此字段即按 video 处理）/ image_set（图文帖图集）/ text（长文）
     artifact_type: Literal["video", "image_set", "text"] = "video"
@@ -166,7 +169,6 @@ class GenerationTask(BaseModel):
 
     task_id: str
     pipeline_id: str
-    entry: EntryId
     status: GenerationStatus = "pending"
     progress: GenerationProgress
     request: GenerationRequest

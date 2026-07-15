@@ -45,7 +45,3 @@ npm run build
 ```
 
 Continue with the [quick start](quick-start.md).
-
-## Optional Surface
-
-`web/app.py` is a frozen legacy Streamlit diagnostic surface retained only during migration. The Windows bundle and production product both use the React console; the legacy surface will be removed after compatibility acceptance.

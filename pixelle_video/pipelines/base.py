@@ -65,9 +65,6 @@ class BasePipeline(ABC):
         self.tts = pixelle_video_core.tts
         self.media = pixelle_video_core.media
         self.video = pixelle_video_core.video
-        
-        # Backward compatibility alias
-        self.image = pixelle_video_core.media
     
     @abstractmethod
     async def __call__(
@@ -114,4 +111,3 @@ class BasePipeline(ABC):
             logger.debug(f"Progress: {progress*100:.0f}% - {event_type}")
         else:
             logger.debug(f"Progress: {progress*100:.0f}% - {event_type}")
-

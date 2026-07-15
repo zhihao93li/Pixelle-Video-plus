@@ -42,7 +42,8 @@ def load_generation_task(task_id: str, directory: Path | None = None) -> Generat
     if not path.exists():
         return None
     try:
-        return GenerationTask.model_validate_json(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return GenerationTask.model_validate(payload)
     except (OSError, ValueError) as error:
         logger.warning(f"生成任务状态无法读取：{path}: {error}")
         return None
@@ -53,7 +54,8 @@ def load_generation_tasks(directory: Path | None = None) -> list[GenerationTask]
     tasks: list[GenerationTask] = []
     for path in sorted(target.glob("*.json")):
         try:
-            tasks.append(GenerationTask.model_validate_json(path.read_text(encoding="utf-8")))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            tasks.append(GenerationTask.model_validate(payload))
         except (OSError, ValueError) as error:
             logger.warning(f"生成任务状态无法读取：{path}: {error}")
             continue

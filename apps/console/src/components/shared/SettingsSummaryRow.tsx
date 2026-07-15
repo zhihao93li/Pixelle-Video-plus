@@ -16,7 +16,7 @@ export function SettingsSummaryRow({
   return (
     <button
       className={cn(
-        "flex min-h-14 w-full items-center gap-3 rounded-lg border bg-background px-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+        "flex min-h-14 w-full items-center gap-3 rounded-lg border bg-background px-4 text-left transition-colors hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
         className
       )}
       onClick={onClick}

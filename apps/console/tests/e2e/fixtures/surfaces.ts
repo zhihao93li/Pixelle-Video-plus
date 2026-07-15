@@ -32,6 +32,11 @@ export const FORMAL_SURFACES: readonly FormalSurface[] = [
     mobileVisual: true,
   },
   {
+    name: "generate-topic-video-idle",
+    path: `/create/generate/${fixtureIds.topicTemplate}`,
+    heading: "生成",
+  },
+  {
     name: "generate-image-set-idle",
     path: `/create/generate/${fixtureIds.imageTemplate}`,
     heading: "生成",
@@ -49,7 +54,12 @@ export const FORMAL_SURFACES: readonly FormalSurface[] = [
   {
     name: "recipe-detail",
     path: `/create/recipes/${fixtureIds.videoTemplate}`,
-    heading: "配方详情",
+    heading: "模板详情",
+  },
+  {
+    name: "topic-recipe-detail",
+    path: `/create/recipes/${fixtureIds.topicTemplate}`,
+    heading: "模板详情",
   },
   {
     name: "special-image-to-video-idle",
@@ -65,18 +75,6 @@ export const FORMAL_SURFACES: readonly FormalSurface[] = [
     name: "special-digital-human-idle",
     path: `/create/special/digital_human/${fixtureIds.humanTemplate}`,
     heading: "特殊视频生成",
-    mobileVisual: true,
-  },
-  {
-    name: "script-review-step-1",
-    path: "/create/script-review",
-    heading: "多语言审核出片",
-    mobileVisual: true,
-  },
-  {
-    name: "tasks-partial-failure",
-    path: "/tasks",
-    heading: "任务",
     mobileVisual: true,
   },
   {

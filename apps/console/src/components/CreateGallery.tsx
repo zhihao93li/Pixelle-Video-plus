@@ -2,16 +2,13 @@ import { useEffect, useMemo, useState, type FormEvent } from "react"
 import {
   ArrowRight,
   Bot,
-  FileText,
   Images,
-  Languages,
   Loader2,
   Plus,
   Settings2,
   Sparkles,
   UploadCloud,
   Video,
-  WandSparkles,
   type LucideIcon,
 } from "lucide-react"
 
@@ -36,7 +33,9 @@ import { readableError } from "@/lib/format"
 import {
   cloneProductionTemplate,
   getTemplateGenerationConfig,
+  listPipelines,
   listTemplates,
+  type PipelineManifest,
   type ProductionTemplate,
 } from "@/lib/generationApi"
 import { PART_KEY_LABELS } from "@/lib/pipelineParts"
@@ -48,19 +47,13 @@ import {
   productionSubmissionSummary,
 } from "@/lib/productionSurface"
 import { navigate, routeHref } from "@/lib/router"
-import { isRetiredTemplate } from "@/lib/templatePresentation"
 import { cn } from "@/lib/utils"
 
 type LoadState = "loading" | "ready" | "error"
 type ConfigSummaryState = "loading" | "ready" | "stale" | "error"
 type RecipeDefaultsState = "loading" | "ready" | "error"
 
-const FLOW_ENTRIES = new Set(["script_review"])
-const CODEX_FAMILY_ID = "codex"
-
-function isFlowEntry(template: ProductionTemplate) {
-  return FLOW_ENTRIES.has(template.product_entry)
-}
+const AGENT_FAMILY_ID = "agent"
 
 type Family = {
   id: string
@@ -71,86 +64,26 @@ type Family = {
   newSources: { pipelineId: string; skeletonId: string; label: string }[]
 }
 
-const FAMILIES: Family[] = [
+const FAMILY_PRESENTATION: Array<
+  Pick<Family, "id" | "label" | "tagline" | "icon">
+> = [
   {
-    id: "standard",
-    label: "图文口播",
-    tagline: "文案、配音与画面合成视频",
+    id: "口播视频",
+    label: "口播视频",
+    tagline: "从主题或完整文案开始生成视频",
     icon: Video,
-    pipelineIds: ["standard"],
-    newSources: [
-      {
-        pipelineId: "standard",
-        skeletonId: "pipeline_standard_base_v1",
-        label: "图文口播",
-      },
-    ],
   },
   {
-    id: "asset",
-    label: "素材成片",
-    tagline: "用已有图片和视频组织成片",
+    id: "素材创作",
+    label: "素材创作",
+    tagline: "用已有图片、视频或人物素材生成成品",
     icon: UploadCloud,
-    pipelineIds: ["asset_based"],
-    newSources: [
-      {
-        pipelineId: "asset_based",
-        skeletonId: "pipeline_asset_based_base_v1",
-        label: "素材成片",
-      },
-    ],
   },
   {
-    id: "image_post",
-    label: "图文帖",
-    tagline: "把文案排成封面与多页图集",
+    id: "图文内容",
+    label: "图文内容",
+    tagline: "把文案生成图集或长文",
     icon: Images,
-    pipelineIds: ["image_post"],
-    newSources: [
-      {
-        pipelineId: "image_post",
-        skeletonId: "pipeline_image_post_base_v1",
-        label: "图文帖",
-      },
-    ],
-  },
-  {
-    id: "long_form",
-    label: "长文",
-    tagline: "把确认稿扩写成结构化文章",
-    icon: FileText,
-    pipelineIds: ["long_form"],
-    newSources: [
-      {
-        pipelineId: "long_form",
-        skeletonId: "pipeline_long_form_base_v1",
-        label: "长文",
-      },
-    ],
-  },
-  {
-    id: "direct",
-    label: "专用视频",
-    tagline: "图片动画、动作迁移与数字人口播",
-    icon: WandSparkles,
-    pipelineIds: ["i2v", "action_transfer", "digital_human"],
-    newSources: [
-      {
-        pipelineId: "i2v",
-        skeletonId: "pixelle_i2v_basic_v1",
-        label: "图片生成视频",
-      },
-      {
-        pipelineId: "action_transfer",
-        skeletonId: "pixelle_action_transfer_basic_v1",
-        label: "动作迁移",
-      },
-      {
-        pipelineId: "digital_human",
-        skeletonId: "pixelle_digital_human_basic_v1",
-        label: "数字人",
-      },
-    ],
   },
 ]
 
@@ -173,7 +106,7 @@ function RecipeCard({
         : customizedSummary
           ? `已调整：${customizedSummary}`
           : template.is_custom
-            ? "沿用我的配方设置"
+            ? "沿用我的模板设置"
             : "沿用出厂设置"
 
   return (
@@ -191,7 +124,7 @@ function RecipeCard({
           {isProjectDefault ? (
             <Badge variant="success">项目默认</Badge>
           ) : template.is_custom ? (
-            <Badge variant="outline">我的配方</Badge>
+            <Badge variant="outline">我的模板</Badge>
           ) : null}
         </div>
 
@@ -234,7 +167,7 @@ function RecipeCard({
           </a>
         </Button>
         <Button
-          aria-label={`调整「${template.display_name}」配方`}
+          aria-label={`调整「${template.display_name}」模板`}
           asChild
           className="size-11 sm:size-8"
           size="icon"
@@ -254,7 +187,7 @@ function configText(template: ProductionTemplate, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
-function CodexRecipeCard({ template }: { template: ProductionTemplate }) {
+function AgentRecipeCard({ template }: { template: ProductionTemplate }) {
   const style =
     configText(template, "prompt_prefix") ??
     configText(template, "image_prompt_visual_context") ??
@@ -263,7 +196,7 @@ function CodexRecipeCard({ template }: { template: ProductionTemplate }) {
   const frameTemplate = configText(template, "frame_template")
   const layout = frameTemplate?.includes("1080x1920")
     ? "竖版字幕画面"
-    : (frameTemplate ?? "跟随配方版式")
+    : (frameTemplate ?? "跟随模板版式")
 
   return (
     <article className="rounded-lg border bg-muted/15 p-4">
@@ -319,12 +252,12 @@ function CodexRecipeCard({ template }: { template: ProductionTemplate }) {
         <p className="text-xs leading-5 text-muted-foreground">
           {template.enabled
             ? "这里仅展示和配置；制作必须从 Agent 发起。"
-            : "这份配方已停用；调整配方后可在设置中重新启用。"}
+            : "这份模板已停用；调整模板后可在设置中重新启用。"}
         </p>
         <Button asChild size="sm" variant="outline">
           <a href={routeHref(`/create/recipes/${template.id}`)}>
             <Settings2 data-icon="inline-start" />
-            调整配方
+            调整模板
           </a>
         </Button>
       </div>
@@ -393,7 +326,7 @@ function NewRecipeForm({
       className="mb-4 rounded-lg border border-dashed bg-muted/20 p-4"
       onSubmit={handleSubmit}
     >
-      <div className="text-sm font-medium">新建{family.label}配方</div>
+      <div className="text-sm font-medium">新建{family.label}模板</div>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         从出厂设置复制一份，再调整成适合你的默认效果。
       </p>
@@ -420,7 +353,7 @@ function NewRecipeForm({
             </label>
           ) : null}
           <label className="flex min-w-0 flex-col gap-1.5 text-sm">
-            <span className="text-xs text-muted-foreground">配方名称</span>
+            <span className="text-xs text-muted-foreground">模板名称</span>
             <Input
               autoFocus
               className="h-11 sm:h-8"
@@ -451,7 +384,7 @@ function NewRecipeForm({
             ) : (
               <Plus data-icon="inline-start" />
             )}
-            创建配方
+            创建模板
           </Button>
         </div>
       </div>
@@ -464,7 +397,8 @@ export function CreateGallery() {
   const [loadState, setLoadState] = useState<LoadState>("loading")
   const [error, setError] = useState<string | null>(null)
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
-  const [codexTemplates, setCodexTemplates] = useState<ProductionTemplate[]>([])
+  const [pipelines, setPipelines] = useState<PipelineManifest[]>([])
+  const [agentTemplates, setAgentTemplates] = useState<ProductionTemplate[]>([])
   const [reloadToken, setReloadToken] = useState(0)
   const [configReloadToken, setConfigReloadToken] = useState(0)
   const [selectedFamilyId, setSelectedFamilyId] = useState<string | null>(null)
@@ -484,7 +418,10 @@ export function CreateGallery() {
       setError(null)
       setNewRecipeFamily(null)
       try {
-        const response = await listTemplates(projectId ?? undefined)
+        const [response, pipelineResponse] = await Promise.all([
+          listTemplates(projectId ?? undefined),
+          listPipelines(),
+        ])
         if (cancelled) {
           return
         }
@@ -492,7 +429,8 @@ export function CreateGallery() {
         setConfigFailures({})
         setConfigSummaryState("loading")
         setTemplates(response.templates)
-        setCodexTemplates(response.agent_templates ?? response.codex_templates ?? [])
+        setPipelines(pipelineResponse.pipelines)
+        setAgentTemplates(response.agent_templates ?? [])
         setLoadState("ready")
       } catch (loadError) {
         if (!cancelled) {
@@ -513,12 +451,7 @@ export function CreateGallery() {
       return
     }
 
-    const visible = templates.filter(
-      (template) =>
-        template.enabled &&
-        !isRetiredTemplate(template) &&
-        !isFlowEntry(template)
-    )
+    const visible = templates.filter((template) => template.enabled)
     let cancelled = false
 
     async function loadConfigSummaries() {
@@ -577,36 +510,62 @@ export function CreateGallery() {
   const productTemplates = useMemo(
     () =>
       templates.filter(
-        (template) =>
-          template.enabled &&
-          !isRetiredTemplate(template) &&
-          !isFlowEntry(template)
+        (template) => template.enabled
       ),
     [templates]
   )
-  const flowTemplates = useMemo(
+  const families = useMemo<Family[]>(
     () =>
-      templates.filter(
-        (template) => isFlowEntry(template) && !template.retired
-      ),
-    [templates]
+      FAMILY_PRESENTATION.flatMap((presentation) => {
+        const familyPipelines = pipelines.filter(
+          (pipeline) =>
+            pipeline.product_family === presentation.id &&
+            pipeline.access_scope === "public" &&
+            pipeline.launch_surfaces.includes("react")
+        )
+        if (familyPipelines.length === 0) return []
+        const pipelineIds = familyPipelines.map((pipeline) => pipeline.id)
+        const newSources = familyPipelines.flatMap((pipeline) => {
+          const skeleton = productTemplates.find(
+            (template) =>
+              template.pipeline_id === pipeline.id && !template.is_custom
+          )
+          return skeleton
+            ? [
+                {
+                  pipelineId: pipeline.id,
+                  skeletonId: skeleton.id,
+                  label: pipeline.name,
+                },
+              ]
+            : []
+        })
+        return [{ ...presentation, pipelineIds, newSources }]
+      }),
+    [pipelines, productTemplates]
   )
-  const visibleCodexTemplates = codexTemplates.filter(
-    (template) => !isRetiredTemplate(template)
-  )
+  const visibleAgentTemplates = agentTemplates
   const defaultTemplateId = project?.default_production_template_id || ""
   const defaultTemplate = productTemplates.find(
     (template) => template.id === defaultTemplateId
   )
-  const defaultFamily = FAMILIES.find((family) =>
+  const defaultFamily = families.find((family) =>
     family.pipelineIds.includes(defaultTemplate?.pipeline_id ?? "")
   )
-  const selectedFamily =
-    FAMILIES.find((family) => family.id === selectedFamilyId) ??
+  const selectedFamily = families.find(
+    (family) => family.id === selectedFamilyId
+  ) ??
     defaultFamily ??
-    FAMILIES[0]
-  const codexSelected =
-    selectedFamilyId === CODEX_FAMILY_ID && visibleCodexTemplates.length > 0
+    families[0] ?? {
+      id: "unavailable",
+      label: "生产方式",
+      tagline: "当前没有可从控制台发起的生产路线",
+      icon: Video,
+      pipelineIds: [],
+      newSources: [],
+    }
+  const agentSelected =
+    selectedFamilyId === AGENT_FAMILY_ID && visibleAgentTemplates.length > 0
   const selectedTemplates = productTemplates.filter((template) =>
     selectedFamily.pipelineIds.includes(template.pipeline_id)
   )
@@ -618,15 +577,13 @@ export function CreateGallery() {
     selectedConfigFailures.length === selectedTemplates.length
       ? "error"
       : "stale"
-  const selectedConfigError = `${selectedConfigFailures.length} 份配方读取失败：${selectedConfigFailures
+  const selectedConfigError = `${selectedConfigFailures.length} 份模板读取失败：${selectedConfigFailures
     .slice(0, 2)
     .join(
       "；"
-    )}${selectedConfigFailures.length > 2 ? "；还有其他配方未能读取" : ""}`
-  const hasAnyEntry =
-    productTemplates.length > 0 ||
-    flowTemplates.length > 0 ||
-    visibleCodexTemplates.length > 0
+    )}${selectedConfigFailures.length > 2 ? "；还有其他模板未能读取" : ""}`
+  const hasAnyProduction =
+    families.length > 0 || visibleAgentTemplates.length > 0
 
   return (
     <PageFrame>
@@ -642,15 +599,15 @@ export function CreateGallery() {
             </Badge>
           ) : undefined
         }
-        description="先选择成品类型，再用现成配方开始制作；需要长期调整的效果可以保存为自己的配方。"
+        description="先选择成品类型，再用现成模板开始制作；需要长期调整的效果可以保存为自己的模板。"
         title="选择生产方式"
       />
 
       {loadState === "loading" ? (
         <AsyncState
-          description="正在读取当前项目可用的配方。"
+          description="正在读取当前项目可用的模板。"
           state="loading"
-          title="正在读取配方"
+          title="正在读取模板"
         />
       ) : null}
 
@@ -666,21 +623,21 @@ export function CreateGallery() {
               重新读取
             </Button>
           }
-          description={error || "暂时无法读取配方，请重试。"}
+          description={error || "暂时无法读取模板，请重试。"}
           state="error"
-          title="配方读取失败"
+          title="模板读取失败"
         />
       ) : null}
 
-      {loadState === "ready" && !hasAnyEntry ? (
+      {loadState === "ready" && !hasAnyProduction ? (
         <EmptyState
-          description="当前没有可用的生产配方。请先到设置中检查配方状态。"
+          description="当前没有可用的生产模板。请先到设置中检查模板状态。"
           icon={Sparkles}
-          title="暂无可用配方"
+          title="暂无可用模板"
         />
       ) : null}
 
-      {loadState === "ready" && hasAnyEntry ? (
+      {loadState === "ready" && hasAnyProduction ? (
         <div className="grid min-w-0 gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
           <WorkspacePanel
             contentClassName="overflow-x-auto lg:overflow-visible"
@@ -693,9 +650,9 @@ export function CreateGallery() {
               aria-label="生产方式"
               className="flex min-w-max gap-2 pb-1 lg:min-w-0 lg:flex-col"
             >
-              {FAMILIES.map((family) => {
+              {families.map((family) => {
                 const Icon = family.icon
-                const active = !codexSelected && selectedFamily.id === family.id
+                const active = !agentSelected && selectedFamily.id === family.id
                 const count = productTemplates.filter((template) =>
                   family.pipelineIds.includes(template.pipeline_id)
                 ).length
@@ -728,17 +685,17 @@ export function CreateGallery() {
                   </button>
                 )
               })}
-              {visibleCodexTemplates.length > 0 ? (
+              {visibleAgentTemplates.length > 0 ? (
                 <button
-                  aria-current={codexSelected ? "page" : undefined}
+                  aria-current={agentSelected ? "page" : undefined}
                   className={cn(
                     "flex min-h-11 min-w-40 items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-[var(--motion-duration-fast)] focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none lg:min-w-0",
-                    codexSelected
+                    agentSelected
                       ? "bg-primary/10 text-primary"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
                   onClick={() => {
-                    setSelectedFamilyId(CODEX_FAMILY_ID)
+                    setSelectedFamilyId(AGENT_FAMILY_ID)
                     setNewRecipeFamily(null)
                   }}
                   type="button"
@@ -752,8 +709,8 @@ export function CreateGallery() {
                       Agent 配图，Pixelle 合成
                     </span>
                   </span>
-                  <Badge variant={codexSelected ? "info" : "outline"}>
-                    {visibleCodexTemplates.length}
+                  <Badge variant={agentSelected ? "info" : "outline"}>
+                    {visibleAgentTemplates.length}
                   </Badge>
                 </button>
               ) : null}
@@ -761,14 +718,14 @@ export function CreateGallery() {
           </WorkspacePanel>
 
           <div className="flex min-w-0 flex-col gap-5">
-            {codexSelected ? (
+            {agentSelected ? (
               <WorkspacePanel
                 description="了解 Agent 与 Pixelle 协作生成配图视频的方式，并调整长期默认设置"
                 title="Agent 专用制作"
               >
                 <div className="grid gap-3">
-                  {visibleCodexTemplates.map((template) => (
-                    <CodexRecipeCard key={template.id} template={template} />
+                  {visibleAgentTemplates.map((template) => (
+                    <AgentRecipeCard key={template.id} template={template} />
                   ))}
                 </div>
               </WorkspacePanel>
@@ -791,7 +748,7 @@ export function CreateGallery() {
                       variant="outline"
                     >
                       <Plus data-icon="inline-start" />
-                      新建配方
+                      新建模板
                     </Button>
                   }
                   title={selectedFamily.label}
@@ -817,8 +774,8 @@ export function CreateGallery() {
                       state={selectedConfigState}
                       title={
                         selectedConfigState === "error"
-                          ? "无法读取配方默认设置"
-                          : "部分配方默认设置可能已过期"
+                          ? "无法读取模板默认设置"
+                          : "部分模板默认设置可能已过期"
                       }
                     />
                   ) : null}
@@ -862,52 +819,16 @@ export function CreateGallery() {
                           variant="outline"
                         >
                           <Plus data-icon="inline-start" />
-                          新建配方
+                          新建模板
                         </Button>
                       }
                       className="min-h-64"
                       description="可以从这条生产方式的出厂设置创建一份。"
                       icon={selectedFamily.icon}
-                      title="还没有可用配方"
+                      title="还没有可用模板"
                     />
                   )}
                 </WorkspacePanel>
-
-                {flowTemplates.length > 0 ? (
-                  <WorkspacePanel
-                    description="需要先审核内容，再一次提交多个结果"
-                    title="审核流程"
-                  >
-                    <div className="divide-y">
-                      {flowTemplates.map((template) => (
-                        <a
-                          className="flex min-h-14 items-center gap-3 py-3 text-left transition-colors duration-[var(--motion-duration-fast)] hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-                          href={routeHref(productionStartRoute(template))}
-                          key={template.id}
-                        >
-                          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                            <Languages className="size-4" />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-medium">
-                              {template.display_name}
-                            </span>
-                            <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                              {productionDescription(template)}
-                            </span>
-                          </span>
-                          <Badge
-                            className="hidden sm:inline-flex"
-                            variant="outline"
-                          >
-                            审核后批量
-                          </Badge>
-                          <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
-                        </a>
-                      ))}
-                    </div>
-                  </WorkspacePanel>
-                ) : null}
               </>
             )}
           </div>

@@ -14,7 +14,7 @@ BUILD_MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BUILD_MODULE)
 
 
-def test_release_allowlist_excludes_runtime_state_and_legacy_ui():
+def test_release_allowlist_excludes_runtime_state_and_development_files():
     release_paths = set(BUILD_MODULE.WINDOWS_RELEASE_PATHS)
 
     assert "api" in release_paths

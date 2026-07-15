@@ -12,7 +12,7 @@ The production configuration surface is the console Settings area. Each section 
 
 ## Configuration Sources
 
-Runtime configuration is stored in local `config.yaml` and the backend data directory. The React console is the production configuration surface. Do not edit configuration concurrently from the legacy Streamlit process during migration, because a stale process can overwrite newer values. Never place credentials or business defaults in frontend code.
+Runtime configuration is stored in local `config.yaml` and the backend data directory. The React console is the production configuration surface. Never place credentials or business defaults in frontend code.
 
 Generation settings use one precedence rule:
 

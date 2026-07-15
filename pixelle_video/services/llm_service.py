@@ -63,13 +63,8 @@ class LLMService:
         )
     """
     
-    def __init__(self, config: dict):
-        """
-        Initialize LLM service
-        
-        Args:
-            config: Full application config dict (kept for backward compatibility)
-        """
+    def __init__(self):
+        """Initialize the LLM service."""
         # Note: We no longer cache config here to support hot reload
         # Config is read dynamically from config_manager in _get_config_value()
         self._client: Optional[AsyncOpenAI] = None
@@ -87,11 +82,17 @@ class LLMService:
         """
         from pixelle_video.config import config_manager
         return getattr(config_manager.config.llm, key, default)
+
+    def _resolve_provider(self, provider_id: str | None = None):
+        from pixelle_video.config import config_manager
+
+        return config_manager.config.llm.active_provider(provider_id)
     
     def _create_client(
         self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
+        provider_id: Optional[str] = None,
     ) -> AsyncOpenAI:
         """
         Create OpenAI client
@@ -104,19 +105,14 @@ class LLMService:
             AsyncOpenAI client instance
         """
         # Get API key (priority: parameter > config)
-        final_api_key = (
-            api_key
-            or self._get_config_value("api_key")
-            or "dummy-key"  # Ollama doesn't need real key
-        )
-        
-        # AiHubMix is the fixed relay endpoint. Keep the parameter escape hatch
-        # for tests and low-level callers, but do not inherit stale provider
-        # URLs from older config files.
-        final_base_url = (
-            base_url
-            or AIHUBMIX_BASE_URL
-        )
+        provider = None
+        if not api_key or not base_url:
+            try:
+                _, provider = self._resolve_provider(provider_id)
+            except ValueError:
+                provider = None
+        final_api_key = api_key or getattr(provider, "api_key", "") or "dummy-key"
+        final_base_url = base_url or getattr(provider, "base_url", "") or AIHUBMIX_BASE_URL
         
         # Create client
         client_kwargs = {"api_key": final_api_key}
@@ -130,6 +126,7 @@ class LLMService:
         prompt: str,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
+        provider_id: Optional[str] = None,
         model: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 2000,
@@ -170,14 +167,26 @@ class LLMService:
             print(review.title)  # Structured access
         """
         # Create client (new instance each time to support parameter overrides)
-        client = self._create_client(api_key=api_key, base_url=base_url)
+        selected_provider = None
+        if not api_key or not base_url or not model:
+            try:
+                _, selected_provider = self._resolve_provider(provider_id)
+            except ValueError:
+                if provider_id:
+                    raise
+        client = self._create_client(
+            api_key=api_key or getattr(selected_provider, "api_key", None),
+            base_url=base_url or getattr(selected_provider, "base_url", None),
+            provider_id=provider_id,
+        )
         
         # Get model (priority: parameter > config)
         final_model = (
             model
-            or self._get_config_value("model")
-            or "gpt-3.5-turbo"  # Default fallback
+            or getattr(selected_provider, "default_model", "")
         )
+        if not final_model:
+            raise ValueError("所选 LLM 服务没有默认模型，请明确选择模型。")
         
         logger.debug(f"LLM call: model={final_model}, base_url={client.base_url}, response_type={response_type}")
         
@@ -340,10 +349,12 @@ You MUST respond with ONLY a valid JSON object (no markdown, no extra text)."""
         Example:
             print(f"Using model: {pixelle_video.llm.active}")
         """
-        return self._get_config_value("model", "gpt-3.5-turbo")
+        try:
+            provider_id, provider = self._resolve_provider()
+        except ValueError:
+            return "未配置"
+        return f"{provider.name or provider_id} / {provider.default_model or '未选择模型'}"
     
     def __repr__(self) -> str:
         """String representation"""
-        model = self.active
-        base_url = AIHUBMIX_BASE_URL
-        return f"<LLMService model={model!r} base_url={base_url!r}>"
+        return f"<LLMService active={self.active!r}>"

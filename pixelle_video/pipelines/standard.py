@@ -13,8 +13,9 @@
 """
 Standard Video Generation Pipeline
 
-Standard workflow for generating short videos from topic or fixed script.
-This is the default pipeline for general-purpose video generation.
+Shared implementation for the formal topic-to-video and script-to-video routes.
+Both routes enter this pipeline with a complete script. Topic writing and human
+confirmation happen before this runtime is started.
 Refactored to use LinearVideoPipeline (Template Method Pattern).
 """
 
@@ -25,6 +26,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from pixelle_video.content.drafting import split_confirmed_script
 from pixelle_video.generation.compose_runtime import (
     ComposeRuntimeContext,
     render_with_compose_runtime,
@@ -40,9 +42,7 @@ from pixelle_video.models.storyboard import (
 from pixelle_video.pipelines.linear import LinearVideoPipeline, PipelineContext
 from pixelle_video.utils.content_generators import (
     generate_image_prompts,
-    generate_narrations_from_topic,
     generate_title,
-    split_narration_script,
 )
 from pixelle_video.utils.os_util import create_task_output_dir, get_task_final_video_path
 from pixelle_video.utils.prompt_helper import build_image_prompt
@@ -65,9 +65,7 @@ class StandardPipeline(LinearVideoPipeline):
     5. Concatenate all segments
     6. Add BGM (optional)
 
-    Supports two modes:
-    - "generate": LLM generates narrations from topic
-    - "fixed": Use provided script as-is (each line = one narration)
+    Scene boundaries are always decided by the configured scene-planning LLM.
     """
 
     # ==================== Lifecycle Methods ====================
@@ -75,9 +73,7 @@ class StandardPipeline(LinearVideoPipeline):
     async def setup_environment(self, ctx: PipelineContext):
         """Step 1: Setup task directory and environment."""
         text = ctx.input_text
-        mode = ctx.params.get("mode", "generate")
-
-        logger.info(f"🚀 Starting StandardPipeline in '{mode}' mode")
+        logger.info("🚀 Starting StandardPipeline with a confirmed script")
         logger.info(f"   Text length: {len(text)} chars")
 
         # Create isolated task directory
@@ -101,25 +97,28 @@ class StandardPipeline(LinearVideoPipeline):
             logger.info(f"   Will copy final video to: {output_path}")
 
     async def generate_content(self, ctx: PipelineContext):
-        """Step 2: Generate or process script/narrations."""
-        mode = ctx.params.get("mode", "generate")
-        text = ctx.input_text
-        n_scenes = ctx.params.get("n_scenes", 5)
-        min_words = ctx.params.get("min_narration_words", 5)
-        max_words = ctx.params.get("max_narration_words", 20)
-
-        if mode == "generate":
-            self._report_progress(ctx.progress_callback, "generating_narrations", 0.05)
-            ctx.narrations = await generate_narrations_from_topic(
-                self.llm, topic=text, n_scenes=n_scenes, min_words=min_words, max_words=max_words
-            )
-            logger.info(f"✅ Generated {len(ctx.narrations)} narrations")
-        else:  # fixed
-            self._report_progress(ctx.progress_callback, "splitting_script", 0.05)
-            split_mode = ctx.params.get("split_mode", "paragraph")
-            ctx.narrations = await split_narration_script(text, split_mode=split_mode)
-            logger.info(f"✅ Split script into {len(ctx.narrations)} segments (mode={split_mode})")
-            logger.info(f"   Note: n_scenes={n_scenes} is ignored in fixed mode")
+        """Step 2: Plan scenes from the complete script."""
+        confirmed_scenes = ctx.params.get("_confirmed_scenes")
+        if isinstance(confirmed_scenes, list) and confirmed_scenes:
+            narrations = [
+                str(narration).strip()
+                for narration in confirmed_scenes
+                if str(narration).strip()
+            ]
+            if not narrations:
+                raise ValueError("Confirmed scene plan is empty")
+            ctx.narrations = narrations
+            logger.info(f"✅ Using {len(ctx.narrations)} human-confirmed scenes")
+            return
+        self._report_progress(ctx.progress_callback, "splitting_script", 0.05)
+        ctx.narrations = await split_confirmed_script(
+            llm_service=self.llm,
+            script=ctx.input_text,
+            settings=ctx.params,
+            language=str(ctx.params.get("_split_language") or "Chinese"),
+            topic=str(ctx.params.get("_split_topic") or ""),
+        )
+        logger.info(f"✅ Scene-planning LLM produced {len(ctx.narrations)} scenes")
 
     async def determine_title(self, ctx: PipelineContext):
         """Step 3: Determine or generate video title."""
@@ -129,7 +128,6 @@ class StandardPipeline(LinearVideoPipeline):
         # This is fine as they are independent in StandardPipeline logic.
 
         title = ctx.params.get("title")
-        mode = ctx.params.get("mode", "generate")
         text = ctx.input_text
 
         if title:
@@ -137,17 +135,13 @@ class StandardPipeline(LinearVideoPipeline):
             logger.info(f"   Title: '{title}' (user-specified)")
         else:
             self._report_progress(ctx.progress_callback, "generating_title", 0.01)
-            if mode == "generate":
-                ctx.title = await generate_title(self.llm, text, strategy="auto")
-                logger.info(f"   Title: '{ctx.title}' (auto-generated)")
-            else:  # fixed
-                ctx.title = await generate_title(self.llm, text, strategy="llm")
-                logger.info(f"   Title: '{ctx.title}' (LLM-generated)")
+            ctx.title = await generate_title(self.llm, text, strategy="llm")
+            logger.info(f"   Title: '{ctx.title}' (LLM-generated)")
 
     async def plan_visuals(self, ctx: PipelineContext):
         """Step 4: Generate image prompts or visual descriptions."""
         # Detect template type to determine if media generation is needed
-        frame_template = ctx.params.get("frame_template") or "1080x1920/default.html"
+        frame_template = ctx.params.get("frame_template") or "1080x1920/image_default.html"
 
         template_name = Path(frame_template).name
         template_type = get_template_type(template_name)
@@ -232,10 +226,9 @@ class StandardPipeline(LinearVideoPipeline):
 
     async def initialize_storyboard(self, ctx: PipelineContext):
         """Step 5: Create Storyboard object and frames."""
-        # === Handle TTS parameter compatibility ===
+        # === Resolve TTS parameters ===
         tts_inference_mode = ctx.params.get("tts_inference_mode")
         tts_voice = ctx.params.get("tts_voice")
-        voice_id = ctx.params.get("voice_id")
         tts_workflow = ctx.params.get("tts_workflow")
         default_tts_mode = self.core.tts.config.get("inference_mode", "local")
         final_tts_mode = tts_inference_mode or default_tts_mode
@@ -243,25 +236,17 @@ class StandardPipeline(LinearVideoPipeline):
         final_voice_id = None
         final_tts_workflow = tts_workflow
 
-        if final_tts_mode:
-            # New API from web UI
-            if final_tts_mode == "local":
-                final_voice_id = tts_voice or voice_id or "zh-CN-YunjianNeural"
-                final_tts_workflow = None
-                logger.debug(f"TTS Mode: local (voice={final_voice_id})")
-            elif final_tts_mode == "fish":
-                final_voice_id = tts_voice or voice_id
-                final_tts_workflow = None
-                logger.debug(f"TTS Mode: fish (reference_id={final_voice_id or 'default'})")
-            elif final_tts_mode == "comfyui":
-                final_voice_id = None
-                logger.debug(f"TTS Mode: comfyui (workflow={final_tts_workflow})")
-        else:
-            # Old API
-            final_voice_id = voice_id or tts_voice or "zh-CN-YunjianNeural"
-            logger.debug(
-                f"TTS Mode: legacy (voice_id={final_voice_id}, workflow={final_tts_workflow})"
-            )
+        if final_tts_mode == "local":
+            final_voice_id = tts_voice or "zh-CN-YunjianNeural"
+            final_tts_workflow = None
+            logger.debug(f"TTS Mode: local (voice={final_voice_id})")
+        elif final_tts_mode == "fish":
+            final_voice_id = tts_voice
+            final_tts_workflow = None
+            logger.debug(f"TTS Mode: fish (reference_id={final_voice_id or 'default'})")
+        elif final_tts_mode == "comfyui":
+            final_voice_id = None
+            logger.debug(f"TTS Mode: comfyui (workflow={final_tts_workflow})")
 
         # Create config
         ctx.config = StoryboardConfig(
@@ -282,7 +267,7 @@ class StandardPipeline(LinearVideoPipeline):
             media_workflow=ctx.params.get("media_workflow"),
             image_provider=ctx.params.get("image_provider"),
             image_model=ctx.params.get("image_model"),
-            frame_template=ctx.params.get("frame_template") or "1080x1920/default.html",
+            frame_template=ctx.params.get("frame_template") or "1080x1920/image_default.html",
             template_params=ctx.params.get("template_params"),
         )
 

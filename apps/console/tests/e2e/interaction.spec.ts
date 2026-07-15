@@ -1,7 +1,11 @@
 import { expect, test } from "playwright/test"
 
 import { preparePage } from "./fixtures/app"
-import { fixtureIds, installApiFixtures } from "./fixtures/api"
+import {
+  fixtureIds,
+  installApiFixtures,
+  type ApiFixtureRequest,
+} from "./fixtures/api"
 
 test.describe("键盘与浏览器历史", () => {
   for (const viewport of [
@@ -25,11 +29,11 @@ test.describe("键盘与浏览器历史", () => {
       const navigation = page
         .locator('nav[aria-label="主导航"]:visible')
         .first()
-      const tasksLink = navigation.getByRole("link", { name: "任务" })
-      await tasksLink.focus()
+      const libraryLink = navigation.getByRole("link", { name: "作品库" })
+      await libraryLink.focus()
       await page.keyboard.press("Enter")
-      await expect(page).toHaveURL(/#\/tasks$/)
-      await expect(tasksLink).toHaveAttribute("aria-current", "page")
+      await expect(page).toHaveURL(/#\/library/)
+      await expect(libraryLink).toHaveAttribute("aria-current", "page")
       expect(unhandledApi).toEqual([])
     })
   }
@@ -41,9 +45,9 @@ test.describe("键盘与浏览器历史", () => {
     await page.goto("/#/create", { waitUntil: "networkidle" })
 
     const navigation = page.locator('nav[aria-label="主导航"]:visible').first()
-    await navigation.getByRole("link", { name: "任务" }).click()
+    await navigation.getByRole("link", { name: "作品库" }).click()
 
-    await expect(page).toHaveURL(/#\/tasks$/)
+    await expect(page).toHaveURL(/#\/library/)
     await expect(page.locator("#main-content")).toBeFocused()
     expect(unhandledApi).toEqual([])
   })
@@ -178,10 +182,10 @@ test.describe("键盘与浏览器历史", () => {
     await expect(
       page.getByText("有未保存更改", { exact: true }).first()
     ).toBeVisible()
-    const tasksLink = page
+    const libraryLink = page
       .locator('nav[aria-label="主导航"]:visible')
-      .getByRole("link", { name: "任务" })
-    await tasksLink.click()
+      .getByRole("link", { name: "作品库" })
+    await libraryLink.click()
 
     const dialog = page.getByRole("alertdialog")
     await expect(dialog).toBeVisible()
@@ -193,37 +197,62 @@ test.describe("键盘与浏览器历史", () => {
       "PetWoods 内容计划（未保存）"
     )
 
-    await tasksLink.click()
+    await libraryLink.click()
     await page.getByRole("button", { name: "放弃更改并离开" }).click()
-    await expect(page).toHaveURL(/#\/tasks$/)
+    await expect(page).toHaveURL(/#\/library/)
     expect(unhandledApi).toEqual([])
   })
 })
 
-test("配方设置直接编辑，并按 Provider 条件展示 Workflow", async ({ page }) => {
-  const unhandledApi = await installApiFixtures(page)
+test("模板设置直接编辑，并按 Provider 条件展示 Workflow", async ({ page }) => {
+  const requests: ApiFixtureRequest[] = []
+  const unhandledApi = await installApiFixtures(page, {
+    captureJsonRequests: requests,
+    imageProvidersReady: true,
+  })
   await preparePage(page)
+  await page.addInitScript(() => {
+    window.localStorage.setItem("pixelle-expert-mode", "true")
+  })
   await page.goto(`/#/create/recipes/${fixtureIds.videoTemplate}`, {
     waitUntil: "networkidle",
   })
 
-  await expect(page.getByRole("heading", { name: "文案生成" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "内容处理" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "画面生成" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "配音" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "版式与输出" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "内容起草设置" })).toHaveCount(
+    0
+  )
+  await expect(page.getByRole("heading", { name: "1. 分镜" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "2. 每镜画面" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "4. 合成" })).toBeVisible()
   await expect(page.getByText("生产步骤与默认设置")).toHaveCount(0)
   await expect(
     page.getByRole("button", { name: "调整", exact: true })
   ).toHaveCount(0)
 
-  await page.getByLabel("生成方式 Provider").click()
-  await page.getByRole("option", { name: "RunningHub 云端" }).click()
-  await expect(page.getByLabel("生成方式 Workflow")).toBeVisible()
+  await expect(
+    page.getByRole("combobox", { name: "每镜画面 workflow" })
+  ).toBeVisible()
+  await page.getByRole("combobox", { name: "图片 Provider" }).click()
+  await page.getByRole("option", { name: "阿里云百炼" }).click()
+  await expect(
+    page.getByRole("combobox", { name: "每镜画面 workflow" })
+  ).toHaveCount(0)
+  await page.getByRole("combobox", { name: "图片模型" }).click()
+  await page.getByRole("option", { name: "Qwen-Image 2.0 Pro" }).click()
 
   const save = page.getByRole("button", { name: "保存生产设置" })
   await expect(save).toBeEnabled()
   await save.click()
   await expect(page.getByText("生产设置已保存", { exact: true })).toBeVisible()
+  const saved = requests.find(
+    (request) =>
+      request.method === "PUT" && request.path.endsWith("/generation-config")
+  )
+  expect(saved?.body).toMatchObject({
+    overrides: {
+      image_provider: "aliyun_bailian",
+      image_model: "qwen-image-2.0-pro",
+    },
+  })
   expect(unhandledApi).toEqual([])
 })

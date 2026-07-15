@@ -14,7 +14,6 @@ const VIEWPORT = { width: 2560, height: 1200 }
 
 const CASES: FrameExpectation[] = [
   { path: "/create", heading: "快速生产", width: 1920, x: 432 },
-  { path: "/tasks", heading: "任务", width: 1920, x: 432 },
   {
     path: `/library?task=${fixtureIds.historyVideoTask}`,
     heading: "作品库",
@@ -26,12 +25,6 @@ const CASES: FrameExpectation[] = [
     heading: "设置",
     width: 1440,
     x: 672,
-  },
-  {
-    path: "/create/script-review",
-    heading: "多语言审核出片",
-    width: 1040,
-    x: 872,
   },
   {
     path: `/create/special/image_to_video/${fixtureIds.i2vTemplate}`,

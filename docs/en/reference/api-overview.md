@@ -16,24 +16,25 @@ The routes below use the `/api` prefix. OpenAPI documentation is available at `/
 | `GET` | `/generation/templates?project=<id>` | Read available and default recipes for a project |
 | `GET` | `/generation/templates/{template_id}` | Read recipe details |
 
-## Submit One Task
+## Submit One Production
 
-`POST /generation/templates/{template_id}/tasks`
+`POST /production-tasks`
 
 ```json
 {
+  "request_id": "content-id:revision-3",
+  "project_id": "project-id",
+  "pipeline_id": "script_to_video",
+  "recipe_id": "pipeline_standard_base_v1",
   "input": {
     "script": "Cats need clean water every day."
   },
-  "metadata": {
-    "project_id": "project-id",
-    "source": "api"
-  },
-  "idempotency_key": "content-id:revision-3"
+  "overrides": {},
+  "source": "react"
 }
 ```
 
-The response contains `generation_task_id` and the complete initial task. Required input fields and allowed overrides are defined by the selected recipe.
+The response contains a stable `production_task_id`, `content_item_id`, and the complete production task. Required input fields and allowed overrides are defined by the selected pipeline and recipe. Reuse the same `request_id` for retries of the same logical request.
 
 ## Submit a Batch
 
@@ -57,18 +58,21 @@ A batch can contain item-level validation failures. Each item returns either a c
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/generation/tasks/{task_id}` | Read a canonical generation task |
-| `GET` | `/generation/tasks/{task_id}/result` | Read a completed result |
-| `DELETE` | `/generation/tasks/{task_id}` | Cancel one unfinished task |
+| `GET` | `/production-tasks` | List workbench production tasks |
+| `GET` | `/production-tasks/{task_id}` | Read a stable production task |
+| `DELETE` | `/production-tasks/{task_id}` | Cancel one unfinished production task |
+| `POST` | `/production-tasks/{task_id}/retry` | Retry a failed or cancelled production unchanged |
+| `GET` | `/generation/tasks/{task_id}` | Read an execution attempt |
+| `GET` | `/generation/tasks/{task_id}/result` | Read execution artifacts |
 | `GET` | `/generation/batches` | List batches |
 | `GET` | `/generation/batches/{batch_id}` | Read a batch and its children |
 | `DELETE` | `/generation/batches/{batch_id}` | Cancel unfinished child tasks |
 | `POST` | `/generation/batches/{batch_id}/items/{index}/retry` | Retry one failed or cancelled item |
 
-Cancelling a batch does not remove completed results. Task state is durable; unfinished tasks become `interrupted` after a service restart and require an explicit retry.
+Cancellation does not remove completed results. Task state is durable; unfinished execution attempts become `interrupted` after a service restart and require an explicit retry.
 
 ## States and Errors
 
-Task states are `pending | running | completed | failed | cancelled | interrupted`.
+Workbench production states are `needs_user | in_progress | failed | produced | cancelled`. Execution states are `pending | running | completed | failed | cancelled | interrupted`.
 
 Errors include a failure layer, message, exception type, and optional detail. Clients must not classify unknown states as running or successful, and must not replace backend failures with local placeholder results.

@@ -106,7 +106,7 @@ export function ProductionSubmitPanel({
   lockedSummary?: string
   /** 当前项目：默认模板 = 项目默认 > 全局 */
   projectId?: string
-  /** 审核稿已由配方起草后，提交步骤必须锁定同一配方。 */
+  /** 审核稿已由模板起草后，提交步骤必须锁定同一模板。 */
   templateSelectionDisabled?: boolean
 }) {
   const expertMode = useExpertMode()
@@ -138,7 +138,6 @@ export function ProductionSubmitPanel({
       templates.filter(
         (template) =>
           template.enabled &&
-          template.product_entry === "generate" &&
           template.input_requirements.includes(requiredInput)
       ),
     [templates, requiredInput]
@@ -178,7 +177,6 @@ export function ProductionSubmitPanel({
         const usable = response.templates.filter(
           (template) =>
             template.enabled &&
-            template.product_entry === "generate" &&
             template.input_requirements.includes(requiredInput)
         )
         if (usable.some((template) => template.id === templateId)) {
@@ -346,7 +344,7 @@ export function ProductionSubmitPanel({
                 setLoadError(null)
                 onTemplateChange(template.id)
               }}
-              placeholder="选择生产配方"
+              placeholder="选择生产模板"
               templates={compatible}
               value={templateId}
             />
@@ -363,7 +361,7 @@ export function ProductionSubmitPanel({
                   onClick={() => navigate(`/create/recipes/${templateId}`)}
                   type="button"
                 >
-                  调整默认配方
+                  调整默认模板
                 </button>
               </div>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -506,7 +504,7 @@ export function ProductionSubmitPanel({
                 仅影响本次提交；留空表示沿用模板默认。要长期生效请改模板默认配置。
               </p>
               <div className="grid gap-4 lg:grid-cols-2">
-                {/* 首卡使用配方默认；选中后用空串撤销本次覆盖。 */}
+                {/* 首卡使用模板默认；选中后用空串撤销本次覆盖。 */}
                 <div className="flex flex-col gap-1.5 text-sm lg:col-span-2">
                   <span className="text-xs text-muted-foreground">
                     {OVERRIDE_LABELS[0].label}
@@ -600,6 +598,7 @@ export function ProductionSubmitPanel({
                       : " · 模板默认"}
                   </span>
                   <Slider
+                    aria-label="语速"
                     max={2}
                     min={0.5}
                     onValueChange={([value]) =>
@@ -618,6 +617,7 @@ export function ProductionSubmitPanel({
                       : " · 模板默认"}
                   </span>
                   <Slider
+                    aria-label="BGM 音量"
                     max={1}
                     min={0}
                     onValueChange={([value]) =>
@@ -647,7 +647,7 @@ export function ProductionSubmitPanel({
                 title="本次覆盖（专家）"
               >
                 <p className="text-xs leading-5 text-muted-foreground">
-                  仅影响本次提交；留空表示沿用配方默认。要长期生效请改配方默认。
+                  仅影响本次提交；留空表示沿用模板默认。要长期生效请改模板默认。
                 </p>
                 <div className="grid gap-4 lg:grid-cols-2">
                   {selected.allowed_user_params.includes("word_count") && (
