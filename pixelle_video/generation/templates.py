@@ -224,7 +224,7 @@ class ProductionTemplateRegistry:
 
 
 def build_default_production_template_registry() -> ProductionTemplateRegistry:
-    registry = _build_builtin_production_template_registry()
+    registry = build_builtin_production_template_registry()
     _append_custom_templates(registry)
     _apply_template_overrides(registry)
     _apply_enabled_overrides(registry)
@@ -233,7 +233,7 @@ def build_default_production_template_registry() -> ProductionTemplateRegistry:
 
 def build_base_production_template_registry() -> ProductionTemplateRegistry:
     """Build recipe defaults before persisted per-recipe overrides are applied."""
-    registry = _build_builtin_production_template_registry()
+    registry = build_builtin_production_template_registry()
     _append_custom_templates(registry)
     return registry
 
@@ -282,7 +282,13 @@ def _apply_template_overrides(registry: ProductionTemplateRegistry) -> None:
         )
 
 
-def _build_builtin_production_template_registry() -> ProductionTemplateRegistry:
+def build_builtin_production_template_registry() -> ProductionTemplateRegistry:
+    """Build the deterministic code-level template catalog.
+
+    Unlike the default registry, this excludes local custom templates and
+    persisted overrides, so it is safe to use for generated repository
+    contracts and CI drift checks.
+    """
     return ProductionTemplateRegistry(
         [
             ProductionTemplate(
@@ -724,7 +730,7 @@ def code_level_enabled(template_id: str) -> bool | None:
 
     用于判断某模板是否"代码层退役"，从而禁止用户开关将其复活。
     """
-    registry = _build_builtin_production_template_registry()
+    registry = build_builtin_production_template_registry()
     try:
         return registry.get(template_id).enabled
     except ProductionTemplateError:

@@ -1,0 +1,41 @@
+name: Contracts
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "codex/**"
+
+jobs:
+  executable-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen --extra dev
+      - run: uv run python scripts/generate_system_contract.py --check
+      - run: uv run pytest -q tests/system_contract_test.py tests/production_templates_test.py tests/generation_registry_test.py
+      - run: uv run ruff check scripts/generate_system_contract.py tests/system_contract_test.py pixelle_video/generation/templates.py
+
+  console-contracts:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/console/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:p1
+      - run: npm run build

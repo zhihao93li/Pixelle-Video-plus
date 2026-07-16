@@ -20,7 +20,7 @@ flowchart LR
 | Console | `apps/console` | Routing, interaction, and ViewModel rendering |
 | API | `api` | HTTP contracts, validation, and task entry points |
 | Content and production tasks | `pixelle_video/content` | Projects, content ledger, confirmation, and stable production tasks |
-| Generation attempts | `pixelle_video/generation` | Recipes, parameter merging, execution attempts, runtime, and quality |
+| Generation attempts | `pixelle_video/generation` | Templates, parameter merging, execution attempts, runtime, and quality |
 | Pipelines | `pixelle_video/pipelines` | Artifact-specific production implementations |
 | Services | `pixelle_video/services` | LLM, TTS, media, storage, and publishing |
 | Content operations | `pixelle_video/content` | Projects, content items, and recoverable operations |
@@ -28,7 +28,7 @@ flowchart LR
 
 ## Boundaries
 
-- Every production request is compiled through the recipe registry before entering a pipeline.
+- Every production request is compiled through the template registry before entering a pipeline.
 - Stable production tasks are persisted by `pixelle_video/content/production_tasks.py`; execution attempts are persisted by `pixelle_video/generation`.
 - The frontend does not interpret raw backend states; states are adapted into shared ViewModels.
 - Projects, tasks, artifacts, and publishing state belong to backend persistence.

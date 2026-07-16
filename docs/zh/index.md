@@ -6,7 +6,6 @@ Pixelle 是面向单人内容运营的 AI 内容生产工作台。它在同一�
 
 - **工作台**：按“待你处理、进行中、异常、已产出”管理生产任务。
 - **快速生产**：使用普通、素材或专用模板提交单条和批量任务。
-- **任务**：查看一次生产运行、子任务、取消、失败和重试。
 - **作品库**：预览视频、图集和长文，并进入发布流程。
 - **设置**：管理项目、AI、语音、生成引擎、存储和模板。
 
@@ -23,5 +22,6 @@ Pixelle 是面向单人内容运营的 AI 内容生产工作台。它在同一�
 - 产品与数据所有权见[当前产品合同](product/current-product.md)。
 - HTTP 合同见 [API 概览](reference/api-overview.md)。
 - 系统分层见[架构设计](development/architecture.md)。
+- 自动生成的代码合同见 [`docs/generated/system-contract.md`](../generated/system-contract.md)。
 
 项目采用 Apache License 2.0。

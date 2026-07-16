@@ -4,22 +4,18 @@ The Pixelle console organizes content production by project. Desktop uses a prim
 
 ## Board
 
-The workbench groups production tasks by confirmed states: needs attention, in progress, failed, and produced. Content detail supports language editing, human confirmation, artifact review, and publish or metric evidence.
+The workbench groups production tasks by confirmed states: needs attention, in progress, failed, and produced. Opening a task card goes directly to its single detail page. The most important current action is at the top; real outputs, failures, and retries follow below in reverse chronological order.
 
-## Quick Create
+## Quick Production
 
-Quick Create first selects the artifact family and then a production recipe:
+Quick Production first selects the artifact family and then a production template:
 
 - Video from scripts, topics, or source assets
 - Image sets with a cover and pages
 - Structured long-form text
 - Specialized video flows: image-to-video, action transfer, and digital human
 
-The generation workspace keeps input and current overrides on the left. The right rail moves from estimate to progress to result. Batch is a mode inside supported recipes, not a separate entry.
-
-## Tasks
-
-Tasks are grouped by submission run. The list shows overall state and progress; details show child tasks, failure reasons, and available cancel or retry actions. Cancelling a batch stops only unfinished children; completed results remain available.
+The generation workspace keeps input and current overrides together. Submission opens the workbench task detail for progress, human confirmation, recovery, and results. Batch is a mode inside supported templates; each item creates an independent task and there is no batch-level status.
 
 ## Library
 
@@ -34,7 +30,7 @@ Settings uses URL-backed sections:
 - AI & Voice
 - Generation
 - Publishing & Storage
-- Recipes
+- Templates
 - Help
 
 Each configuration section saves independently. Unsaved changes are marked and protected when leaving.

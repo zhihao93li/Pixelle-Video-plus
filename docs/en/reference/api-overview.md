@@ -8,13 +8,13 @@ uv run uvicorn api.app:app --host 127.0.0.1 --port 8000
 
 The routes below use the `/api` prefix. OpenAPI documentation is available at `/docs`.
 
-## Projects and Recipes
+## Projects and Templates
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/projects` | Read projects and the default project |
-| `GET` | `/generation/templates?project=<id>` | Read available and default recipes for a project |
-| `GET` | `/generation/templates/{template_id}` | Read recipe details |
+| `GET` | `/generation/templates?project=<id>` | Read available and default templates for a project |
+| `GET` | `/generation/templates/{template_id}` | Read template details |
 
 ## Submit One Production
 
@@ -34,7 +34,7 @@ The routes below use the `/api` prefix. OpenAPI documentation is available at `/
 }
 ```
 
-The response contains a stable `production_task_id`, `content_item_id`, and the complete production task. Required input fields and allowed overrides are defined by the selected pipeline and recipe. Reuse the same `request_id` for retries of the same logical request.
+The response contains a stable `production_task_id`, `content_item_id`, and the complete production task. Required input fields and allowed overrides are defined by the selected pipeline and template. The request field remains `recipe_id` for API compatibility. Reuse the same `request_id` for retries of the same logical request.
 
 ## Submit a Batch
 

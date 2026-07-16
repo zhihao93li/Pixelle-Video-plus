@@ -1,6 +1,8 @@
-# 架构设计
+# 架构边界
 
-Pixelle 使用 React 控制台、FastAPI 合同层和 Python 生产服务组成单一业务系统。
+Pixelle 使用 React 控制台、FastAPI 合同层和 Python 生产服务组成单一业务系统。本页只解释稳定分层；
+精确 Pipeline、模板、设置和状态见[自动生成系统合同](../../generated/system-contract.md)，架构取舍见
+[`docs/adr/`](../../adr/README.md)。
 
 ```mermaid
 flowchart LR
@@ -23,7 +25,6 @@ flowchart LR
 | 生成执行 | `pixelle_video/generation` | 模板、参数合并、执行尝试、运行和质量 |
 | 管线 | `pixelle_video/pipelines` | 各产物生产实现 |
 | 服务 | `pixelle_video/services` | LLM、TTS、媒体、存储和发布 |
-| 内容运营 | `pixelle_video/content` | 项目、内容条目与可恢复操作状态 |
 | Agent | `agent_plugin` + 用例级 API | 认证后的受控自动化操作接口；确认仍由人在控制台完成 |
 
 ## 关键边界

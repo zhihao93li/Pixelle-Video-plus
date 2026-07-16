@@ -1,0 +1,1948 @@
+{
+  "artifact_types": {
+    "generation_result": [
+      "video",
+      "image_set",
+      "text"
+    ],
+    "production_task": [
+      "video",
+      "image_set",
+      "text",
+      "audio"
+    ]
+  },
+  "generated_from": [
+    "pixelle_video/generation/defaults.py",
+    "pixelle_video/generation/schemas.py",
+    "pixelle_video/generation/templates.py",
+    "pixelle_video/generation/template_overrides.py",
+    "pixelle_video/content/production_tasks.py"
+  ],
+  "pipelines": [
+    {
+      "access_scope": "public",
+      "category": "workflow_video",
+      "description": "把参考视频中的动作迁移到目标人物图。",
+      "id": "action_transfer",
+      "input": {
+        "description": "提供参考视频、目标人物图和提示词。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Target duration in seconds",
+            "field_type": "integer",
+            "name": "duration"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Reference action video path",
+            "field_type": "string",
+            "name": "reference_video"
+          },
+          {
+            "default": null,
+            "description": "Target image file paths",
+            "field_type": "array",
+            "name": "assets"
+          },
+          {
+            "default": null,
+            "description": "Action transfer prompt",
+            "field_type": "string",
+            "name": "prompt"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "react"
+      ],
+      "name": "动作迁移",
+      "outputs": [
+        {
+          "description": "Final workflow video",
+          "kind": "video",
+          "required": true,
+          "role": "primary_video"
+        },
+        {
+          "description": "Workflow execution metadata",
+          "kind": "metadata",
+          "required": false,
+          "role": "workflow_metadata"
+        }
+      ],
+      "product_family": "素材创作",
+      "quick_setting_keys": [],
+      "required_capabilities": [
+        "media",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "system",
+          "description": "",
+          "id": "execute_workflow",
+          "name": "迁移动作",
+          "setting_keys": [
+            "workflow_key",
+            "source"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "download_video",
+          "name": "保存视频",
+          "setting_keys": []
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    },
+    {
+      "access_scope": "public",
+      "category": "asset_based",
+      "description": "分析用户上传的图片或视频素材并生成营销视频。",
+      "id": "asset_based",
+      "input": {
+        "description": "提供图片或视频素材。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Video title",
+            "field_type": "string",
+            "name": "video_title"
+          },
+          {
+            "default": null,
+            "description": "Marketing or creative intent",
+            "field_type": "string",
+            "name": "intent"
+          },
+          {
+            "default": 30,
+            "description": "Target duration in seconds",
+            "field_type": "integer",
+            "name": "duration"
+          },
+          {
+            "default": "runninghub",
+            "description": "Analysis workflow source",
+            "field_type": "string",
+            "name": "source"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Image or video file paths",
+            "field_type": "array",
+            "name": "assets"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "react",
+        "batch"
+      ],
+      "name": "素材生成视频",
+      "outputs": [
+        {
+          "description": "Final video",
+          "kind": "video",
+          "required": true,
+          "role": "primary_video"
+        },
+        {
+          "description": "Storyboard and scene metadata",
+          "kind": "storyboard",
+          "required": false,
+          "role": "storyboard"
+        }
+      ],
+      "product_family": "素材创作",
+      "quick_setting_keys": [
+        "voice_id",
+        "tts_speed",
+        "bgm_path"
+      ],
+      "required_capabilities": [
+        "llm",
+        "tts",
+        "image_analysis",
+        "video_analysis",
+        "ffmpeg",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "system",
+          "description": "",
+          "id": "analyze_assets",
+          "name": "分析素材",
+          "setting_keys": [
+            "source"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_script",
+          "name": "生成文案",
+          "setting_keys": []
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "match_assets",
+          "name": "匹配素材",
+          "setting_keys": []
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_tts",
+          "name": "配音",
+          "setting_keys": [
+            "voice_id",
+            "tts_speed"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "compose_video",
+          "name": "合成",
+          "setting_keys": [
+            "compose_runtime",
+            "bgm_path",
+            "bgm_volume",
+            "bgm_mode"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    },
+    {
+      "access_scope": "agent",
+      "category": "agent",
+      "description": "将用户确认的分镜和 Agent 生成图片合成为视频。",
+      "id": "codex_scene_video",
+      "input": {
+        "description": "一到二十个已确认、图片齐全的分镜。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Optional video title",
+            "field_type": "string",
+            "name": "title"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Confirmed scenes containing scene_id, narration, image_prompt, image_path, and optional duration",
+            "field_type": "array",
+            "name": "scenes"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "agent"
+      ],
+      "name": "Agent 配图视频",
+      "outputs": [
+        {
+          "description": "Final video",
+          "kind": "video",
+          "required": true,
+          "role": "primary_video"
+        },
+        {
+          "description": "Storyboard and scene metadata",
+          "kind": "storyboard",
+          "required": false,
+          "role": "storyboard"
+        }
+      ],
+      "product_family": "Agent 创作",
+      "quick_setting_keys": [
+        "frame_template",
+        "tts_voice",
+        "tts_speed",
+        "bgm_path"
+      ],
+      "required_capabilities": [
+        "tts",
+        "ffmpeg",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "agent",
+          "description": "",
+          "id": "plan_scenes",
+          "name": "Agent 规划分镜",
+          "setting_keys": []
+        },
+        {
+          "actor": "user",
+          "description": "",
+          "id": "review_scenes",
+          "name": "确认分镜",
+          "setting_keys": []
+        },
+        {
+          "actor": "agent",
+          "description": "",
+          "id": "generate_agent_images",
+          "name": "Agent 生成图片",
+          "setting_keys": [
+            "prompt_prefix",
+            "image_prompt_visual_context",
+            "image_prompt_generation_rules"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "validate_scenes",
+          "name": "校验已确认分镜",
+          "setting_keys": []
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_tts",
+          "name": "配音",
+          "setting_keys": [
+            "tts_inference_mode",
+            "tts_workflow",
+            "tts_voice",
+            "tts_speed",
+            "ref_audio"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "compose_video",
+          "name": "合成",
+          "setting_keys": [
+            "frame_template",
+            "template_params",
+            "compose_runtime",
+            "bgm_path",
+            "bgm_volume",
+            "bgm_mode"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    },
+    {
+      "access_scope": "public",
+      "category": "workflow_video",
+      "description": "从人物形象和口播文案生成数字人视频。",
+      "id": "digital_human",
+      "input": {
+        "description": "提供人物形象和口播内容。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Presenter script or product copy",
+            "field_type": "string",
+            "name": "script"
+          },
+          {
+            "default": null,
+            "description": "Product image file paths",
+            "field_type": "array",
+            "name": "goods_assets"
+          },
+          {
+            "default": null,
+            "description": "Product title",
+            "field_type": "string",
+            "name": "goods_title"
+          },
+          {
+            "default": "customize",
+            "description": "digital or customize",
+            "field_type": "string",
+            "name": "mode"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Character image file paths",
+            "field_type": "array",
+            "name": "character_assets"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "react"
+      ],
+      "name": "数字人口播",
+      "outputs": [
+        {
+          "description": "Final workflow video",
+          "kind": "video",
+          "required": true,
+          "role": "primary_video"
+        },
+        {
+          "description": "Workflow execution metadata",
+          "kind": "metadata",
+          "required": false,
+          "role": "workflow_metadata"
+        }
+      ],
+      "product_family": "素材创作",
+      "quick_setting_keys": [
+        "tts_voice",
+        "tts_speed"
+      ],
+      "required_capabilities": [
+        "tts",
+        "media",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "system",
+          "description": "",
+          "id": "compose_image",
+          "name": "合成人物画面",
+          "setting_keys": []
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_tts",
+          "name": "配音",
+          "setting_keys": [
+            "tts_inference_mode",
+            "tts_workflow",
+            "tts_voice",
+            "tts_speed"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "execute_workflow",
+          "name": "生成数字人",
+          "setting_keys": [
+            "workflow_key"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "download_video",
+          "name": "保存视频",
+          "setting_keys": []
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    },
+    {
+      "access_scope": "public",
+      "category": "workflow_video",
+      "description": "从一张图片和运动提示词生成视频片段。",
+      "id": "i2v",
+      "input": {
+        "description": "提供图片和运动提示词。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Optional video title",
+            "field_type": "string",
+            "name": "title"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Image file paths",
+            "field_type": "array",
+            "name": "assets"
+          },
+          {
+            "default": null,
+            "description": "Image-to-video prompt",
+            "field_type": "string",
+            "name": "prompt"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "react"
+      ],
+      "name": "图片生成视频",
+      "outputs": [
+        {
+          "description": "Final workflow video",
+          "kind": "video",
+          "required": true,
+          "role": "primary_video"
+        },
+        {
+          "description": "Workflow execution metadata",
+          "kind": "metadata",
+          "required": false,
+          "role": "workflow_metadata"
+        }
+      ],
+      "product_family": "素材创作",
+      "quick_setting_keys": [],
+      "required_capabilities": [
+        "media",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "system",
+          "description": "",
+          "id": "execute_workflow",
+          "name": "生成视频",
+          "setting_keys": [
+            "workflow_key",
+            "source"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "download_video",
+          "name": "保存视频",
+          "setting_keys": []
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    },
+    {
+      "access_scope": "public",
+      "category": "image_post",
+      "description": "把确认稿排成封面和逐页图片。",
+      "id": "image_post",
+      "input": {
+        "description": "提供按页拆分的完整文案。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Optional cover title",
+            "field_type": "string",
+            "name": "title"
+          },
+          {
+            "default": "line",
+            "description": "Pagination mode",
+            "field_type": "string",
+            "name": "split_mode"
+          },
+          {
+            "default": null,
+            "description": "Approved pages resolved by the workflow",
+            "field_type": "array",
+            "name": "pages"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Confirmed script (one line per page)",
+            "field_type": "string",
+            "name": "script"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "react",
+        "agent",
+        "batch"
+      ],
+      "name": "图文图集",
+      "outputs": [
+        {
+          "description": "Cover image",
+          "kind": "image",
+          "required": true,
+          "role": "cover"
+        },
+        {
+          "description": "Per-scene page image",
+          "kind": "image",
+          "required": true,
+          "role": "page"
+        },
+        {
+          "description": "Publish caption text",
+          "kind": "metadata",
+          "required": false,
+          "role": "caption"
+        }
+      ],
+      "product_family": "图文内容",
+      "quick_setting_keys": [
+        "frame_template",
+        "image_provider",
+        "image_model"
+      ],
+      "required_capabilities": [
+        "llm",
+        "media",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "system",
+          "description": "",
+          "id": "paginate",
+          "name": "分页",
+          "setting_keys": [
+            "split_mode"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_image_prompts",
+          "name": "视觉提示",
+          "setting_keys": [
+            "prompt_prefix",
+            "image_prompt_visual_context",
+            "image_prompt_generation_rules"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_media",
+          "name": "每页配图",
+          "setting_keys": [
+            "image_provider",
+            "image_model",
+            "media_workflow",
+            "source"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "compose_pages",
+          "name": "版式成图",
+          "setting_keys": [
+            "frame_template",
+            "template_params",
+            "media_width",
+            "media_height"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    },
+    {
+      "access_scope": "public",
+      "category": "long_form",
+      "description": "把确认稿扩写成结构化长文。",
+      "id": "long_form",
+      "input": {
+        "description": "提供用于扩写的完整文案。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Optional article title",
+            "field_type": "string",
+            "name": "title"
+          },
+          {
+            "default": null,
+            "description": "Target language",
+            "field_type": "string",
+            "name": "language"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Confirmed script to expand",
+            "field_type": "string",
+            "name": "script"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "react",
+        "agent",
+        "batch"
+      ],
+      "name": "长文",
+      "outputs": [
+        {
+          "description": "Long-form markdown article",
+          "kind": "metadata",
+          "required": true,
+          "role": "article"
+        }
+      ],
+      "product_family": "图文内容",
+      "quick_setting_keys": [
+        "word_count",
+        "llm_model"
+      ],
+      "required_capabilities": [
+        "llm",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "system",
+          "description": "",
+          "id": "write_article",
+          "name": "长文改写",
+          "setting_keys": [
+            "long_form_prompt",
+            "word_count",
+            "llm_provider_id",
+            "llm_model"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    },
+    {
+      "access_scope": "public",
+      "category": "general",
+      "description": "从已经准备好的完整文案生成视频，不再经过写稿。",
+      "id": "script_to_video",
+      "input": {
+        "description": "提供可直接用于生产的完整文案。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Optional user-provided title",
+            "field_type": "string",
+            "name": "title"
+          },
+          {
+            "default": null,
+            "description": "Approved scene plan resolved by the workflow",
+            "field_type": "array",
+            "name": "scenes"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Confirmed narration script",
+            "field_type": "string",
+            "name": "script"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "react",
+        "agent",
+        "batch"
+      ],
+      "name": "文案生成视频",
+      "outputs": [
+        {
+          "description": "Final video",
+          "kind": "video",
+          "required": true,
+          "role": "primary_video"
+        },
+        {
+          "description": "Storyboard and scene metadata",
+          "kind": "storyboard",
+          "required": false,
+          "role": "storyboard"
+        }
+      ],
+      "product_family": "口播视频",
+      "quick_setting_keys": [
+        "frame_template",
+        "tts_voice",
+        "tts_speed",
+        "bgm_path"
+      ],
+      "required_capabilities": [
+        "llm",
+        "tts",
+        "media",
+        "ffmpeg",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "system",
+          "description": "",
+          "id": "split_scenes",
+          "name": "分镜",
+          "setting_keys": [
+            "split_template_name",
+            "split_prompt",
+            "split_provider_id",
+            "split_model"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_image_prompts",
+          "name": "视觉提示",
+          "setting_keys": [
+            "prompt_prefix",
+            "image_prompt_visual_context",
+            "image_prompt_generation_rules"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_tts",
+          "name": "配音",
+          "setting_keys": [
+            "tts_inference_mode",
+            "tts_workflow",
+            "tts_voice",
+            "tts_speed",
+            "ref_audio"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_media",
+          "name": "画面",
+          "setting_keys": [
+            "image_provider",
+            "image_model",
+            "media_workflow",
+            "frame_template",
+            "template_params",
+            "media_width",
+            "media_height"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "compose_video",
+          "name": "合成",
+          "setting_keys": [
+            "compose_runtime",
+            "bgm_path",
+            "bgm_volume",
+            "bgm_mode"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    },
+    {
+      "access_scope": "public",
+      "category": "image_post",
+      "description": "从主题生成图文文案，确认后分页，再确认分页并生成图集。",
+      "id": "topic_to_image_post",
+      "input": {
+        "description": "提供一个图文主题或创作方向。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Optional cover title",
+            "field_type": "string",
+            "name": "title"
+          },
+          {
+            "default": null,
+            "description": "Approved copy resolved by the workflow",
+            "field_type": "string",
+            "name": "script"
+          },
+          {
+            "default": null,
+            "description": "Approved pages resolved by the workflow",
+            "field_type": "array",
+            "name": "pages"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Topic or idea for the image post",
+            "field_type": "string",
+            "name": "topic"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "react",
+        "agent",
+        "batch"
+      ],
+      "name": "主题生成图文",
+      "outputs": [
+        {
+          "description": "Cover image",
+          "kind": "image",
+          "required": true,
+          "role": "cover"
+        },
+        {
+          "description": "Per-scene page image",
+          "kind": "image",
+          "required": true,
+          "role": "page"
+        },
+        {
+          "description": "Publish caption text",
+          "kind": "metadata",
+          "required": false,
+          "role": "caption"
+        }
+      ],
+      "product_family": "图文内容",
+      "quick_setting_keys": [
+        "frame_template",
+        "image_provider",
+        "image_model"
+      ],
+      "required_capabilities": [
+        "llm",
+        "media",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_script",
+          "name": "写图文文案",
+          "setting_keys": [
+            "script_template_name",
+            "script_prompt",
+            "script_provider_id",
+            "script_model",
+            "language_script_models"
+          ]
+        },
+        {
+          "actor": "user",
+          "description": "",
+          "id": "review_script",
+          "name": "确认图文文案",
+          "setting_keys": []
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "paginate",
+          "name": "分页",
+          "setting_keys": [
+            "split_template_name",
+            "split_prompt",
+            "split_provider_id",
+            "split_model"
+          ]
+        },
+        {
+          "actor": "user",
+          "description": "",
+          "id": "review_pages",
+          "name": "确认分页",
+          "setting_keys": []
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_image_prompts",
+          "name": "视觉提示",
+          "setting_keys": [
+            "prompt_prefix",
+            "image_prompt_visual_context",
+            "image_prompt_generation_rules"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_media",
+          "name": "每页配图",
+          "setting_keys": [
+            "image_provider",
+            "image_model",
+            "media_workflow",
+            "source"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "compose_pages",
+          "name": "版式成图",
+          "setting_keys": [
+            "frame_template",
+            "template_params",
+            "media_width",
+            "media_height"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    },
+    {
+      "access_scope": "public",
+      "category": "long_form",
+      "description": "从主题直接生成结构化长文，产出后由用户检查。",
+      "id": "topic_to_long_form",
+      "input": {
+        "description": "提供一个长文主题或写作方向。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Optional article title",
+            "field_type": "string",
+            "name": "title"
+          },
+          {
+            "default": null,
+            "description": "Target language",
+            "field_type": "string",
+            "name": "language"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Topic or writing direction",
+            "field_type": "string",
+            "name": "topic"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "react",
+        "agent",
+        "batch"
+      ],
+      "name": "主题生成长文",
+      "outputs": [
+        {
+          "description": "Long-form markdown article",
+          "kind": "metadata",
+          "required": true,
+          "role": "article"
+        }
+      ],
+      "product_family": "图文内容",
+      "quick_setting_keys": [
+        "word_count",
+        "llm_model"
+      ],
+      "required_capabilities": [
+        "llm",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "system",
+          "description": "",
+          "id": "write_article",
+          "name": "生成长文",
+          "setting_keys": [
+            "long_form_prompt",
+            "word_count",
+            "llm_provider_id",
+            "llm_model"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    },
+    {
+      "access_scope": "public",
+      "category": "general",
+      "description": "从主题起草文案，经人工确认后继续生成完整视频。",
+      "id": "topic_to_video",
+      "input": {
+        "description": "提供一个主题，由 Pixelle 起草并等待人工确认。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Optional user-provided title",
+            "field_type": "string",
+            "name": "title"
+          },
+          {
+            "default": null,
+            "description": "Approved script resolved by the workflow",
+            "field_type": "string",
+            "name": "script"
+          },
+          {
+            "default": null,
+            "description": "Approved scene plan resolved by the workflow",
+            "field_type": "array",
+            "name": "scenes"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Topic or idea to turn into video",
+            "field_type": "string",
+            "name": "topic"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "react",
+        "agent",
+        "batch"
+      ],
+      "name": "主题生成视频",
+      "outputs": [
+        {
+          "description": "Final video",
+          "kind": "video",
+          "required": true,
+          "role": "primary_video"
+        },
+        {
+          "description": "Storyboard and scene metadata",
+          "kind": "storyboard",
+          "required": false,
+          "role": "storyboard"
+        }
+      ],
+      "product_family": "口播视频",
+      "quick_setting_keys": [
+        "frame_template",
+        "tts_voice",
+        "tts_speed",
+        "bgm_path"
+      ],
+      "required_capabilities": [
+        "llm",
+        "tts",
+        "media",
+        "ffmpeg",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_script",
+          "name": "写稿",
+          "setting_keys": [
+            "script_template_name",
+            "script_prompt",
+            "script_provider_id",
+            "script_model",
+            "language_script_models"
+          ]
+        },
+        {
+          "actor": "user",
+          "description": "",
+          "id": "review_script",
+          "name": "确认文案",
+          "setting_keys": []
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "split_scenes",
+          "name": "分镜",
+          "setting_keys": [
+            "split_template_name",
+            "split_prompt",
+            "split_provider_id",
+            "split_model"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_image_prompts",
+          "name": "视觉提示",
+          "setting_keys": [
+            "prompt_prefix",
+            "image_prompt_visual_context",
+            "image_prompt_generation_rules"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_tts",
+          "name": "配音",
+          "setting_keys": [
+            "tts_inference_mode",
+            "tts_workflow",
+            "tts_voice",
+            "tts_speed",
+            "ref_audio"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_media",
+          "name": "画面",
+          "setting_keys": [
+            "image_provider",
+            "image_model",
+            "media_workflow",
+            "frame_template",
+            "template_params",
+            "media_width",
+            "media_height"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "compose_video",
+          "name": "合成",
+          "setting_keys": [
+            "compose_runtime",
+            "bgm_path",
+            "bgm_volume",
+            "bgm_mode"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    }
+  ],
+  "runtime_fact_sources": {
+    "agent_capabilities": "/api/agent/capabilities",
+    "interactive_api_docs": "/docs",
+    "openapi": "/openapi.json"
+  },
+  "schema_version": 1,
+  "settings": {
+    "bgm_mode": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "bgm_path": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "bgm_volume": {
+      "accepted_types": [
+        "float",
+        "int"
+      ]
+    },
+    "compose_runtime": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "frame_template": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "image_model": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "image_prompt_generation_rules": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "image_prompt_visual_context": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "image_provider": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "language_script_models": {
+      "accepted_types": [
+        "dict"
+      ]
+    },
+    "llm_model": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "llm_provider_id": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "long_form_prompt": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "media_height": {
+      "accepted_types": [
+        "int"
+      ]
+    },
+    "media_width": {
+      "accepted_types": [
+        "int"
+      ]
+    },
+    "media_workflow": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "prompt_prefix": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "ref_audio": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "script_model": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "script_prompt": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "script_provider_id": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "script_template_name": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "source": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "split_mode": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "split_model": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "split_prompt": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "split_provider_id": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "split_template_name": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "template_params": {
+      "accepted_types": [
+        "dict"
+      ]
+    },
+    "tts_inference_mode": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "tts_speed": {
+      "accepted_types": [
+        "float",
+        "int"
+      ]
+    },
+    "tts_voice": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "tts_workflow": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "voice_id": {
+      "accepted_types": [
+        "str"
+      ]
+    },
+    "word_count": {
+      "accepted_types": [
+        "int"
+      ]
+    },
+    "workflow_key": {
+      "accepted_types": [
+        "str"
+      ]
+    }
+  },
+  "states": {
+    "generation_task": [
+      "pending",
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+      "interrupted"
+    ],
+    "production_task": [
+      "needs_user",
+      "in_progress",
+      "failed",
+      "produced",
+      "cancelled"
+    ]
+  },
+  "templates": [
+    {
+      "access_scope": "agent",
+      "allowed_user_params": [
+        "title",
+        "frame_template",
+        "template_params",
+        "prompt_prefix",
+        "image_prompt_visual_context",
+        "image_prompt_generation_rules",
+        "bgm_path",
+        "bgm_volume",
+        "bgm_mode",
+        "tts_inference_mode",
+        "tts_workflow",
+        "tts_voice",
+        "tts_speed",
+        "ref_audio",
+        "compose_runtime"
+      ],
+      "description": "Agent 根据用户确认的分镜生成图片，Pixelle 负责配音、字幕和视频合成。",
+      "display_name": "Agent 配图口播视频",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "allow_silent",
+        "bgm_mode",
+        "bgm_volume",
+        "compose_runtime",
+        "frame_template",
+        "quality_profile",
+        "tts_speed",
+        "video_fps"
+      ],
+      "id": "codex_image_story_v1",
+      "input_requirements": [
+        "scenes"
+      ],
+      "passthrough_input_fields": [],
+      "pipeline_id": "codex_scene_video",
+      "required_capabilities": [
+        "tts",
+        "ffmpeg",
+        "persistence"
+      ],
+      "version": "v1"
+    },
+    {
+      "access_scope": "public",
+      "allowed_user_params": [
+        "bgm_path",
+        "bgm_volume",
+        "bgm_mode",
+        "voice_id",
+        "tts_speed",
+        "compose_runtime"
+      ],
+      "description": "上传图片/视频素材，AI 组织成带字幕配音的完整短片。克隆后可调默认合成参数。",
+      "display_name": "素材增强视频",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "allow_silent",
+        "bgm_mode",
+        "bgm_volume",
+        "compose_runtime",
+        "frame_template",
+        "mode",
+        "quality_profile",
+        "runninghub_instance_type",
+        "source",
+        "template_params",
+        "video_fps"
+      ],
+      "id": "pipeline_asset_based_base_v1",
+      "input_requirements": [
+        "assets"
+      ],
+      "passthrough_input_fields": [
+        "video_title",
+        "intent",
+        "duration"
+      ],
+      "pipeline_id": "asset_based",
+      "required_capabilities": [
+        "ffmpeg",
+        "persistence"
+      ],
+      "version": "v1"
+    },
+    {
+      "access_scope": "public",
+      "allowed_user_params": [
+        "title",
+        "split_mode",
+        "frame_template",
+        "template_params",
+        "media_workflow",
+        "image_provider",
+        "image_model",
+        "media_width",
+        "media_height",
+        "prompt_prefix",
+        "image_prompt_visual_context",
+        "image_prompt_generation_rules",
+        "source"
+      ],
+      "description": "文案 → 封面 + 每段一页配图的图集，直接发小红书图文。克隆后可调默认版式、画面等参数。",
+      "display_name": "小红书图文帖",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "frame_template",
+        "media_height",
+        "media_width",
+        "quality_profile",
+        "split_mode"
+      ],
+      "id": "pipeline_image_post_base_v1",
+      "input_requirements": [
+        "script"
+      ],
+      "passthrough_input_fields": [],
+      "pipeline_id": "image_post",
+      "required_capabilities": [
+        "llm",
+        "media",
+        "persistence"
+      ],
+      "version": "v1"
+    },
+    {
+      "access_scope": "public",
+      "allowed_user_params": [
+        "title",
+        "long_form_prompt",
+        "word_count",
+        "llm_provider_id",
+        "llm_model"
+      ],
+      "description": "确认稿 → 扩写成结构化长文（markdown），适合公众号 / 知乎 / 小红书长文。克隆后可调长文提示词、目标字数与写作模型。",
+      "display_name": "长文",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "long_form_prompt",
+        "word_count"
+      ],
+      "id": "pipeline_long_form_base_v1",
+      "input_requirements": [
+        "script"
+      ],
+      "passthrough_input_fields": [],
+      "pipeline_id": "long_form",
+      "required_capabilities": [
+        "llm",
+        "persistence"
+      ],
+      "version": "v1"
+    },
+    {
+      "access_scope": "public",
+      "allowed_user_params": [
+        "title",
+        "split_template_name",
+        "split_prompt",
+        "split_provider_id",
+        "split_model",
+        "frame_template",
+        "template_params",
+        "media_workflow",
+        "image_provider",
+        "image_model",
+        "media_width",
+        "media_height",
+        "prompt_prefix",
+        "image_prompt_visual_context",
+        "image_prompt_generation_rules",
+        "bgm_path",
+        "bgm_volume",
+        "bgm_mode",
+        "tts_inference_mode",
+        "tts_workflow",
+        "tts_voice",
+        "tts_speed",
+        "ref_audio",
+        "compose_runtime"
+      ],
+      "description": "文案 → 每段生成一张 AI 配图，配上字幕和配音，合成竖版口播视频。克隆后可调默认画面、音色等参数。",
+      "display_name": "图文口播视频",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "allow_silent",
+        "bgm_mode",
+        "bgm_volume",
+        "compose_runtime",
+        "frame_template",
+        "quality_profile",
+        "split_model",
+        "split_provider_id",
+        "split_template_name",
+        "video_fps"
+      ],
+      "id": "pipeline_standard_base_v1",
+      "input_requirements": [
+        "script"
+      ],
+      "passthrough_input_fields": [],
+      "pipeline_id": "script_to_video",
+      "required_capabilities": [
+        "llm",
+        "tts",
+        "media",
+        "ffmpeg",
+        "persistence"
+      ],
+      "version": "v1"
+    },
+    {
+      "access_scope": "public",
+      "allowed_user_params": [
+        "title",
+        "script_template_name",
+        "script_prompt",
+        "script_provider_id",
+        "script_model",
+        "language_script_models",
+        "split_template_name",
+        "split_prompt",
+        "split_provider_id",
+        "split_model",
+        "frame_template",
+        "template_params",
+        "media_workflow",
+        "image_provider",
+        "image_model",
+        "media_width",
+        "media_height",
+        "prompt_prefix",
+        "image_prompt_visual_context",
+        "image_prompt_generation_rules",
+        "source"
+      ],
+      "description": "主题 → 图文文案确认 → 分页确认 → 图集。",
+      "display_name": "主题生成小红书图文",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "frame_template",
+        "media_height",
+        "media_width",
+        "quality_profile",
+        "script_template_name",
+        "split_mode",
+        "split_template_name"
+      ],
+      "id": "pipeline_topic_to_image_post_base_v1",
+      "input_requirements": [
+        "topic"
+      ],
+      "passthrough_input_fields": [],
+      "pipeline_id": "topic_to_image_post",
+      "required_capabilities": [
+        "llm",
+        "media",
+        "persistence"
+      ],
+      "version": "v1"
+    },
+    {
+      "access_scope": "public",
+      "allowed_user_params": [
+        "title",
+        "long_form_prompt",
+        "word_count",
+        "llm_provider_id",
+        "llm_model"
+      ],
+      "description": "主题或写作方向 → 结构化长文；长文本身就是最终产物，不设中间确认。",
+      "display_name": "主题生成长文",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "long_form_prompt",
+        "word_count"
+      ],
+      "id": "pipeline_topic_to_long_form_base_v1",
+      "input_requirements": [
+        "topic"
+      ],
+      "passthrough_input_fields": [],
+      "pipeline_id": "topic_to_long_form",
+      "required_capabilities": [
+        "llm",
+        "persistence"
+      ],
+      "version": "v1"
+    },
+    {
+      "access_scope": "public",
+      "allowed_user_params": [
+        "title",
+        "script_template_name",
+        "script_prompt",
+        "script_provider_id",
+        "script_model",
+        "language_script_models",
+        "split_template_name",
+        "split_prompt",
+        "split_provider_id",
+        "split_model",
+        "frame_template",
+        "template_params",
+        "media_workflow",
+        "image_provider",
+        "image_model",
+        "media_width",
+        "media_height",
+        "prompt_prefix",
+        "image_prompt_visual_context",
+        "image_prompt_generation_rules",
+        "bgm_path",
+        "bgm_volume",
+        "bgm_mode",
+        "tts_inference_mode",
+        "tts_workflow",
+        "tts_voice",
+        "tts_speed",
+        "ref_audio",
+        "compose_runtime"
+      ],
+      "description": "输入一个主题，先生成可确认文案，再继续制作图文口播视频。",
+      "display_name": "主题起稿口播视频",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "allow_silent",
+        "bgm_mode",
+        "bgm_volume",
+        "compose_runtime",
+        "frame_template",
+        "language_script_models",
+        "quality_profile",
+        "script_model",
+        "script_provider_id",
+        "script_template_name",
+        "split_model",
+        "split_provider_id",
+        "split_template_name",
+        "video_fps"
+      ],
+      "id": "pipeline_topic_to_video_base_v1",
+      "input_requirements": [
+        "topic"
+      ],
+      "passthrough_input_fields": [],
+      "pipeline_id": "topic_to_video",
+      "required_capabilities": [
+        "llm",
+        "tts",
+        "media",
+        "ffmpeg",
+        "persistence"
+      ],
+      "version": "v1"
+    },
+    {
+      "access_scope": "public",
+      "allowed_user_params": [
+        "title",
+        "duration",
+        "workflow_key"
+      ],
+      "description": "上传参考动作视频和目标图片，生成动作迁移视频。这是动作迁移管线的基础模板，可克隆后调整默认参数。",
+      "display_name": "动作迁移视频",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "allow_silent",
+        "quality_profile",
+        "workflow_key"
+      ],
+      "id": "pixelle_action_transfer_basic_v1",
+      "input_requirements": [
+        "reference_video",
+        "assets",
+        "prompt"
+      ],
+      "passthrough_input_fields": [],
+      "pipeline_id": "action_transfer",
+      "required_capabilities": [],
+      "version": "v1"
+    },
+    {
+      "access_scope": "public",
+      "allowed_user_params": [
+        "title",
+        "mode",
+        "goods_assets",
+        "goods_title",
+        "tts_inference_mode",
+        "tts_voice",
+        "tts_speed",
+        "tts_workflow",
+        "ref_audio",
+        "workflow_key"
+      ],
+      "description": "上传角色图和商品/自定义文案，生成数字人视频。这是数字人管线的基础模板，可克隆后调整默认参数。",
+      "display_name": "数字人视频",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "allow_silent",
+        "mode",
+        "quality_profile",
+        "tts_speed",
+        "workflow_paths"
+      ],
+      "id": "pixelle_digital_human_basic_v1",
+      "input_requirements": [
+        "character_assets"
+      ],
+      "passthrough_input_fields": [
+        "script"
+      ],
+      "pipeline_id": "digital_human",
+      "required_capabilities": [],
+      "version": "v1"
+    },
+    {
+      "access_scope": "public",
+      "allowed_user_params": [
+        "source",
+        "title",
+        "duration",
+        "workflow_key"
+      ],
+      "description": "上传图片并输入提示词，生成图片驱动的视频片段。这是 I2V 管线的基础模板，可克隆后调整默认参数。",
+      "display_name": "图片生成视频 I2V",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "allow_silent",
+        "quality_profile",
+        "workflow_key"
+      ],
+      "id": "pixelle_i2v_basic_v1",
+      "input_requirements": [
+        "assets",
+        "prompt"
+      ],
+      "passthrough_input_fields": [],
+      "pipeline_id": "i2v",
+      "required_capabilities": [],
+      "version": "v1"
+    }
+  ]
+}

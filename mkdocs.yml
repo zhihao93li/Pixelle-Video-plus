@@ -82,6 +82,8 @@ plugins:
             Development: 开发指南
             Architecture: 架构设计
             Product Contract: 产品合同
+            Executable Contract: 可执行合同
+            Decisions: 架构决策
             Contributing: 贡献指南
             FAQ: 常见问题
             Troubleshooting: 故障排查
@@ -142,6 +144,8 @@ nav:
   - Development:
     - Architecture: development/architecture.md
     - Product Contract: product/current-product.md
+    - Executable Contract: generated/system-contract.md
+    - Decisions: adr/README.md
     - Contributing: development/contributing.md
   - FAQ: faq.md
   - Troubleshooting: troubleshooting.md

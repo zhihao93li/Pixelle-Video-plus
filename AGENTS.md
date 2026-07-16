@@ -1,4 +1,4 @@
-# # 工作原则
+# Pixelle 工作指南
 
 ## 实事求是与独立判断
 
@@ -12,3 +12,17 @@
 - 能用简单逻辑解决复杂问题时，优先使用简单逻辑；只保留满足正确性、稳定性和可维护性所需的最小复杂度。
 - 永远优先解决根源问题，而不是在表象上打补丁、添加兜底、吞掉异常或绕过原流程。
 - 不要通过新增逻辑来掩盖或修补既有逻辑的问题。应先定位原有逻辑为什么错误，并优先直接修正它；只有在确有独立的新需求或边界条件时，才新增逻辑，并明确其必要性和边界。
+
+## 事实源
+
+- 代码级 Pipeline、模板、设置、状态与产物合同：`docs/generated/system-contract.json`
+- 便于人阅读的自动生成摘要：`docs/generated/system-contract.md`
+- 当前机器的 Agent 能力与可用性：启动 API 后读取 `GET /api/agent/capabilities`
+- 当前 HTTP 合同：启动 API 后读取 `GET /openapi.json` 或 `/docs`
+- 产品语义与用户体验边界：`docs/zh/product/current-product.md`
+- 已采纳的架构取舍及原因：`docs/adr/`
+
+不要在 AGENTS、PRD 或页面代码中复制 Pipeline、模板、设置或状态清单。修改可执行合同时运行
+`uv run python scripts/generate_system_contract.py`，提交生成结果；CI 会用 `--check` 拒绝漂移。
+
+运行时 Provider、凭据、启停、模型清单和网络可用性不能从名称猜测，也不能写成静态事实；必须读取真实配置与能力接口。

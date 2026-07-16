@@ -5,10 +5,9 @@ Pixelle is an AI content production workspace for solo content operators. It con
 ## Product Surfaces
 
 - **Workbench** groups production tasks by needs-attention, in-progress, failed, and produced states.
-- **Quick Create** submits single or batch work through standard, asset, and specialized recipes.
-- **Tasks** shows production runs, child tasks, cancellation, failures, and retries.
+- **Quick Production** submits single or batch work through standard, asset, and specialized templates.
 - **Library** previews video, image sets, and text before publishing.
-- **Settings** manages projects, AI, voice, generation engines, storage, and recipes.
+- **Settings** manages projects, AI, voice, generation engines, storage, and templates.
 
 ## Quick Start
 
@@ -23,5 +22,6 @@ The production console runs at `http://127.0.0.1:5173`. FastAPI documentation is
 - See the [current product contract](product/current-product.md) for ownership rules.
 - See the [API overview](reference/api-overview.md) for HTTP contracts.
 - See [architecture](development/architecture.md) for system layers.
+- See the [generated system contract](../generated/system-contract.md) for the executable catalog.
 
 Pixelle is licensed under Apache License 2.0.

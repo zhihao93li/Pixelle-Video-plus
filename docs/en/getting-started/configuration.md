@@ -4,11 +4,11 @@ The production configuration surface is the console Settings area. Each section 
 
 ## First-Time Order
 
-1. **Projects**: create or select a project and choose its default production recipe.
+1. **Projects**: create or select a project.
 2. **AI & Voice**: configure drafting models, TTS mode, voices, and workflows.
 3. **Generation**: configure local ComfyUI or RunningHub and run connection diagnostics.
 4. **Publishing & Storage**: configure output storage, publishing targets, and credentials.
-5. **Recipes**: enable the recipes required by the current project and edit recipe defaults when needed.
+5. **Templates**: enable the templates required by the current project and edit their defaults when needed.
 
 ## Configuration Sources
 
@@ -17,7 +17,7 @@ Runtime configuration is stored in local `config.yaml` and the backend data dire
 Generation settings use one precedence rule:
 
 ```text
-project defaults → effective recipe defaults → current-run overrides
+project defaults → effective template defaults → current-run overrides
 ```
 
 Fields unchanged for the current run are not submitted as overrides.

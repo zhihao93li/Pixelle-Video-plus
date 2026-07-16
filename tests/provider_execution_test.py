@@ -2,10 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from pixelle_video.config.schema import ComfyUIConfig
 from pixelle_video.services.provider_execution import (
     execute_workflow_with_provider_progress,
 )
-from pixelle_video.config.schema import ComfyUIConfig
 
 
 class FakeRunningHubClient:

@@ -1,6 +1,9 @@
 # Current Product Contract
 
-This file is the product truth for the current behavior and code boundaries.
+This file defines product semantics and user-facing boundaries. The exact pipeline,
+template, setting, state, and artifact catalog is generated at
+[`docs/generated/system-contract.md`](../../generated/system-contract.md). Runtime availability
+comes from `GET /api/agent/capabilities`.
 
 ## Product Definition
 
@@ -15,15 +18,14 @@ A project carries brand, channel, audience, language, and asset context, but doe
 
 ## Product Surfaces
 
-The React console in `apps/console` has five primary destinations:
+The React console in `apps/console` has four primary destinations:
 
 1. Workbench groups production tasks by confirmed facts: needs attention, in progress, failed, or produced.
-2. Quick Create selects an artifact type and recipe, then opens a standard or specialized production flow.
-3. Tasks shows execution attempts, batches, cancellation, and retry.
-4. Library filters, previews, and publishes generated artifacts.
-5. Settings manages projects, AI, voice, generation engines, storage, and recipes.
+2. Quick Production is the only React surface that starts production and selects an artifact type and template.
+3. Library filters, previews, and publishes generated artifacts.
+4. Settings manages projects, AI, voice, generation engines, storage, and templates.
 
-Artifacts use one discriminated union: `video`, `image_set`, or `text`.
+Artifact types are declared by the generated executable contract rather than copied here.
 
 ## Runtime Architecture
 
@@ -57,23 +59,19 @@ flowchart LR
 
 One pipeline represents one input contract and one complete route. Different inputs, required stages, or required artifacts require different pipelines; providers and composition services remain reusable. The current contract has no `entry`, `entries`, or `default_entry` concept.
 
-A recipe binds exactly one pipeline and stores long-lived defaults. Every formal production request creates or binds a content-ledger item and a stable `production_task_id` before starting a provider. The old direct-generation write endpoints have been removed and are absent from OpenAPI. `/api/media/generate` is a settings preview and does not create a formal artifact.
+A template binds exactly one pipeline and stores long-lived defaults. Every formal production request creates or binds a content-ledger item and a stable `production_task_id` before starting a provider. The HTTP field remains `recipe_id` for compatibility. The old direct-generation write endpoints have been removed and are absent from OpenAPI. `/api/media/generate` is a settings preview and does not create a formal artifact.
 
 Setting precedence is:
 
 ```text
-Project defaults → Effective recipe defaults → Run overrides
+Project defaults → Effective template defaults → Run overrides
 ```
 
-The workbench consumes only persisted production-task states:
-
-```text
-needs_user | in_progress | failed | produced | cancelled
-```
+The workbench consumes only persisted production-task states declared by the generated contract.
 
 `produced` means execution succeeded and every required artifact is present and readable. Publishing and metrics do not alter that production fact. A service restart preserves terminal tasks and marks unfinished work as `interrupted` for explicit retry.
 
-An unchanged retry appends an execution attempt. Changing the script, scenes, images, recipe, or effective parameters creates a new production task and preserves old tasks and artifacts.
+An unchanged retry appends an execution attempt. Changing the script, scenes, images, template, or effective parameters creates a new production task and preserves old tasks and artifacts.
 
 ## Code Constraints
 

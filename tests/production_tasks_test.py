@@ -12,6 +12,7 @@ import pixelle_video.content.store as content_store
 from api.app import app
 from api.dependencies import get_generation_service, get_pixelle_video
 from api.production_recovery import recover_pre_generation_stages
+from pixelle_video.config import config_manager
 from pixelle_video.content.models import ContentVariant, new_content_item
 from pixelle_video.content.production_service import prepare_production
 from pixelle_video.content.production_tasks import (
@@ -25,7 +26,6 @@ from pixelle_video.content.production_tasks import (
     sync_generation_task,
 )
 from pixelle_video.content.stage_revisions import confirm_revision, create_revision
-from pixelle_video.config import config_manager
 from pixelle_video.generation import build_default_pipeline_registry
 from pixelle_video.generation.schemas import (
     GenerationArtifact,
