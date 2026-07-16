@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import {
   ChevronDown,
-  ChevronUp,
   ImageIcon,
   Loader2,
   RotateCcw,
@@ -54,9 +53,11 @@ import {
 import {
   productionSettingSections,
   type ProductionSettingField,
+  type ProductionSettingSection,
 } from "@/lib/productionSettingsFields"
 import type { ProductionSettingsResources } from "@/lib/useProductionSettingsResources"
 import { navigate, routeHref } from "@/lib/router"
+import { cn } from "@/lib/utils"
 
 export type ProductionSettingsActions = {
   generateMedia?: (input: MediaPreviewInput) => Promise<MediaPreviewResponse>
@@ -123,6 +124,10 @@ function workflowLabel(source: string) {
   return source
 }
 
+function isImageWorkflow(name: string) {
+  return name.toLowerCase().startsWith("image_")
+}
+
 function fieldSource(
   mode: ProductionSettingMode,
   key: string,
@@ -131,6 +136,24 @@ function fieldSource(
 ): ProductionSettingSource {
   if (mode === "run") return dirty ? "run" : "recipe"
   return dirty || key in savedOverrides ? "recipe" : "factory"
+}
+
+const WIDE_FIELD_CONTROLS = new Set<ProductionSettingField["control"]>([
+  "audio",
+  "bgm",
+  "frame_template",
+  "language_models",
+  "prompt_template",
+  "readonly",
+  "template_params",
+  "textarea",
+])
+
+function fieldUsesFullGrid(field: ProductionSettingField) {
+  return (
+    WIDE_FIELD_CONTROLS.has(field.control) ||
+    ["llm_model", "script_model", "split_model", "title"].includes(field.key)
+  )
 }
 
 export function ProductionSettingsEditor({
@@ -180,6 +203,18 @@ export function ProductionSettingsEditor({
   const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null)
   const [promptSaveName, setPromptSaveName] = useState("")
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const preferredSectionId =
+    sections.find((section) => section.step != null && section.step > 0)?.id ??
+    sections[0]?.id ??
+    null
+  const [openSectionId, setOpenSectionId] = useState<string | null>(
+    preferredSectionId
+  )
+  const effectiveOpenSectionId = sections.some(
+    (section) => section.id === openSectionId
+  )
+    ? openSectionId
+    : preferredSectionId
 
   const frameTemplate = valueText(values.frame_template)
   const loadTemplateParams = actions?.getTemplateParams
@@ -264,13 +299,13 @@ export function ProductionSettingsEditor({
     setActionError(null)
     setTtsPreview(null)
     try {
-      const inferenceMode = (valueText(values.tts_inference_mode) ||
-        "local") as "local" | "comfyui" | "fish"
+      const inferenceMode = valueText(values.tts_inference_mode) as
+        "local" | "comfyui" | "fish" | ""
       const voice = valueText(values.tts_voice || values.voice_id).trim()
       setTtsPreview(
         await actions.synthesizeTts({
           text: actions.previewText || "预览示例文案",
-          inferenceMode,
+          inferenceMode: inferenceMode || undefined,
           workflow: valueText(values.tts_workflow) || undefined,
           voiceId: inferenceMode === "fish" ? undefined : voice || undefined,
           referenceId:
@@ -321,9 +356,13 @@ export function ProductionSettingsEditor({
     const source = fieldSource(mode, field.key, pending, savedOverrides)
     const label = settingSourceNote(mode, source, pending)
     const resettable = pending || field.key in savedOverrides
+    const showSource = pending || (mode === "recipe" && source === "recipe")
+    if (!showSource && !resettable) return null
     return (
       <div className="flex items-center gap-1.5">
-        <Badge variant={pending ? "warning" : "secondary"}>{label}</Badge>
+        {showSource ? (
+          <Badge variant={pending ? "warning" : "secondary"}>{label}</Badge>
+        ) : null}
         {resettable && !field.readOnly ? (
           <Button
             aria-label={`恢复${field.label}的继承值`}
@@ -343,7 +382,11 @@ export function ProductionSettingsEditor({
     const workflows =
       field.key === "tts_workflow"
         ? resources.ttsWorkflows
-        : resources.mediaWorkflows
+        : field.key === "media_workflow"
+          ? resources.mediaWorkflows.filter((workflow) =>
+              isImageWorkflow(workflow.name)
+            )
+          : resources.mediaWorkflows
     const current = valueText(values[field.key])
     if (workflows.length === 0) {
       return (
@@ -387,7 +430,18 @@ export function ProductionSettingsEditor({
     const current = valueText(values[field.key]) || "comfy_workflow"
     return (
       <Select
-        onValueChange={(provider) => setValue(field.key, provider)}
+        onValueChange={(provider) => {
+          if (provider === current) return
+          setValues(
+            provider === "comfy_workflow"
+              ? { image_provider: provider, image_model: "" }
+              : {
+                  image_provider: provider,
+                  image_model: "",
+                  media_workflow: "",
+                }
+          )
+        }}
         value={current}
       >
         <SelectTrigger id={`production-setting-${field.key}`}>
@@ -414,13 +468,6 @@ export function ProductionSettingsEditor({
 
   function renderImageModel(field: ProductionSettingField) {
     const provider = valueText(values.image_provider) || "comfy_workflow"
-    if (provider === "comfy_workflow") {
-      return (
-        <div className="flex min-h-9 items-center rounded-lg border bg-muted/20 px-3 text-xs text-muted-foreground">
-          模型由所选 Workflow 决定
-        </div>
-      )
-    }
     const selected = resources.imageProviders.find(
       (item) => item.id === provider
     )
@@ -461,7 +508,7 @@ export function ProductionSettingsEditor({
     }
     return (
       <div className="flex flex-col gap-3">
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 @sm/setting-control:flex-row">
           <Select
             onValueChange={(value) => {
               setValues({ [field.key]: value, [contentKey]: "" })
@@ -484,6 +531,7 @@ export function ProductionSettingsEditor({
             </SelectContent>
           </Select>
           <Button
+            className="shrink-0"
             disabled={!current}
             onClick={() => setExpandedPrompt(expanded ? null : field.key)}
             type="button"
@@ -513,12 +561,23 @@ export function ProductionSettingsEditor({
               onChange={(event) => setValue(contentKey, event.target.value)}
               value={content}
             />
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <Input
-                onChange={(event) => setPromptSaveName(event.target.value)}
-                placeholder="给这份提示词起个名字"
-                value={promptSaveName}
-              />
+            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <FieldLabel
+                  className="text-xs"
+                  htmlFor={`production-setting-${field.key}-save-name`}
+                >
+                  保存为新提示词
+                </FieldLabel>
+                <Input
+                  autoComplete="off"
+                  id={`production-setting-${field.key}-save-name`}
+                  name={`${field.key}_save_name`}
+                  onChange={(event) => setPromptSaveName(event.target.value)}
+                  placeholder="例如：宠物科普口播…"
+                  value={promptSaveName}
+                />
+              </div>
               <Button
                 disabled={!promptSaveName.trim() || !content.trim()}
                 onClick={() => {
@@ -565,9 +624,20 @@ export function ProductionSettingsEditor({
           ? "split_provider_id"
           : "llm_provider_id"
     const providerId = valueText(values[providerKey])
+    const effectiveProviderId = providerId || resources.llmDefaultProviderId
     const provider = resources.llmProviders.find(
-      (item) => item.id === providerId
+      (item) => item.id === effectiveProviderId
     )
+    const effectiveModel = current || provider?.default_model || ""
+    const modelOptions = provider
+      ? [
+          ...(provider.default_model &&
+          !provider.models.some((model) => model.id === provider.default_model)
+            ? [{ id: provider.default_model, label: provider.default_model }]
+            : []),
+          ...provider.models,
+        ]
+      : []
     if (resources.llmProviders.length === 0) {
       return (
         <Input
@@ -580,35 +650,54 @@ export function ProductionSettingsEditor({
     }
     return (
       <div className="flex flex-col gap-2">
-        <div className="grid gap-2 sm:grid-cols-[minmax(10rem,0.7fr)_minmax(0,1.3fr)]">
-          <Select
-            onValueChange={(value) => {
-              setValues({ [providerKey]: value, [field.key]: "" })
-            }}
-            value={providerId}
-          >
-            <SelectTrigger aria-label={`${field.label} LLM 服务`}>
-              <SelectValue placeholder="选择 LLM 服务" />
-            </SelectTrigger>
-            <SelectContent>
-              {resources.llmProviders.map((item) => (
-                <SelectItem key={item.id} value={item.id}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <SearchableSelect
-            disabled={!providerId}
-            id={`production-setting-${field.key}`}
-            onValueChange={(value) => setValue(field.key, value)}
-            options={(provider?.models ?? []).map((model) => ({
-              label: model.label,
-              value: model.id,
-            }))}
-            placeholder={providerId ? "选择模型" : "先选择 LLM 服务"}
-            value={current}
-          />
+        <div className="grid gap-2 @lg/setting-control:grid-cols-[minmax(11rem,14rem)_minmax(0,1fr)]">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-xs text-muted-foreground">LLM 服务</span>
+            <Select
+              onValueChange={(value) => {
+                const selectedProvider = resources.llmProviders.find(
+                  (item) => item.id === value
+                )
+                setValues({
+                  [providerKey]: value,
+                  [field.key]: selectedProvider?.default_model || "",
+                })
+              }}
+              value={effectiveProviderId}
+            >
+              <SelectTrigger aria-label={`${field.label} LLM 服务`}>
+                <SelectValue placeholder="选择 LLM 服务" />
+              </SelectTrigger>
+              <SelectContent>
+                {resources.llmProviders.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-xs text-muted-foreground">模型</span>
+            <SearchableSelect
+              disabled={!effectiveProviderId}
+              id={`production-setting-${field.key}`}
+              onValueChange={(value) =>
+                setValues({
+                  [providerKey]: effectiveProviderId,
+                  [field.key]: value,
+                })
+              }
+              options={modelOptions.map((model) => ({
+                label: model.label,
+                value: model.id,
+              }))}
+              placeholder={
+                effectiveProviderId ? "尚未配置默认模型" : "先选择 LLM 服务"
+              }
+              value={effectiveModel}
+            />
+          </div>
         </div>
         {provider?.error ? (
           <p className="text-xs text-destructive">
@@ -657,7 +746,7 @@ export function ProductionSettingsEditor({
           )
           return (
             <div
-              className="grid gap-2 xl:grid-cols-[9rem_12rem_minmax(0,1fr)_auto]"
+              className="grid gap-2 @3xl/setting-control:grid-cols-[9rem_14rem_minmax(0,1fr)_auto]"
               key={`${row.language}-${index}`}
             >
               <Input
@@ -961,15 +1050,28 @@ export function ProductionSettingsEditor({
       )
     }
     if (field.control === "select") {
+      const followsSystemTts = field.key === "tts_inference_mode"
       return (
         <Select
-          onValueChange={(value) => setValue(field.key, value)}
-          value={valueText(current)}
+          onValueChange={(value) =>
+            setValue(
+              field.key,
+              followsSystemTts && value === "__system__" ? "" : value
+            )
+          }
+          value={
+            followsSystemTts
+              ? valueText(current) || "__system__"
+              : valueText(current)
+          }
         >
           <SelectTrigger id={`production-setting-${field.key}`}>
             <SelectValue placeholder="选择" />
           </SelectTrigger>
           <SelectContent>
+            {followsSystemTts ? (
+              <SelectItem value="__system__">跟随系统默认</SelectItem>
+            ) : null}
             {(field.options ?? []).map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
@@ -1011,33 +1113,25 @@ export function ProductionSettingsEditor({
     )
   }
 
-  function fieldSpansFullRow(field: ProductionSettingField) {
-    return (
-      [
-        "textarea",
-        "language_models",
-        "template_params",
-        "frame_template",
-        "bgm",
-      ].includes(field.control) ||
-      ["script_model", "split_model", "llm_model"].includes(field.key)
-    )
-  }
-
   function renderField(field: ProductionSettingField) {
-    if (
-      field.key === "media_workflow" &&
-      valueText(values.image_provider || "comfy_workflow") !== "comfy_workflow"
-    ) {
+    const imageProvider = valueText(values.image_provider) || "comfy_workflow"
+    if (field.key === "media_workflow" && imageProvider !== "comfy_workflow") {
+      return null
+    }
+    if (field.key === "image_model" && imageProvider === "comfy_workflow") {
       return null
     }
     return (
       <Field
-        className={fieldSpansFullRow(field) ? "lg:col-span-2" : undefined}
+        className={cn(
+          "min-w-0 gap-2",
+          fieldUsesFullGrid(field) && "@xl/setting-grid:col-span-2"
+        )}
+        data-slot="production-setting-row"
         data-setting-key={field.key}
         key={field.key}
       >
-        <div className="flex min-h-6 items-center justify-between gap-2">
+        <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-2">
           <FieldLabel htmlFor={`production-setting-${field.key}`}>
             {field.label}
             {field.control === "slider"
@@ -1048,9 +1142,117 @@ export function ProductionSettingsEditor({
           </FieldLabel>
           {renderStatus(field)}
         </div>
-        {renderControl(field)}
-        {field.hint ? <FieldDescription>{field.hint}</FieldDescription> : null}
+        <div className="@container/setting-control min-w-0">
+          {renderControl(field)}
+        </div>
+        {field.hint ? (
+          <FieldDescription className="text-xs leading-5">
+            {field.hint}
+          </FieldDescription>
+        ) : null}
       </Field>
+    )
+  }
+
+  function sectionChangeCount(section: ProductionSettingSection) {
+    return section.fields.filter(
+      (field) => dirty.has(field.key) || field.key in savedOverrides
+    ).length
+  }
+
+  function renderSection(section: ProductionSettingSection) {
+    const isOpen = effectiveOpenSectionId === section.id
+    const changedCount = sectionChangeCount(section)
+    const sectionDomId = `${quickPresentation ? "run" : "recipe"}-setting-section-${section.id}`
+    const contentId = `${sectionDomId}-content`
+    const canResetSection = changedCount > 0
+    const Heading = quickPresentation ? "h3" : "h2"
+    const inheritedLabel = mode === "run" ? "沿用模板" : "沿用出厂设置"
+    const headingLabel = `${section.step != null ? `${section.step}. ` : ""}${section.title}`
+
+    return (
+      <section
+        className={cn(
+          "scroll-mt-28 overflow-hidden rounded-lg border bg-card text-card-foreground",
+          isOpen && "border-primary/30 shadow-sm",
+          changedCount > 0 && "border-warning/50"
+        )}
+        data-open={isOpen}
+        data-slot="production-setting-section"
+        id={sectionDomId}
+        key={section.id}
+      >
+        <Heading className="contents">
+          <button
+            aria-label={headingLabel}
+            aria-controls={contentId}
+            aria-expanded={isOpen}
+            className="grid w-full grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3.5 text-left hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
+            onClick={() => setOpenSectionId(section.id)}
+            type="button"
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                "grid size-8 place-items-center rounded-full bg-muted text-xs font-semibold text-muted-foreground",
+                isOpen && "bg-primary/10 text-primary",
+                changedCount > 0 && "bg-warning/10 text-warning"
+              )}
+            >
+              {section.step ?? <SlidersHorizontal className="size-3.5" />}
+            </span>
+            <span className="min-w-0">
+              <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span className="text-sm font-semibold">{section.title}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {section.description}
+                </span>
+              </span>
+              <span
+                className={cn(
+                  "mt-1 block text-xs text-muted-foreground",
+                  changedCount > 0 && "font-medium text-warning"
+                )}
+              >
+                {changedCount > 0
+                  ? `${mode === "run" ? "已调整" : "已自定义"} ${changedCount} 项`
+                  : inheritedLabel}
+              </span>
+            </span>
+            <ChevronDown
+              aria-hidden="true"
+              className={cn(
+                "size-4 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none",
+                isOpen && "rotate-180"
+              )}
+            />
+          </button>
+        </Heading>
+        <div hidden={!isOpen} id={contentId}>
+          <div className="border-t px-4 py-5 sm:px-5">
+            {onResetMany && canResetSection ? (
+              <div className="mb-4 flex justify-end">
+                <Button
+                  onClick={() =>
+                    onResetMany(section.fields.map((field) => field.key))
+                  }
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <RotateCcw />
+                  恢复此阶段
+                </Button>
+              </div>
+            ) : null}
+            <div className="@container/setting-grid">
+              <div className="grid grid-cols-1 gap-x-6 gap-y-5 @xl/setting-grid:grid-cols-2">
+                {section.fields.map((field) => renderField(field))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     )
   }
 
@@ -1138,12 +1340,20 @@ export function ProductionSettingsEditor({
               {hasDetailedSettings ? (
                 <Button
                   aria-expanded={detailsOpen}
-                  onClick={() => setDetailsOpen((current) => !current)}
+                  onClick={() => {
+                    if (!detailsOpen) setOpenSectionId(preferredSectionId)
+                    setDetailsOpen((current) => !current)
+                  }}
                   size="sm"
                   type="button"
                   variant="outline"
                 >
-                  {detailsOpen ? <ChevronUp /> : <ChevronDown />}
+                  <ChevronDown
+                    className={cn(
+                      "transition-transform duration-150 motion-reduce:transition-none",
+                      detailsOpen && "rotate-180"
+                    )}
+                  />
                   {detailsOpen ? "收起本次设置" : "展开本次设置"}
                 </Button>
               ) : null}
@@ -1151,88 +1361,9 @@ export function ProductionSettingsEditor({
           </div>
 
           {detailsOpen && sections.length > 0 ? (
-            <>
-              <nav
-                aria-label="本次设置阶段"
-                className="mt-4 flex gap-1 overflow-x-auto border-y py-2"
-              >
-                {sections.map((section) => {
-                  const modified = section.fields.some((field) =>
-                    dirty.has(field.key)
-                  )
-                  return (
-                    <Button
-                      className="shrink-0"
-                      key={section.id}
-                      onClick={() =>
-                        document
-                          .getElementById(`run-setting-section-${section.id}`)
-                          ?.scrollIntoView({
-                            behavior: "smooth",
-                            block: "start",
-                          })
-                      }
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={`size-1.5 rounded-full ${
-                          modified ? "bg-warning" : "bg-muted-foreground/40"
-                        }`}
-                      />
-                      {section.title}
-                    </Button>
-                  )
-                })}
-              </nav>
-
-              <div className="mt-4 flex flex-col gap-4">
-                {sections.map((section) => {
-                  const completeSection =
-                    sections.find((item) => item.id === section.id) ?? section
-                  const canResetSection = completeSection.fields.some(
-                    (field) =>
-                      dirty.has(field.key) || field.key in savedOverrides
-                  )
-                  return (
-                    <WorkspacePanel
-                      className="scroll-mt-28"
-                      description={section.description}
-                      headerAction={
-                        onResetMany && canResetSection ? (
-                          <Button
-                            onClick={() =>
-                              onResetMany(
-                                completeSection.fields.map((field) => field.key)
-                              )
-                            }
-                            size="sm"
-                            type="button"
-                            variant="ghost"
-                          >
-                            <RotateCcw />
-                            恢复此阶段
-                          </Button>
-                        ) : undefined
-                      }
-                      id={`run-setting-section-${section.id}`}
-                      key={section.id}
-                      title={
-                        section.step
-                          ? `${section.step}. ${section.title}`
-                          : section.title
-                      }
-                    >
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        {section.fields.map((field) => renderField(field))}
-                      </div>
-                    </WorkspacePanel>
-                  )
-                })}
-              </div>
-            </>
+            <div aria-label="本次设置阶段" className="mt-4 flex flex-col gap-2">
+              {sections.map((section) => renderSection(section))}
+            </div>
           ) : !hasDetailedSettings ? (
             <p className="mt-4 rounded-lg border border-dashed px-4 py-5 text-sm text-muted-foreground">
               当前生产方式没有可调整的本次设置。
@@ -1241,82 +1372,11 @@ export function ProductionSettingsEditor({
         </section>
       ) : null}
 
-      {!quickPresentation && sections.some((section) => section.step) ? (
-        <nav
-          aria-label="模板生产阶段"
-          className="flex gap-1 overflow-x-auto border-y py-2"
-        >
-          {sections
-            .filter((section) => section.step)
-            .map((section) => {
-              const modified = section.fields.some((field) =>
-                dirty.has(field.key)
-              )
-              return (
-                <Button
-                  className="shrink-0"
-                  key={section.id}
-                  onClick={() =>
-                    document
-                      .getElementById(`recipe-setting-section-${section.id}`)
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
-                  }
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`grid size-5 place-items-center rounded-full border text-[10px] ${
-                      modified
-                        ? "border-warning bg-warning/10 text-warning"
-                        : "border-border text-muted-foreground"
-                    }`}
-                  >
-                    {section.step}
-                  </span>
-                  {section.title}
-                </Button>
-              )
-            })}
-        </nav>
+      {!quickPresentation && sections.length > 0 ? (
+        <div aria-label="模板生产阶段" className="flex flex-col gap-2">
+          {sections.map((section) => renderSection(section))}
+        </div>
       ) : null}
-
-      {!quickPresentation &&
-        sections.map((section) => (
-          <WorkspacePanel
-            className="scroll-mt-28"
-            description={section.description}
-            headerAction={
-              onResetMany &&
-              section.fields.some(
-                (field) => dirty.has(field.key) || field.key in savedOverrides
-              ) ? (
-                <Button
-                  onClick={() =>
-                    onResetMany(section.fields.map((field) => field.key))
-                  }
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  <RotateCcw />
-                  恢复此阶段
-                </Button>
-              ) : undefined
-            }
-            id={`recipe-setting-section-${section.id}`}
-            key={section.id}
-            title={
-              section.step ? `${section.step}. ${section.title}` : section.title
-            }
-            variant="surface"
-          >
-            <div className="grid gap-4 lg:grid-cols-2">
-              {section.fields.map((field) => renderField(field))}
-            </div>
-          </WorkspacePanel>
-        ))}
 
       {(!quickPresentation || detailsOpen) &&
       (hasFrame || hasTts || hasMedia) ? (

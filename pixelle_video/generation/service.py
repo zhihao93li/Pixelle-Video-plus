@@ -186,7 +186,7 @@ class GenerationService:
         params.pop("mode", None)
 
         if request.pipeline_id == "topic_to_video":
-            confirmed_script = request.metadata.get("confirmed_script")
+            confirmed_script = request.input.get("script")
             if not isinstance(confirmed_script, str) or not confirmed_script.strip():
                 raise ValueError(
                     "topic_to_video must complete writing and human confirmation before production"
@@ -197,17 +197,17 @@ class GenerationService:
                 "_split_language": request.metadata.get("language") or "Chinese",
                 "_split_topic": request.input["topic"],
             }
-            if request.metadata.get("confirmed_scenes"):
-                kwargs["_confirmed_scenes"] = request.metadata["confirmed_scenes"]
+            if request.input.get("scenes"):
+                kwargs["_confirmed_scenes"] = request.input["scenes"]
             return kwargs
 
         if request.pipeline_id == "topic_to_image_post":
-            confirmed_script = request.metadata.get("confirmed_script")
+            confirmed_script = request.input.get("script")
             if not isinstance(confirmed_script, str) or not confirmed_script.strip():
                 raise ValueError(
                     "topic_to_image_post must complete writing and human confirmation before production"
                 )
-            page_text = request.metadata.get("confirmed_scenes")
+            page_text = request.input.get("pages")
             text = (
                 "\n".join(str(page).strip() for page in page_text if str(page).strip())
                 if isinstance(page_text, list)
@@ -216,7 +216,13 @@ class GenerationService:
             return {"text": text, **params}
 
         if request.pipeline_id == "image_post":
-            return {"text": request.input["script"], **params}
+            pages = request.input.get("pages")
+            text = (
+                "\n".join(str(page).strip() for page in pages if str(page).strip())
+                if isinstance(pages, list) and pages
+                else request.input["script"]
+            )
+            return {"text": text, **params}
 
         if request.pipeline_id == "script_to_video":
             kwargs = {
@@ -231,8 +237,8 @@ class GenerationService:
                     else {}
                 ),
             }
-            if request.metadata.get("confirmed_scenes"):
-                kwargs["_confirmed_scenes"] = request.metadata["confirmed_scenes"]
+            if request.input.get("scenes"):
+                kwargs["_confirmed_scenes"] = request.input["scenes"]
             return kwargs
 
         if request.pipeline_id == "topic_to_long_form":

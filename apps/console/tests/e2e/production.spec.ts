@@ -47,6 +47,33 @@ test.describe("生产模式与产物", () => {
     expect(unhandledApi).toEqual([])
   })
 
+  test("视频发起页只预告真实生产路线，不伪装成分镜预览", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page)
+    await preparePage(page)
+    await page.goto(`/#/create/generate/${fixtureIds.topicTemplate}`, {
+      waitUntil: "networkidle",
+    })
+
+    await expect(page.getByText("本次生产概览", { exact: true })).toBeVisible()
+    const route = page.getByRole("list", { name: "本次生产路线" })
+    await expect(
+      route.getByRole("listitem").filter({ hasText: "输入主题" })
+    ).toBeVisible()
+    await expect(
+      route.getByRole("listitem").filter({ hasText: "确认文案" })
+    ).toBeVisible()
+    await expect(
+      route.getByRole("listitem").filter({ hasText: "确认分镜" })
+    ).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "分镜预览", exact: true })
+    ).toHaveCount(0)
+    await expect(
+      page.getByText(/真实文案、分镜和进度会在任务页出现/)
+    ).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
   test("主题路线在模板和本次设置共用写稿与分镜控件", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page)
     await preparePage(page)
@@ -59,9 +86,11 @@ test.describe("生产模式与产物", () => {
     await expect(
       page.getByRole("combobox", { name: "写稿提示词" })
     ).toContainText("default-script")
+    await page.getByRole("button", { name: /^2\. 分镜/ }).click()
     await expect(
       page.getByRole("combobox", { name: "分镜提示词" })
     ).toContainText("default-split")
+    await page.getByRole("button", { name: /^1\. 写稿/ }).click()
     await page.getByRole("button", { name: "展开编辑" }).first().click()
     const promptEditor = page.getByRole("textbox", { name: "写稿提示词正文" })
     await expect(promptEditor).toBeVisible()
@@ -78,9 +107,11 @@ test.describe("生产模式与产物", () => {
     await expect(
       page.getByRole("combobox", { name: "写稿提示词" })
     ).toContainText("default-script")
+    await page.getByRole("button", { name: /^2\. 分镜/ }).click()
     await expect(
       page.getByRole("combobox", { name: "分镜提示词" })
     ).toContainText("default-split")
+    await page.getByRole("button", { name: /^1\. 写稿/ }).click()
     await page.getByRole("button", { name: "展开编辑" }).first().click()
     await page
       .getByRole("textbox", { name: "写稿提示词正文" })
@@ -100,6 +131,84 @@ test.describe("生产模式与产物", () => {
     await page.getByRole("combobox", { name: "第 1 行模型" }).click()
     await page.getByRole("option", { name: "deepseek-v4" }).click()
     await expect(page.getByText("分镜数量", { exact: true })).toHaveCount(0)
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("生产设置保持字段合同并在宽窄页面使用阶段折叠与字段网格", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 2048, height: 1152 })
+    const unhandledApi = await installApiFixtures(page)
+    await preparePage(page)
+    await page.goto(`/#/create/generate/${fixtureIds.topicTemplate}`, {
+      waitUntil: "networkidle",
+    })
+    await page
+      .getByRole("button", { name: "展开本次设置", exact: true })
+      .click()
+
+    const settingRows = page.locator('[data-slot="production-setting-row"]')
+    await expect(
+      page.locator('[data-setting-key="script_template_name"]')
+    ).toBeVisible()
+    await expect
+      .poll(() =>
+        settingRows.evaluateAll((rows) =>
+          rows.map((row) => row.getAttribute("data-setting-key"))
+        )
+      )
+      .toEqual([
+        "title",
+        "script_template_name",
+        "script_model",
+        "language_script_models",
+        "split_template_name",
+        "split_model",
+        "frame_template",
+        "image_provider",
+        "media_workflow",
+        "media_width",
+        "media_height",
+        "prompt_prefix",
+        "image_prompt_visual_context",
+        "image_prompt_generation_rules",
+        "tts_inference_mode",
+        "tts_voice",
+        "tts_speed",
+        "bgm_path",
+        "bgm_volume",
+        "bgm_mode",
+        "compose_runtime",
+        "template_params",
+      ])
+
+    await expect(
+      page.locator('[data-slot="production-setting-section"][data-open="true"]')
+    ).toHaveCount(1)
+    await page.getByRole("button", { name: /^4\. (音色|配音)/ }).click()
+    const desktopEngine = await page
+      .locator('[data-setting-key="tts_inference_mode"]')
+      .boundingBox()
+    const desktopVoice = await page
+      .locator('[data-setting-key="tts_voice"]')
+      .boundingBox()
+    expect(desktopEngine).not.toBeNull()
+    expect(desktopVoice).not.toBeNull()
+    expect(Math.abs(desktopEngine!.y - desktopVoice!.y)).toBeLessThanOrEqual(2)
+    expect(desktopVoice!.x).toBeGreaterThan(desktopEngine!.x)
+    expect(Math.abs(desktopEngine!.width - desktopVoice!.width)).toBeLessThan(4)
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    const mobileEngine = await page
+      .locator('[data-setting-key="tts_inference_mode"]')
+      .boundingBox()
+    const mobileVoice = await page
+      .locator('[data-setting-key="tts_voice"]')
+      .boundingBox()
+    expect(mobileEngine).not.toBeNull()
+    expect(mobileVoice).not.toBeNull()
+    expect(Math.abs(mobileEngine!.x - mobileVoice!.x)).toBeLessThanOrEqual(16)
+    expect(mobileVoice!.y).toBeGreaterThan(mobileEngine!.y)
     expect(unhandledApi).toEqual([])
   })
 
@@ -127,6 +236,7 @@ test.describe("生产模式与产物", () => {
     await page
       .getByRole("button", { name: "展开本次设置", exact: true })
       .click()
+    await page.getByRole("button", { name: /^3\. 音色/ }).click()
     const voice = page.getByLabel(/^音色/).last()
     await expect(voice).toHaveValue("recipe-voice")
 
@@ -134,7 +244,8 @@ test.describe("生产模式与产物", () => {
     await page.getByRole("button", { name: "恢复模板默认" }).click()
     await expect(voice).toHaveValue("recipe-voice")
     await voice.fill("run-voice")
-    await page.getByRole("combobox", { name: "图片 Provider" }).click()
+    await page.getByRole("button", { name: /^2\. 每镜画面/ }).click()
+    await page.getByRole("combobox", { name: "图片生成方式" }).click()
     await page.getByRole("option", { name: "阿里云百炼" }).click()
     await page.getByRole("combobox", { name: "图片模型" }).click()
     await page.getByRole("option", { name: "Qwen-Image 2.0 Pro" }).click()
@@ -144,7 +255,15 @@ test.describe("生产模式与产物", () => {
       .getByLabel("视频文案", { exact: true })
       .fill("只验证本次覆盖的提交文案。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
-    await expect(page.getByText("已完成", { exact: true })).toBeVisible()
+    await expect(page).toHaveURL(/#\/board\/tasks\/production-submitted-1$/)
+    await expect(
+      page.getByRole("heading", { name: "检查产物并发布" })
+    ).toBeVisible()
+    await expect(
+      page.getByLabel("生成结果视频预览", { exact: true })
+    ).toBeVisible()
+    await expect(page.getByRole("link", { name: "下载视频" })).toBeVisible()
+    await expect(page.getByRole("link", { name: /查看产物/ })).toHaveCount(0)
 
     const taskRequest = captured.find(
       (request) => request.path === "/production-tasks"
@@ -184,6 +303,15 @@ test.describe("生产模式与产物", () => {
     await page
       .getByRole("button", { name: "展开本次设置", exact: true })
       .click()
+    await expect(
+      page.getByRole("combobox", { name: "写作模型 LLM 服务" })
+    ).toContainText("AiHubMix 主账号")
+    await expect(
+      page.getByRole("combobox", { name: "写作模型", exact: true })
+    ).toContainText("deepseek-v4")
+    await expect(
+      page.getByText("留空使用系统默认模型。", { exact: true })
+    ).toHaveCount(0)
     await page.getByLabel("目标字数").fill("2400")
     await expect(page.getByText(/本次覆盖 1 项/).first()).toBeVisible()
 
@@ -191,7 +319,10 @@ test.describe("生产模式与产物", () => {
       .getByLabel("文案", { exact: true })
       .fill("请把这段养猫素材扩写成结构化长文。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
-    await expect(page.getByText("已完成", { exact: true })).toBeVisible()
+    await expect(page).toHaveURL(/#\/board\/tasks\/production-submitted-1$/)
+    await expect(
+      page.getByRole("heading", { name: "检查产物并发布" })
+    ).toBeVisible()
 
     const taskRequest = captured.find(
       (request) => request.path === "/production-tasks"
@@ -233,7 +364,7 @@ test.describe("生产模式与产物", () => {
       page.getByRole("combobox", { name: /当前：WhiskerLab 内容计划/ })
     ).toBeVisible()
     await expect(page.getByLabel("视频文案", { exact: true })).toHaveValue("")
-    await expect(page.getByText("分镜数量由 AI 决定")).toBeVisible()
+    await expect(page.getByText("本次生产概览", { exact: true })).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 
@@ -275,8 +406,14 @@ test.describe("生产模式与产物", () => {
     ).toBeVisible()
     await expect(page.getByRole("heading", { name: "3. 音色" })).toHaveCount(1)
     await expect(page.getByRole("heading", { name: "4. 合成" })).toHaveCount(1)
-    await expect(page.getByLabel(/^音色/)).toHaveCount(1)
-    await expect(page.getByLabel("背景音乐文件")).toHaveCount(1)
+    await expect(page.getByLabel(/^音色/).last()).toBeHidden()
+    await expect(page.getByLabel("背景音乐文件")).toBeHidden()
+    await page.getByRole("button", { name: /^3\. 音色/ }).click()
+    await expect(page.getByLabel(/^音色/).last()).toBeVisible()
+    await expect(page.getByLabel("背景音乐文件")).toBeHidden()
+    await page.getByRole("button", { name: /^4\. 合成/ }).click()
+    await expect(page.getByLabel(/^音色/).last()).toBeHidden()
+    await expect(page.getByLabel("背景音乐文件")).toBeVisible()
     await expect(
       page.getByRole("button", { name: "收起本次设置", exact: true })
     ).toHaveAttribute("aria-expanded", "true")
@@ -412,16 +549,17 @@ test.describe("生产模式与产物", () => {
     await expect(
       page.locator("button:visible").filter({ hasText: "正在上传并提交…" })
     ).toBeVisible()
-    await expect(page.getByRole("button", { name: "前往发布" })).toBeVisible()
+    await expect(page).toHaveURL(/#\/board\/tasks\/production-submitted-1$/)
+    await expect(
+      page.getByRole("heading", { name: "检查产物并发布" })
+    ).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 
-  test("标准视频从 submitting 进入 completed 并自动读取结果", async ({
-    page,
-  }) => {
+  test("提交后进入稳定任务页并持续展示当前阶段", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       submissionDelayMs: 350,
-      submissionState: "completed",
+      submissionState: "running",
     })
     await preparePage(page)
     await page.goto(`/#/create/generate/${fixtureIds.videoTemplate}`, {
@@ -432,28 +570,22 @@ test.describe("生产模式与产物", () => {
       .fill("猫咪摇尾巴时，速度和高度都在表达情绪。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
 
-    await Promise.all([
-      expect(
-        page.locator("button:visible").filter({ hasText: "正在提交…" })
-      ).toBeVisible(),
-      expect(page.getByText("提交中", { exact: true })).toBeVisible(),
-      expect(
-        page.getByRole("heading", { name: "任务状态", exact: true })
-      ).toBeVisible(),
-    ])
-    await expect(page.getByText("已完成", { exact: true })).toBeVisible()
     await expect(
-      page.getByRole("heading", { name: "生成结果", exact: true })
+      page.locator("button:visible").filter({ hasText: "正在提交…" })
     ).toBeVisible()
+    await expect(page).toHaveURL(/#\/board\/tasks\/production-submitted-1$/)
+    await expect(page.getByText("进行中", { exact: true })).toBeVisible()
     await expect(
-      page.getByRole("heading", { name: "任务状态", exact: true })
-    ).toHaveCount(0)
-    await expect(page.getByRole("button", { name: "前往发布" })).toBeVisible()
-    await expect(page.locator("video")).toBeVisible()
+      page.getByText("正在规划分镜", { exact: true }).first()
+    ).toBeVisible()
+    await expect(page.getByText("正在处理", { exact: true })).toBeVisible()
+    await expect(
+      page.getByRole("progressbar", { name: "正在规划分镜" })
+    ).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 
-  test("标准视频 failed 显示原因并允许重新提交", async ({ page }) => {
+  test("失败任务在稳定任务页显示原因与重试入口", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       submissionState: "failed",
     })
@@ -466,15 +598,14 @@ test.describe("生产模式与产物", () => {
       .fill("故障状态验收文案。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
 
-    await expect(page.getByText("任务失败", { exact: true })).toBeVisible()
+    await expect(page).toHaveURL(/#\/board\/tasks\/production-submitted-1$/)
+    await expect(page.getByText("异常", { exact: true })).toBeVisible()
     await expect(page.getByText(/渲染节点暂时不可用/)).toBeVisible()
-    await expect(
-      page.getByRole("button", { name: "开始生成" }).first()
-    ).toBeEnabled()
+    await expect(page.getByRole("button", { name: "原样重试" })).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 
-  test("运行中任务可取消，cancelled 后恢复提交", async ({ page }) => {
+  test("运行中任务可从稳定任务页取消", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       submissionState: "running",
     })
@@ -487,17 +618,17 @@ test.describe("生产模式与产物", () => {
       .fill("取消状态验收文案。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
 
-    await expect(page.getByText("生成中", { exact: true })).toBeVisible()
+    await expect(page).toHaveURL(/#\/board\/tasks\/production-submitted-1$/)
+    await expect(page.getByText("进行中", { exact: true })).toBeVisible()
     await page.getByRole("button", { name: "取消任务" }).click()
-    await expect(page.getByText("已取消", { exact: true })).toBeVisible()
-    await expect(page.getByRole("button", { name: "取消任务" })).toHaveCount(0)
     await expect(
-      page.getByRole("button", { name: "开始生成" }).first()
-    ).toBeEnabled()
+      page.getByText("已取消", { exact: true }).first()
+    ).toBeVisible()
+    await expect(page.getByRole("button", { name: "取消任务" })).toHaveCount(0)
     expect(unhandledApi).toEqual([])
   })
 
-  test("未知后端状态不推断为运行中，也不暴露取消操作", async ({ page }) => {
+  test("无法量化的阶段展示真实忙碌状态而不伪造百分比", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       submissionState: "unknown",
     })
@@ -510,11 +641,9 @@ test.describe("生产模式与产物", () => {
       .fill("未知状态验收文案。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
 
-    await expect(page.getByText("状态待同步", { exact: true })).toBeVisible()
-    await expect(page.getByRole("button", { name: "取消任务" })).toHaveCount(0)
-    await expect(
-      page.getByRole("button", { name: "开始生成" }).first()
-    ).toBeEnabled()
+    await expect(page).toHaveURL(/#\/board\/tasks\/production-submitted-1$/)
+    await expect(page.getByText("正在处理", { exact: true })).toBeVisible()
+    await expect(page.getByText(/^\d+%$/)).toHaveCount(0)
     expect(unhandledApi).toEqual([])
   })
 
@@ -539,7 +668,7 @@ test.describe("生产模式与产物", () => {
     expect(unhandledApi).toEqual([])
   })
 
-  test("completed 后结果读取失败提供就地重试", async ({ page }) => {
+  test("稳定任务直接承载结果读取错误与恢复入口", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, {
       submissionState: "result-error",
     })
@@ -552,11 +681,15 @@ test.describe("生产模式与产物", () => {
       .fill("结果读取失败验收文案。")
     await page.getByRole("button", { name: "开始生成" }).first().click()
 
-    await expect(page.getByText("结果读取失败", { exact: true })).toBeVisible()
-    const retry = page.getByRole("button", { name: "重新读取结果" })
-    await expect(retry).toBeVisible()
-    await retry.click()
-    await expect(page.getByText("结果读取失败", { exact: true })).toBeVisible()
+    await expect(page).toHaveURL(/#\/board\/tasks\/production-submitted-1$/)
+    await expect(
+      page.getByRole("heading", { name: "检查产物并发布" })
+    ).toBeVisible()
+    await expect(page.getByText("产物读取失败", { exact: true })).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "重新读取产物" })
+    ).toBeVisible()
+    await expect(page.getByRole("link", { name: /查看产物/ })).toHaveCount(0)
     expect(unhandledApi).toEqual([])
   })
 

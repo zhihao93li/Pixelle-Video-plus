@@ -14,7 +14,11 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, ValidationError
 
 from api.dependencies import ConfigManagerDep
-from pixelle_video.config.schema import PixelleVideoConfig
+from pixelle_video.config.schema import (
+    LLM_PROVIDER_PRESETS,
+    LLMProviderType,
+    PixelleVideoConfig,
+)
 from pixelle_video.generation.templates import build_default_production_template_registry
 from pixelle_video.services.buffer_publisher import BufferPublisher, BufferPublishError
 from pixelle_video.services.image_providers import (
@@ -54,24 +58,30 @@ class LlmProviderOption(BaseModel):
     label: str
     provider_type: str
     configured: bool
+    default_model: str
     error: str | None = None
     models: list[LlmModelOption]
 
 
 class LlmModelCatalogResponse(BaseModel):
     configured: bool
+    default_provider_id: str
     providers: list[LlmProviderOption]
+
+
+class LlmProviderPreset(BaseModel):
+    id: LLMProviderType
+    label: str
+    base_url: str
+
+
+class LlmProviderPresetCatalogResponse(BaseModel):
+    providers: list[LlmProviderPreset]
 
 
 class LlmProviderUpdateRequest(BaseModel):
     name: str
-    provider_type: Literal[
-        "aihubmix",
-        "openai",
-        "aliyun_bailian",
-        "volcengine_ark",
-        "custom_openai",
-    ]
+    provider_type: LLMProviderType
     enabled: bool = True
     api_key: str = ""
     clear_api_key: bool = False
@@ -179,6 +189,9 @@ async def update_settings_config(
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
     config_manager.save()
+    from api.dependencies import refresh_runtime_tts_config
+
+    refresh_runtime_tts_config(config_manager.config)
     return _settings_payload(config_manager)
 
 
@@ -187,6 +200,9 @@ async def reset_settings_config(config_manager: ConfigManagerDep):
     """Reset app configuration to schema defaults."""
     config_manager.config = PixelleVideoConfig()
     config_manager.save()
+    from api.dependencies import refresh_runtime_tts_config
+
+    refresh_runtime_tts_config(config_manager.config)
     return _settings_payload(config_manager)
 
 
@@ -286,6 +302,7 @@ async def get_llm_model_catalog(config_manager: ConfigManagerDep):
                     fetch_available_models,
                     provider.api_key,
                     provider.base_url,
+                    provider_type=provider.provider_type,
                 )
             except Exception as exc:
                 error = str(exc)
@@ -295,6 +312,7 @@ async def get_llm_model_catalog(config_manager: ConfigManagerDep):
                 label=provider.name or provider_id,
                 provider_type=provider.provider_type,
                 configured=configured,
+                default_model=provider.default_model,
                 error=error,
                 models=[
                     LlmModelOption(id=model, label=model)
@@ -304,7 +322,19 @@ async def get_llm_model_catalog(config_manager: ConfigManagerDep):
         )
     return LlmModelCatalogResponse(
         configured=any(provider.configured for provider in providers),
+        default_provider_id=config_manager.config.llm.default_provider_id,
         providers=providers,
+    )
+
+
+@router.get("/llm/provider-presets", response_model=LlmProviderPresetCatalogResponse)
+async def get_llm_provider_presets():
+    """Return the connection presets actually supported by this backend."""
+    return LlmProviderPresetCatalogResponse(
+        providers=[
+            LlmProviderPreset(id=provider_id, **definition)
+            for provider_id, definition in LLM_PROVIDER_PRESETS.items()
+        ]
     )
 
 

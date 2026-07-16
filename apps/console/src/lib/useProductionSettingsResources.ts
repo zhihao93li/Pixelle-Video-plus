@@ -23,6 +23,7 @@ export type ProductionSettingsResources = {
   bgm: ResourceBgm[]
   frameTemplates: ResourceTemplate[]
   imageProviders: ImageProviderSetting[]
+  llmDefaultProviderId: string
   mediaWorkflows: ResourceWorkflow[]
   pipelines: PipelineManifest[]
   llmProviders: LlmModelProvider[]
@@ -35,6 +36,7 @@ const emptyResources: ProductionSettingsResources = {
   bgm: [],
   frameTemplates: [],
   imageProviders: [],
+  llmDefaultProviderId: "",
   mediaWorkflows: [],
   pipelines: [],
   llmProviders: [],
@@ -63,7 +65,8 @@ export function useProductionSettingsResources() {
       getLlmModelCatalog(),
     ]).then((results) => {
       if (cancelled) return
-      const [bgm, frames, media, tts, providers, pipelines, prompts, models] = results
+      const [bgm, frames, media, tts, providers, pipelines, prompts, models] =
+        results
       setResources({
         bgm: bgm.status === "fulfilled" ? bgm.value.bgm_files : [],
         frameTemplates:
@@ -73,6 +76,8 @@ export function useProductionSettingsResources() {
         ttsWorkflows: tts.status === "fulfilled" ? tts.value.workflows : [],
         imageProviders:
           providers.status === "fulfilled" ? providers.value.providers : [],
+        llmDefaultProviderId:
+          models.status === "fulfilled" ? models.value.default_provider_id : "",
         pipelines:
           pipelines.status === "fulfilled" ? pipelines.value.pipelines : [],
         llmProviders:

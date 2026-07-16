@@ -478,7 +478,6 @@ export function SettingsWorkspace() {
     }
   }
 
-
   async function testComfyui() {
     if (!settings) {
       return
@@ -716,7 +715,7 @@ export function SettingsWorkspace() {
           {activeView === "ai-voice" && settings ? (
             <div className="flex flex-col gap-5">
               <SettingsViewHeader
-                description="配置内容起草模型与 Fish Audio 语音服务。"
+                description="配置内容起草模型与默认配音服务。"
                 dirty={dirtySections["ai-voice"]}
                 onSave={() => void saveSettings("ai-voice")}
                 saving={savingSection === "ai-voice"}
@@ -736,7 +735,46 @@ export function SettingsWorkspace() {
                 />
               </Section>
 
-              <Section id="tts" title="Fish Audio">
+              <Section id="tts" title="配音服务">
+                <Field label="默认配音服务">
+                  <Select
+                    onValueChange={(value) =>
+                      patchSettings({
+                        comfyui: {
+                          ...settings.comfyui,
+                          tts: {
+                            ...settings.comfyui.tts,
+                            inference_mode: value as
+                              "local" | "comfyui" | "fish",
+                          },
+                        },
+                      })
+                    }
+                    value={settings.comfyui.tts.inference_mode ?? "local"}
+                  >
+                    <SelectTrigger aria-label="默认配音服务" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectItem value="local">
+                          Microsoft Edge 在线语音
+                        </SelectItem>
+                        <SelectItem value="fish">Fish Audio</SelectItem>
+                        <SelectItem value="comfyui">ComfyUI TTS</SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  新建任务默认使用这里选择的服务；模板明确指定其他服务时才会覆盖。
+                </p>
+                <div className="border-t pt-5">
+                  <h3 className="text-sm font-medium">Fish Audio</h3>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    选择 Fish Audio 为默认服务时，使用下面的模型和默认音色。
+                  </p>
+                </div>
                 <SecretSettingField
                   configured={Boolean(
                     settings.comfyui.tts.fish_audio.api_key_configured

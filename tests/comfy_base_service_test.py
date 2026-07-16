@@ -20,6 +20,7 @@ def test_comfykit_config_redaction_hides_secrets_without_changing_runtime_config
     assert config["runninghub_api_key"] == "real-secret"
     assert service._redact_sensitive_config(config) == {
         "comfyui_url": "http://127.0.0.1:8188",
+        "runninghub_url": "https://www.runninghub.cn",
         "runninghub_api_key": "***",
         "runninghub_instance_type": "plus",
         "runninghub_timeout": 600,

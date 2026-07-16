@@ -183,6 +183,7 @@ def test_settings_config_endpoint_saves_schema_valid_updates():
                     "runninghub_instance_type": "plus",
                     "runninghub_timeout": 300,
                     "tts": {
+                        "inference_mode": "fish",
                         "fish_audio": {
                             "api_key": "fish-key",
                             "model": "s2-pro",
@@ -215,6 +216,7 @@ def test_settings_config_endpoint_saves_schema_valid_updates():
     assert payload["config"]["llm"]["model"] == "gpt-4.1"
     assert payload["config"]["comfyui"]["runninghub_instance_type"] == "plus"
     assert payload["config"]["comfyui"]["runninghub_timeout"] == 300
+    assert payload["config"]["comfyui"]["tts"]["inference_mode"] == "fish"
     assert payload["config"]["publish"]["cos"]["public_base_url"] == (
         "https://new-bucket.example.com/"
     )
@@ -329,7 +331,11 @@ def test_settings_llm_model_catalog_uses_real_configured_provider(monkeypatch):
     monkeypatch.setattr(
         settings_router,
         "fetch_available_models",
-        lambda api_key, base_url: ["gpt-4.1", "claude-sonnet-4", "qwen-max"],
+        lambda api_key, base_url, *, provider_type="": [
+            "gpt-4.1",
+            "claude-sonnet-4",
+            "qwen-max",
+        ],
     )
     app.dependency_overrides[get_config_manager] = get_fake_config_manager
     try:
@@ -340,14 +346,43 @@ def test_settings_llm_model_catalog_uses_real_configured_provider(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["configured"] is True
+    assert payload["default_provider_id"] == "aihubmix"
     assert [provider["id"] for provider in payload["providers"]] == ["aihubmix"]
     assert payload["providers"][0]["provider_type"] == "aihubmix"
+    assert payload["providers"][0]["default_model"] == "gpt-4.1"
     assert [model["id"] for model in payload["providers"][0]["models"]] == [
         "claude-sonnet-4",
         "gpt-4.1",
         "qwen-max",
     ]
     assert not any("selected" in provider for provider in payload["providers"])
+
+
+def test_settings_llm_provider_presets_are_exposed_by_backend():
+    response = TestClient(app).get("/api/settings/llm/provider-presets")
+
+    assert response.status_code == 200
+    providers = {provider["id"]: provider for provider in response.json()["providers"]}
+    assert providers["aihubmix"] == {
+        "id": "aihubmix",
+        "label": "AiHubMix",
+        "base_url": "https://aihubmix.com/v1",
+    }
+    assert providers["openai"] == {
+        "id": "openai",
+        "label": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+    }
+    assert {
+        provider_id: providers[provider_id]["base_url"]
+        for provider_id in ("deepseek", "minimax", "kimi", "anthropic", "xai")
+    } == {
+        "deepseek": "https://api.deepseek.com",
+        "minimax": "https://api.minimaxi.com/v1",
+        "kimi": "https://api.moonshot.cn/v1",
+        "anthropic": "https://api.anthropic.com/v1/",
+        "xai": "https://api.x.ai/v1",
+    }
 
 
 def test_settings_support_multiple_real_llm_providers_and_default_selection(monkeypatch):
@@ -423,8 +458,8 @@ def test_llm_model_catalog_calls_each_provider_own_endpoint(monkeypatch):
     )
     calls = []
 
-    def fake_fetch(api_key, base_url):
-        calls.append((api_key, base_url))
+    def fake_fetch(api_key, base_url, *, provider_type=""):
+        calls.append((api_key, base_url, provider_type))
         return ["gpt-4.1"] if "openai.com" in base_url else ["claude-sonnet-4"]
 
     monkeypatch.setattr(settings_router, "fetch_available_models", fake_fetch)
@@ -436,8 +471,8 @@ def test_llm_model_catalog_calls_each_provider_own_endpoint(monkeypatch):
 
     assert response.status_code == 200, response.text
     assert calls == [
-        ("a-key", "https://aihubmix.com/v1"),
-        ("o-key", "https://api.openai.com/v1"),
+        ("a-key", "https://aihubmix.com/v1", "aihubmix"),
+        ("o-key", "https://api.openai.com/v1", "openai"),
     ]
     assert [provider["id"] for provider in response.json()["providers"]] == [
         "aihubmix-main",

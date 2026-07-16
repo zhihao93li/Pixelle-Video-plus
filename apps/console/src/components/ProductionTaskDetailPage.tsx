@@ -2,14 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ArrowLeft,
   CircleAlert,
-  Clock3,
-  ExternalLink,
   LoaderCircle,
   RefreshCcw,
   RotateCcw,
   Square,
 } from "lucide-react"
 
+import { CurrentReviewWorkspace } from "@/components/content/review/CurrentReviewWorkspace"
+import { ProductionFollowUp } from "@/components/production/ProductionFollowUp"
+import { ProductionTimeline } from "@/components/production/ProductionTimeline"
+import { ArtifactPreview } from "@/components/shared/ArtifactPreview"
 import { AsyncState } from "@/components/shared/AsyncState"
 import { PageFrame } from "@/components/shared/PageFrame"
 import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
@@ -20,10 +22,18 @@ import { Progress } from "@/components/ui/progress"
 import { formatDate, readableError } from "@/lib/format"
 import {
   cancelProductionTask,
+  getPendingContentReview,
   getProductionTask,
+  getProductionTaskTimeline,
+  getTaskResult,
   retryProductionTask,
+  type ContentItem,
+  type GenerationResult,
+  type PendingReviewSession,
   type ProductionTask,
+  type ProductionTimelineEntry,
 } from "@/lib/generationApi"
+import { resultArtifactViewModel } from "@/lib/productionRunAdapters"
 import { routeHref } from "@/lib/router"
 
 const STATE_LABELS: Record<ProductionTask["state"], string> = {
@@ -42,51 +52,212 @@ function sourceLabel(source: ProductionTask["source"]) {
 
 export function ProductionTaskDetailPage({ taskId }: { taskId: string }) {
   const [task, setTask] = useState<ProductionTask | null>(null)
+  const [item, setItem] = useState<ContentItem | null>(null)
+  const [pendingReview, setPendingReview] =
+    useState<PendingReviewSession | null>(null)
+  const [result, setResult] = useState<GenerationResult | null>(null)
+  const [resultLoading, setResultLoading] = useState(false)
+  const [resultError, setResultError] = useState<string | null>(null)
+  const [timeline, setTimeline] = useState<ProductionTimelineEntry[]>([])
+  const [timelineCursor, setTimelineCursor] = useState<string | null>(null)
+  const [timelineLoading, setTimelineLoading] = useState(false)
+  const [timelineError, setTimelineError] = useState<string | null>(null)
+  const [timelineResults, setTimelineResults] = useState<
+    Record<string, GenerationResult | null>
+  >({})
+  const [timelineResultErrors, setTimelineResultErrors] = useState<
+    Record<string, string | null>
+  >({})
   const [loading, setLoading] = useState(true)
   const [action, setAction] = useState<"cancel" | "retry" | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const loadTimelineResults = useCallback(
+    async (entries: ProductionTimelineEntry[]) => {
+      const taskIds = Array.from(
+        new Set(
+          entries
+            .filter((entry) => entry.event_type === "artifact_produced")
+            .map((entry) => entry.generation_task_id)
+            .filter((id): id is string => Boolean(id))
+        )
+      )
+      await Promise.all(
+        taskIds.map(async (generationTaskId) => {
+          try {
+            const nextResult = await getTaskResult(generationTaskId)
+            setTimelineResults((current) => ({
+              ...current,
+              [generationTaskId]: nextResult,
+            }))
+            setTimelineResultErrors((current) => ({
+              ...current,
+              [generationTaskId]: null,
+            }))
+          } catch (fetchError) {
+            setTimelineResults((current) => ({
+              ...current,
+              [generationTaskId]: null,
+            }))
+            setTimelineResultErrors((current) => ({
+              ...current,
+              [generationTaskId]: readableError(fetchError),
+            }))
+          }
+        })
+      )
+    },
+    []
+  )
+
+  const loadTimeline = useCallback(
+    async (cursor?: string) => {
+      setTimelineLoading(true)
+      try {
+        const page = await getProductionTaskTimeline(taskId, {
+          cursor,
+          limit: 30,
+        })
+        setTimeline((current) =>
+          cursor ? [...current, ...page.items] : page.items
+        )
+        setTimelineCursor(page.next_cursor)
+        setTimelineError(null)
+        await loadTimelineResults(page.items)
+      } catch (fetchError) {
+        setTimelineError(readableError(fetchError))
+      } finally {
+        setTimelineLoading(false)
+      }
+    },
+    [loadTimelineResults, taskId]
+  )
+
   const refresh = useCallback(async () => {
     try {
-      setTask(await getProductionTask(taskId))
+      const nextTask = await getProductionTask(taskId)
+      setTask(nextTask)
+
+      const context = await getPendingContentReview(nextTask.content_item_id)
+      setItem(context.item)
+      setPendingReview(context.review)
+
+      const latestTaskId = nextTask.generation_task_ids.at(-1)
+      if (nextTask.state === "produced" && latestTaskId) {
+        setResultLoading(true)
+        try {
+          setResult(await getTaskResult(latestTaskId))
+          setResultError(null)
+        } catch (resultFetchError) {
+          setResult(null)
+          setResultError(readableError(resultFetchError))
+        } finally {
+          setResultLoading(false)
+        }
+      } else {
+        setResult(null)
+        setResultError(null)
+        setResultLoading(false)
+      }
+      await loadTimeline()
       setError(null)
     } catch (refreshError) {
       setError(readableError(refreshError))
     } finally {
       setLoading(false)
     }
-  }, [taskId])
+  }, [loadTimeline, taskId])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void refresh(), 0)
     return () => window.clearTimeout(timeout)
   }, [refresh])
 
+  useEffect(() => {
+    if (task?.state !== "in_progress") return undefined
+    let cancelled = false
+    let timeout: number | undefined
+    const poll = async () => {
+      await refresh()
+      if (!cancelled) timeout = window.setTimeout(poll, 2_000)
+    }
+    timeout = window.setTimeout(poll, 2_000)
+    return () => {
+      cancelled = true
+      if (timeout) window.clearTimeout(timeout)
+    }
+  }, [refresh, task?.state])
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void refresh()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibility)
+  }, [refresh])
+
   const latestGenerationTaskId = task?.generation_task_ids.at(-1)
   const progress = task?.progress_percentage
   const canCancel = task?.state === "in_progress"
   const canRetry = task?.state === "failed" || task?.state === "cancelled"
+  const artifact = resultArtifactViewModel(result, null)
   const primaryHref = useMemo(() => {
-    if (!task) return null
-    if (task.state === "produced" && latestGenerationTaskId) {
-      return `/library?task=${encodeURIComponent(latestGenerationTaskId)}`
-    }
-    if (task.state === "needs_user") {
-      return `/board/item/${task.content_item_id}`
-    }
-    return null
+    if (!task || task.state !== "produced" || !latestGenerationTaskId)
+      return null
+    return `/library?task=${encodeURIComponent(latestGenerationTaskId)}`
   }, [latestGenerationTaskId, task])
+
+  const visibleTimeline = useMemo(() => {
+    return timeline.filter((entry) => {
+      if (
+        task?.state === "needs_user" &&
+        pendingReview?.review_id &&
+        entry.revision_id === pendingReview.review_id &&
+        entry.category === "output"
+      ) {
+        return false
+      }
+      if (
+        task?.state === "produced" &&
+        item?.status !== "published" &&
+        item?.status !== "measured" &&
+        entry.event_type === "artifact_produced" &&
+        entry.generation_task_id === latestGenerationTaskId
+      ) {
+        return false
+      }
+      if (
+        task?.state === "failed" &&
+        entry.event_type === "production_failed" &&
+        entry.generation_task_id === latestGenerationTaskId
+      ) {
+        return false
+      }
+      if (
+        task?.state === "cancelled" &&
+        entry.event_type === "task_cancelled"
+      ) {
+        return false
+      }
+      return true
+    })
+  }, [
+    item?.status,
+    latestGenerationTaskId,
+    pendingReview?.review_id,
+    task?.state,
+    timeline,
+  ])
 
   async function runAction(kind: "cancel" | "retry") {
     if (!task) return
     setAction(kind)
     setError(null)
     try {
-      const updated =
-        kind === "cancel"
-          ? await cancelProductionTask(task.production_task_id)
-          : await retryProductionTask(task.production_task_id)
-      setTask(updated)
+      if (kind === "cancel") await cancelProductionTask(task.production_task_id)
+      else await retryProductionTask(task.production_task_id)
+      await refresh()
     } catch (actionError) {
       setError(readableError(actionError))
     } finally {
@@ -118,6 +289,17 @@ export function ProductionTaskDetailPage({ taskId }: { taskId: string }) {
       </PageFrame>
     )
   }
+
+  const currentTitle =
+    task.state === "needs_user"
+      ? task.stage_label
+      : task.state === "produced" && item?.status === "published"
+        ? "记录发布数据"
+        : task.state === "produced" && item?.status === "measured"
+          ? "任务已完成"
+          : task.state === "produced"
+            ? "检查产物并发布"
+            : "当前状态"
 
   return (
     <PageFrame>
@@ -151,160 +333,222 @@ export function ProductionTaskDetailPage({ taskId }: { taskId: string }) {
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="flex min-w-0 flex-col gap-4">
-          <WorkspacePanel
-            description="这张卡从提交开始持续记录同一次生产，不会在确认或重试时换成另一张卡。"
-            title="当前状态"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge
-                variant={task.state === "failed" ? "destructive" : "secondary"}
-              >
-                {STATE_LABELS[task.state]}
-              </Badge>
-              <Badge variant="outline">{task.stage_label}</Badge>
-              <Badge variant="outline">{sourceLabel(task.source)}</Badge>
-            </div>
-
-            {progress != null && task.state === "in_progress" ? (
-              <div className="mt-4 space-y-2">
-                <Progress value={progress} />
-                <div className="text-right text-xs text-muted-foreground tabular-nums">
-                  {Math.round(progress)}%
-                </div>
-              </div>
-            ) : null}
-
-            {task.error ? (
-              <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-                <div className="flex items-center gap-2 text-sm font-medium text-destructive">
-                  <CircleAlert className="size-4" />
-                  {task.error.layer}
-                  {task.error.exception_type
-                    ? ` · ${task.error.exception_type}`
-                    : ""}
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {task.error.message}
-                </p>
-              </div>
-            ) : null}
-
-            <div className="mt-4 flex flex-wrap gap-2">
-              {primaryHref ? (
-                <Button asChild size="sm">
-                  <a href={routeHref(primaryHref)}>
-                    {task.action_label ??
-                      (task.state === "produced" ? "查看产物" : "继续处理")}
-                    <ExternalLink data-icon="inline-end" />
-                  </a>
-                </Button>
-              ) : null}
-              {canRetry ? (
-                <Button
-                  disabled={action != null}
-                  onClick={() => void runAction("retry")}
-                  size="sm"
-                  variant="outline"
-                >
-                  {action === "retry" ? (
-                    <LoaderCircle className="animate-spin" />
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <WorkspacePanel
+          description={
+            task.state === "needs_user"
+              ? "这是当前唯一需要处理的内容；完成后会进入下方生产记录。"
+              : "只展示当前最重要的状态或操作。"
+          }
+          title={currentTitle}
+        >
+          {task.state === "needs_user" ? (
+            pendingReview ? (
+              <CurrentReviewWorkspace
+                itemId={task.content_item_id}
+                onChanged={refresh}
+                review={pendingReview}
+              />
+            ) : (
+              <AsyncState
+                action={
+                  <Button
+                    onClick={() => void refresh()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    重新读取
+                  </Button>
+                }
+                description="任务正在等待人工确认，但当前确认内容还未读取到。"
+                state="stale"
+                title="确认内容暂未就绪"
+              />
+            )
+          ) : task.state === "produced" ? (
+            <div className="space-y-4">
+              {item?.status === "published" ||
+              item?.status === "measured" ? null : (
+                <>
+                  {resultLoading && !result ? (
+                    <AsyncState state="loading" title="正在读取产物" />
+                  ) : resultError ? (
+                    <AsyncState
+                      action={
+                        <Button
+                          onClick={() => void refresh()}
+                          size="sm"
+                          variant="outline"
+                        >
+                          <RefreshCcw />
+                          重新读取产物
+                        </Button>
+                      }
+                      description={resultError}
+                      state="error"
+                      title="产物读取失败"
+                    />
                   ) : (
-                    <RotateCcw />
+                    <ArtifactPreview artifact={artifact} />
                   )}
-                  原样重试
-                </Button>
-              ) : null}
-              {canCancel ? (
-                <Button
-                  disabled={action != null}
-                  onClick={() => void runAction("cancel")}
-                  size="sm"
-                  variant="outline"
-                >
-                  {action === "cancel" ? (
-                    <LoaderCircle className="animate-spin" />
-                  ) : (
-                    <Square />
-                  )}
-                  取消任务
-                </Button>
+                  {primaryHref ? (
+                    <div className="flex justify-end">
+                      <Button asChild size="sm" variant="outline">
+                        <a href={routeHref(primaryHref)}>在作品库中打开</a>
+                      </Button>
+                    </div>
+                  ) : null}
+                </>
+              )}
+              {item ? (
+                <ProductionFollowUp
+                  item={item}
+                  onChanged={refresh}
+                  productionTaskId={task.production_task_id}
+                />
               ) : null}
             </div>
-          </WorkspacePanel>
-
-          <WorkspacePanel
-            description="重试会追加一次执行记录，旧失败不会被覆盖。"
-            title="执行记录"
-          >
-            <div className="space-y-2">
-              {task.attempts.map((attempt, index) => (
-                <div
-                  className="flex flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
-                  key={attempt.generation_task_id}
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge
+                  variant={
+                    task.state === "failed" ? "destructive" : "secondary"
+                  }
                 >
+                  {STATE_LABELS[task.state]}
+                </Badge>
+                <Badge variant="outline">{task.stage_label}</Badge>
+                <Badge variant="outline">{sourceLabel(task.source)}</Badge>
+              </div>
+
+              {task.state === "in_progress" ? (
+                <div className="space-y-2">
+                  <Progress
+                    aria-label={task.stage_label}
+                    indeterminate={progress == null}
+                    value={progress ?? undefined}
+                  />
+                  <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                    <span>{task.stage_label}</span>
+                    {progress != null ? (
+                      <span>{Math.round(progress)}%</span>
+                    ) : (
+                      <span>正在处理</span>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {task.state === "failed" && task.error ? (
+                <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  <CircleAlert className="mt-0.5 size-4 shrink-0" />
                   <div>
-                    <div className="font-medium">
-                      第 {index + 1} 次执行 · {attempt.status}
-                    </div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {attempt.stage || "尚未进入执行步骤"}
-                    </div>
+                    <div className="font-medium">{task.stage_label}</div>
+                    <div className="mt-1">{task.error.message}</div>
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    {formatDate(attempt.updated_at)}
-                  </div>
-                </div>
-              ))}
-              {task.attempts.length === 0 ? (
-                <div className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-                  尚未进入生成引擎
                 </div>
               ) : null}
+
+              <div className="flex flex-wrap justify-end gap-2">
+                {canRetry ? (
+                  <Button
+                    disabled={action != null}
+                    onClick={() => void runAction("retry")}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {action === "retry" ? (
+                      <LoaderCircle className="animate-spin" />
+                    ) : (
+                      <RotateCcw />
+                    )}
+                    原样重试
+                  </Button>
+                ) : null}
+                {canCancel ? (
+                  <Button
+                    disabled={action != null}
+                    onClick={() => void runAction("cancel")}
+                    size="sm"
+                    variant="outline"
+                  >
+                    {action === "cancel" ? (
+                      <LoaderCircle className="animate-spin" />
+                    ) : (
+                      <Square />
+                    )}
+                    取消任务
+                  </Button>
+                ) : null}
+              </div>
             </div>
-          </WorkspacePanel>
-        </div>
+          )}
+        </WorkspacePanel>
 
-        <div className="flex flex-col gap-4">
-          <WorkspacePanel padding="compact" title="任务信息">
-            <dl className="space-y-3 text-sm">
-              <div>
-                <dt className="text-xs text-muted-foreground">所属项目</dt>
-                <dd className="mt-0.5 break-all">{task.project_id}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">下一责任人</dt>
-                <dd className="mt-0.5">{task.next_actor}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">创建时间</dt>
-                <dd className="mt-0.5">{formatDate(task.created_at)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">状态更新时间</dt>
-                <dd className="mt-0.5">{formatDate(task.state_since)}</dd>
-              </div>
-            </dl>
-          </WorkspacePanel>
-
-          <WorkspacePanel padding="compact" title="关联记录">
-            <div className="space-y-2 text-sm">
-              <a
-                className="flex items-center justify-between rounded-md border px-3 py-2 hover:border-primary/40"
-                href={routeHref(`/board/item/${task.content_item_id}`)}
+        {timelineError ? (
+          <AsyncState
+            action={
+              <Button
+                onClick={() => void loadTimeline()}
+                size="sm"
+                variant="outline"
               >
-                内容详情
-                <ExternalLink className="size-3.5" />
-              </a>
-              <div className="flex items-center gap-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                <Clock3 className="size-3.5" />
-                {task.generation_task_ids.length} 条生成记录，
-                {task.artifact_ids.length} 条产物记录
+                重新读取记录
+              </Button>
+            }
+            description={timelineError}
+            state="error"
+            title="生产记录读取失败"
+          />
+        ) : (
+          <div className="rounded-xl border bg-card p-5 sm:p-6">
+            <ProductionTimeline
+              entries={visibleTimeline}
+              resultErrors={timelineResultErrors}
+              results={timelineResults}
+            />
+            {timelineCursor ? (
+              <div className="mt-5 flex justify-center border-t pt-4">
+                <Button
+                  disabled={timelineLoading}
+                  onClick={() => void loadTimeline(timelineCursor)}
+                  size="sm"
+                  variant="outline"
+                >
+                  {timelineLoading ? (
+                    <LoaderCircle className="animate-spin" />
+                  ) : null}
+                  查看更早记录
+                </Button>
               </div>
+            ) : null}
+          </div>
+        )}
+
+        <details className="rounded-lg border bg-card">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+            任务信息
+          </summary>
+          <dl className="grid gap-4 border-t px-4 py-4 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-xs text-muted-foreground">所属项目</dt>
+              <dd className="mt-1 break-all">{task.project_id}</dd>
             </div>
-          </WorkspacePanel>
-        </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">发起方式</dt>
+              <dd className="mt-1">{sourceLabel(task.source)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">创建时间</dt>
+              <dd className="mt-1">{formatDate(task.created_at)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">最后更新</dt>
+              <dd className="mt-1">{formatDate(task.updated_at)}</dd>
+            </div>
+          </dl>
+        </details>
       </div>
     </PageFrame>
   )

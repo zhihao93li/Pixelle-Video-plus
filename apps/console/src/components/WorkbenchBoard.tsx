@@ -38,7 +38,7 @@ import {
 import { routeHref } from "@/lib/router"
 import { cn } from "@/lib/utils"
 
-const POLL_INTERVAL_MS = 15_000
+const POLL_INTERVAL_MS = 5_000
 const ALL_FILTER = "__all__"
 
 type WorkbenchColumn = {
@@ -128,12 +128,19 @@ function TaskCard({ task }: { task: WorkbenchTaskCard }) {
           </Badge>
         </div>
 
-        {progress != null && task.state === "in_progress" ? (
+        {task.state === "in_progress" ? (
           <div className="mt-3 flex flex-col gap-1">
-            <Progress value={progress} />
-            <span className="text-right text-[11px] text-muted-foreground tabular-nums">
-              {Math.round(progress)}%
-            </span>
+            <Progress
+              aria-label={task.stage.label}
+              indeterminate={progress == null}
+              value={progress ?? undefined}
+            />
+            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <span className="truncate">{task.stage.label}</span>
+              <span className="shrink-0 tabular-nums">
+                {progress != null ? `${Math.round(progress)}%` : "正在处理…"}
+              </span>
+            </div>
           </div>
         ) : null}
 
@@ -371,9 +378,14 @@ export function WorkbenchBoard() {
   useEffect(() => {
     const timeout = window.setTimeout(() => void refresh(), 0)
     const interval = window.setInterval(() => void refresh(), POLL_INTERVAL_MS)
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void refresh()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
     return () => {
       window.clearTimeout(timeout)
       window.clearInterval(interval)
+      document.removeEventListener("visibilitychange", handleVisibility)
     }
   }, [refresh])
 
@@ -620,7 +632,6 @@ export function WorkbenchBoard() {
           </div>
         </>
       )}
-
     </PageFrame>
   )
 }

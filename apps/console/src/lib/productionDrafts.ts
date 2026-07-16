@@ -32,7 +32,7 @@ export type StandardGenerationSettings = {
   bgmPath: string
   bgmVolume: number
   bgmMode: "loop" | "once"
-  ttsInferenceMode: "local" | "comfyui" | "fish"
+  ttsInferenceMode: "" | "local" | "comfyui" | "fish"
   ttsVoice: string
   ttsWorkflow: string
   ttsSpeed: number
@@ -81,8 +81,8 @@ export const fallbackStandardSettings: StandardGenerationSettings = {
   bgmPath: "",
   bgmVolume: 0.2,
   bgmMode: "loop",
-  ttsInferenceMode: "local",
-  ttsVoice: "zh-CN-YunjianNeural",
+  ttsInferenceMode: "",
+  ttsVoice: "",
   ttsWorkflow: "",
   ttsSpeed: 1,
   ttsRefAudioPath: "",
@@ -235,7 +235,7 @@ export function standardDraftForTemplate(
     ttsInferenceMode: enumParam(
       params,
       "tts_inference_mode",
-      ["local", "comfyui", "fish"] as const,
+      ["", "local", "comfyui", "fish"] as const,
       fallbackStandardSettings.ttsInferenceMode
     ),
     ttsVoice: stringParam(

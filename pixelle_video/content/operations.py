@@ -27,6 +27,7 @@ class ContentFlowOperation(BaseModel):
     operation: str
     item_id: str
     prior_status: str
+    payload: dict[str, Any] = Field(default_factory=dict)
     phase: Literal["accepted", "external_completed", "item_updated", "task_created", "linked"] = (
         "accepted"
     )
@@ -52,7 +53,13 @@ def request_hash(payload: Any) -> str:
 
 
 def begin_operation(
-    *, request_id: str, payload_hash: str, operation: str, item_id: str, prior_status: str
+    *,
+    request_id: str,
+    payload_hash: str,
+    operation: str,
+    item_id: str,
+    prior_status: str,
+    payload: dict[str, Any] | None = None,
 ) -> tuple[ContentFlowOperation, bool]:
     if not request_id.strip():
         raise ValueError("request_id is required")
@@ -69,6 +76,7 @@ def begin_operation(
             operation=operation,
             item_id=item_id,
             prior_status=prior_status,
+            payload=payload or {},
         )
         save_operation(record)
         return record, True
@@ -128,6 +136,7 @@ def fail_operation(record: ContentFlowOperation, message: str, *, layer: str = "
 def recover_running_operations() -> None:
     """Reconcile interrupted operations from persisted item/task facts."""
 
+    from pixelle_video.content.production_tasks import latest_task_for_content
     from pixelle_video.content.store import list_items, load_item, save_item
     from pixelle_video.generation.task_store import load_generation_task
 
@@ -156,6 +165,11 @@ def recover_running_operations() -> None:
             if item.status == "pending_review" and item.variants:
                 complete_operation(record, {"item_id": item.item_id, "status": item.status})
             else:
+                task = latest_task_for_content(item.item_id, states={"in_progress"})
+                if task is not None and task.stage_id == "generate_script" and record.payload:
+                    # The startup production runner can safely replay this
+                    # pre-provider LLM stage from the persisted request.
+                    continue
                 if item.status == "drafting":
                     item.status = "idea"
                     item.add_event(
@@ -185,11 +199,23 @@ def recover_running_operations() -> None:
                     record, {"item_id": item.item_id, "task_ids": known_ids, "recovered": True}
                 )
             else:
+                task = latest_task_for_content(item.item_id, states={"in_progress"})
+                if task is not None and task.stage_id == "submit_production":
+                    continue
                 item.status = record.prior_status
                 item.updated_at = now_iso()
                 save_item(item)
                 fail_operation(record, "服务重启前尚未创建生产任务。")
             continue
+
+        if record.operation == "revise_review":
+            task = latest_task_for_content(item.item_id, states={"in_progress"})
+            if (
+                task is not None
+                and task.stage_id in {"rewrite_script", "regenerate_scenes"}
+                and record.payload
+            ):
+                continue
 
         matching_event = any(
             event.detail.get("request_id") == record.request_id for event in item.events

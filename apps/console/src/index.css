@@ -171,6 +171,18 @@
   --page-content-width: none;
 }
 
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%) scaleX(0.3);
+  }
+  50% {
+    transform: translateX(35%) scaleX(0.55);
+  }
+  100% {
+    transform: translateX(100%) scaleX(0.3);
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

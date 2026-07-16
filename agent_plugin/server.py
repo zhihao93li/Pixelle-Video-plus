@@ -82,16 +82,23 @@ async def get_content_item(item_id: str) -> Any:
 
 
 @mcp.tool
+async def get_pending_review(item_id: str) -> Any:
+    """Read the exact versioned script, scenes or pages currently awaiting approval."""
+    return await _call(lambda: _client.request("GET", f"/content-items/{item_id}/pending-review"))
+
+
+@mcp.tool
 async def confirm_pending_item(
     item_id: str,
+    review_id: str,
     content_version: str,
     explicit_user_confirmation: bool,
     request_id: str | None = None,
 ) -> Any:
     """Relay a user's explicit approval of the exact content version previously displayed.
 
-    Never call this from inferred sentiment. ``content_version`` must be the
-    ``updated_at`` value returned with the full pending item, and
+    Never call this from inferred sentiment. ``review_id`` and
+    ``content_version`` must come from ``get_pending_review``, and
     ``explicit_user_confirmation`` must only be true after an unambiguous user reply.
     """
     return await _call(
@@ -99,6 +106,7 @@ async def confirm_pending_item(
             "POST",
             f"/content-items/{item_id}/confirm",
             json={
+                "review_id": review_id,
                 "content_version": content_version,
                 "explicit_user_confirmation": explicit_user_confirmation,
                 **_trace(request_id),
@@ -110,6 +118,7 @@ async def confirm_pending_item(
 @mcp.tool
 async def edit_pending_review(
     item_id: str,
+    review_id: str,
     content_version: str,
     variants: dict[str, dict[str, Any]] | None = None,
     scenes: list[dict[str, Any]] | None = None,
@@ -130,6 +139,7 @@ async def edit_pending_review(
             f"/content-items/{item_id}/revise-review",
             json={
                 "action": "direct_edit",
+                "review_id": review_id,
                 "content_version": content_version,
                 "variants": variants,
                 "scene_manifest": scene_manifest,
@@ -142,6 +152,7 @@ async def edit_pending_review(
 @mcp.tool
 async def regenerate_pending_review(
     item_id: str,
+    review_id: str,
     content_version: str,
     action: str,
     selected_scene_ids: list[str] | None = None,
@@ -168,6 +179,7 @@ async def regenerate_pending_review(
             f"/content-items/{item_id}/revise-review",
             json={
                 "action": action,
+                "review_id": review_id,
                 "content_version": content_version,
                 "selected_scene_ids": selected_scene_ids or [],
                 "instruction": instruction,
@@ -319,6 +331,7 @@ async def mark_published(
     platform: str,
     published_at: str,
     evidence: dict[str, str],
+    production_task_id: str | None = None,
     request_id: str | None = None,
 ) -> Any:
     """Record evidence that a produced item was actually published."""
@@ -329,6 +342,7 @@ async def mark_published(
             json={
                 "platform": platform,
                 "published_at": published_at,
+                "production_task_id": production_task_id,
                 **evidence,
                 **_trace(request_id),
             },
@@ -344,6 +358,7 @@ async def record_metrics(
     comments: int | None = None,
     note: str | None = None,
     publication_id: str | None = None,
+    production_task_id: str | None = None,
     mock: bool = False,
     mock_label: str | None = None,
     request_id: str | None = None,
@@ -359,6 +374,7 @@ async def record_metrics(
                 "comments": comments,
                 "note": note,
                 "publication_id": publication_id,
+                "production_task_id": production_task_id,
                 "mock": mock,
                 "mock_label": mock_label,
                 **_trace(request_id),

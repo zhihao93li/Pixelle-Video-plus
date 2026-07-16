@@ -1,14 +1,8 @@
-import { useCallback, useEffect, useState } from "react"
-import {
-  ArrowLeft,
-  Bot,
-  FileText,
-  Image,
-  Plus,
-  Sparkles,
-  X,
-} from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { ArrowLeft, Bot, FileText, Image, Sparkles } from "lucide-react"
 
+import { SceneManifestView } from "@/components/content/review/SceneManifestView"
+import { CurrentReviewWorkspace } from "@/components/content/review/CurrentReviewWorkspace"
 import {
   ContentLifecyclePanel,
   type ContentLifecycleAction,
@@ -24,8 +18,6 @@ import {
   FieldDescription,
   FieldGroup,
   FieldLabel,
-  FieldLegend,
-  FieldSet,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
@@ -37,7 +29,6 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { useToast } from "@/components/ui/toast"
 import { InlineError, TechDetails } from "@/components/shared/feedback"
 import { formatDate, readableError } from "@/lib/format"
 import { languageLabel } from "@/lib/languages"
@@ -50,31 +41,23 @@ import {
 import { ImageSetView } from "@/components/shared/ImageSetView"
 import { TextArticleView } from "@/components/shared/TextArticleView"
 import { imageSetLabel } from "@/lib/imageSet"
-import { routeHref } from "@/lib/router"
+import { navigate, routeHref } from "@/lib/router"
 import { cn } from "@/lib/utils"
 import {
   artifactFileUrl,
-  confirmContentItem,
-  contentSceneImageUrl,
-  getContentItem,
+  getPendingContentReview,
+  getProductionTask,
   getTaskResult,
   markContentPublished,
-  patchContentItem,
   recordContentMetrics,
-  reviseContentReview,
   transitionContentItem,
   type ContentItem,
   type GenerationResult,
-  type SceneDraft,
+  type PendingReviewSession,
 } from "@/lib/generationApi"
 
-/**
- * 内容详情页（/board/item/:id）：抽屉的继任者（DESIGN.md §2.5：分钟级多分区
- * 工作必须页面）。左=多语言文案与分镜编辑，右=状态/溯源/产物/发布/数据/动态。
- * 确认属于原生产任务的中间站点；本页不创建新的生产任务。
- */
-
-type VariantDraft = { title: string; script: string; narrations: string[] }
+/** Legacy content-only fallback. Production-linked content always redirects to
+ * the stable production task page so the user sees one detail surface. */
 
 function scrollToSection(id: string) {
   const target = document.getElementById(id)
@@ -92,15 +75,16 @@ function scrollToSection(id: string) {
 }
 
 export function ContentItemDetailPage({ itemId }: { itemId: string }) {
-  const toast = useToast()
   const [item, setItem] = useState<ContentItem | null>(null)
+  const [pendingReview, setPendingReview] =
+    useState<PendingReviewSession | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeLanguage, setActiveLanguage] = useState<string | null>(null)
-  const [variantDrafts, setVariantDrafts] = useState<
-    Record<string, VariantDraft>
-  >({})
+  const [contentView, setContentView] = useState<"manuscript" | "scenes">(
+    "scenes"
+  )
   const [results, setResults] = useState<
     Record<string, GenerationResult | null>
   >({})
@@ -118,12 +102,29 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
     note: "",
   })
   const [eventsExpanded, setEventsExpanded] = useState(false)
-  const [sceneDrafts, setSceneDrafts] = useState<SceneDraft[]>([])
-  const [selectedSceneIds, setSelectedSceneIds] = useState<string[]>([])
-  const [revisionInstruction, setRevisionInstruction] = useState("")
   const [reloadToken, setReloadToken] = useState(0)
+  const [legacyFallbackTaskId, setLegacyFallbackTaskId] = useState<
+    string | null
+  >(null)
+  const initializedContentSession = useRef<string | null>(null)
 
   const refresh = useCallback(() => setReloadToken((token) => token + 1), [])
+  const linkedProductionTaskId = item?.links.production_task_ids?.at(-1)
+
+  useEffect(() => {
+    if (!linkedProductionTaskId) return undefined
+    let cancelled = false
+    void getProductionTask(linkedProductionTaskId)
+      .then(() => {
+        if (!cancelled) navigate(`/board/tasks/${linkedProductionTaskId}`)
+      })
+      .catch(() => {
+        if (!cancelled) setLegacyFallbackTaskId(linkedProductionTaskId)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [linkedProductionTaskId])
 
   // 加载条目（生产中时 15s 轮询等待回写）
   useEffect(() => {
@@ -132,11 +133,13 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
 
     async function load() {
       try {
-        const next = await getContentItem(itemId)
+        const context = await getPendingContentReview(itemId)
+        const next = context.item
         if (cancelled) {
           return
         }
         setItem(next)
+        setPendingReview(context.review)
         setLoadError(null)
         if (next.status === "producing") {
           timer = window.setTimeout(() => setReloadToken((t) => t + 1), 15_000)
@@ -157,33 +160,26 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
     }
   }, [itemId, reloadToken])
 
-  // 条目/状态跃迁时重置编辑态（同状态轮询不冲掉编辑）——渲染期调整模式
-  const initKey = item ? `${item.item_id}:${item.status}` : null
-  const [initializedFor, setInitializedFor] = useState<string | null>(null)
-  if (item && initKey && initializedFor !== initKey) {
-    setInitializedFor(initKey)
-    const drafts: Record<string, VariantDraft> = {}
+  // 非确认区的辅助表单每条内容只初始化一次。待确认编辑器由
+  // review_id + version 直接挂载，不再从页面状态推测当前站点。
+  const contentSessionKey = item?.item_id ?? null
+
+  useEffect(() => {
+    if (
+      !item ||
+      !contentSessionKey ||
+      initializedContentSession.current === contentSessionKey
+    ) {
+      return
+    }
+    initializedContentSession.current = contentSessionKey
     const languages = Array.from(
       new Set([...item.languages, ...Object.keys(item.variants)])
     )
-    for (const language of languages) {
-      const variant = item.variants[language]
-      drafts[language] = {
-        title: variant?.title ?? "",
-        script: variant?.script ?? "",
-        narrations: variant?.narrations?.length
-          ? [...variant.narrations]
-          : [""],
-      }
-    }
-    setVariantDrafts(drafts)
     setActiveLanguage((current) =>
       current && languages.includes(current) ? current : (languages[0] ?? null)
     )
     setError(null)
-    setSceneDrafts(item.scene_manifest?.scenes ?? [])
-    setSelectedSceneIds([])
-    setRevisionInstruction("")
     setMetricsDraft({
       likes: item.metrics.likes != null ? String(item.metrics.likes) : "",
       favorites:
@@ -196,7 +192,7 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
           ? item.metrics.publication_id
           : (item.publications[0]?.publication_id ?? ""),
     })
-  }
+  }, [contentSessionKey, item])
 
   // 产物
   useEffect(() => {
@@ -279,17 +275,26 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
     )
   }
 
+  if (
+    linkedProductionTaskId &&
+    legacyFallbackTaskId !== linkedProductionTaskId
+  ) {
+    return (
+      <PageFrame>
+        <AsyncState state="loading" title="正在打开生产任务…" />
+      </PageFrame>
+    )
+  }
+
   const languages = Array.from(
     new Set([...item.languages, ...Object.keys(item.variants)])
   )
-  const manifestPending =
-    item.status === "pending_review" && Boolean(item.scene_manifest)
-  const isAgentImageManifest =
-    item.scene_manifest?.review_kind === "agent_image_scenes"
-  const isImagePagesManifest = item.scene_manifest?.review_kind === "image_pages"
-  const canEditScenes =
-    item.status === "pending_review" && !item.scene_manifest?.confirmed
-  const isReviewing = item.status === "pending_review" && !item.scene_manifest
+  const activeReviewKind = pendingReview?.payload.kind
+  const manifestPending = Boolean(
+    activeReviewKind && activeReviewKind !== "script"
+  )
+  const isAgentImageManifest = activeReviewKind === "agent_image_scenes"
+  const isImagePagesManifest = activeReviewKind === "image_pages"
   const productionFailure = contentProductionFailure(item)
   const allConfirmed =
     item.languages.length > 0 &&
@@ -307,128 +312,6 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
   const isNonVideoPublish = publishArtifactType !== "video"
   const nonVideoPublishNoun = publishArtifactType === "text" ? "长文" : "图集"
   const currentLanguage = activeLanguage ?? languages[0] ?? null
-  const currentDraft: VariantDraft = (currentLanguage &&
-    variantDrafts[currentLanguage]) || {
-    title: "",
-    script: "",
-    narrations: [""],
-  }
-  const currentVariant = currentLanguage
-    ? item.variants[currentLanguage]
-    : undefined
-
-  function patchCurrentDraft(patch: Partial<VariantDraft>) {
-    if (!currentLanguage) {
-      return
-    }
-    setVariantDrafts((current) => ({
-      ...current,
-      [currentLanguage]: { ...currentDraft, ...patch },
-    }))
-  }
-
-  function cleanNarrations(values: string[]) {
-    return values.map((line) => line.trim()).filter(Boolean)
-  }
-
-  async function confirmVariant(language: string) {
-    const draft = variantDrafts[language]
-    await patchContentItem(item!.item_id, {
-      variants: {
-        [language]: {
-          status: "confirmed",
-          title: draft?.title ?? "",
-          script: draft?.script ?? "",
-          narrations: cleanNarrations(draft?.narrations ?? []),
-        },
-      },
-    })
-  }
-
-  async function rejectVariant(language: string) {
-    const draft = variantDrafts[language]
-    await patchContentItem(item!.item_id, {
-      variants: {
-        [language]: {
-          status: "rejected",
-          script: draft?.script ?? "",
-          narrations: cleanNarrations(draft?.narrations ?? []),
-        },
-      },
-    })
-    if (item!.status === "pending_review") {
-      await transitionContentItem(item!.item_id, "draft_ready", {
-        reason: "打回重写",
-      })
-    }
-  }
-
-  async function confirmItem() {
-    if (item!.scene_manifest) {
-      await confirmContentItem(item!.item_id)
-      return
-    }
-    await confirmContentItem(
-      item!.item_id,
-      Object.fromEntries(
-        item!.languages.flatMap((language) => {
-          const draft = variantDrafts[language]
-          return draft
-            ? [
-                [
-                  language,
-                  {
-                    language,
-                    status: "confirmed" as const,
-                    title: draft.title,
-                    script: draft.script,
-                    narrations: cleanNarrations(draft.narrations),
-                  },
-                ],
-              ]
-            : []
-        })
-      )
-    )
-  }
-
-  async function saveSceneManifest() {
-    if (!item!.scene_manifest) return
-    await reviseContentReview({
-      itemId: item!.item_id,
-      action: "direct_edit",
-      contentVersion: item!.updated_at,
-      sceneManifest: {
-        ...item!.scene_manifest,
-        confirmed: false,
-        scenes: sceneDrafts,
-      },
-    })
-    toast({ title: "分镜已保存，等待重新确认", variant: "success" })
-    refresh()
-  }
-
-  async function reviseCurrentReview(
-    action: "rewrite_script" | "regenerate_selected" | "regenerate_all"
-  ) {
-    await reviseContentReview({
-      itemId: item!.item_id,
-      action,
-      contentVersion: item!.updated_at,
-      selectedSceneIds,
-      instruction: revisionInstruction,
-    })
-    toast({
-      title:
-        action === "rewrite_script"
-          ? "文案已重写，等待确认"
-          : action === "regenerate_all"
-            ? "整套内容已重新生成"
-            : "选中内容已重新生成",
-      variant: "success",
-    })
-    refresh()
-  }
 
   async function saveMetrics() {
     await recordContentMetrics({
@@ -506,7 +389,8 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
 
   switch (item.status) {
     case "idea":
-      lifecycleGuidance = "这是一条未发起生产的历史内容；新生产统一从快速生产开始。"
+      lifecycleGuidance =
+        "这是一条未发起生产的历史内容；新生产统一从快速生产开始。"
       lifecycleAction = {
         href: routeHref("/create"),
         label: "前往快速生产",
@@ -523,35 +407,14 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
     case "pending_review":
       if (manifestPending) {
         lifecycleGuidance = isAgentImageManifest
-          ? "确认完整分镜文案和图片提示词后，Agent 才会开始生成图片。"
+          ? "请在主编辑区确认完整分镜文案和图片提示词；确认后 Agent 才会开始生成图片。"
           : isImagePagesManifest
-            ? "确认分页后，原生产任务将自动继续生成配图和图集。"
-            : "确认分镜后，原生产任务将自动继续生成画面、配音和视频。"
-        lifecycleAction = {
-          label: isImagePagesManifest ? "确认分页" : "确认完整分镜",
-          loading: busy,
-          onClick: () => void run(confirmItem),
-        }
+            ? "请在主编辑区确认分页；确认后原生产任务将自动继续生成配图和图集。"
+            : "请在主编辑区确认分镜；确认后原生产任务将自动继续生成画面、配音和视频。"
       } else if (allConfirmed) {
-        lifecycleGuidance = "所有语言版本都已确认，可以完成本轮审核。"
-        lifecycleAction = {
-          label: "确认全部语言",
-          loading: busy,
-          onClick: () => {
-            void run(confirmItem)
-          },
-        }
+        lifecycleGuidance = "文案已经确认，请在主编辑区继续原生产任务。"
       } else if (nextPendingLanguage) {
-        lifecycleGuidance = `继续审核 ${languageLabel(nextPendingLanguage)} 版本。`
-        lifecycleAction = {
-          label: `审核${languageLabel(nextPendingLanguage)}版`,
-          onClick: () => {
-            setActiveLanguage(nextPendingLanguage)
-            window.requestAnimationFrame(() =>
-              scrollToSection("content-editor")
-            )
-          },
-        }
+        lifecycleGuidance = `请在主编辑区审核 ${languageLabel(nextPendingLanguage)} 版本。`
       } else {
         lifecycleGuidance = "当前没有可审核的语言版本。"
       }
@@ -679,13 +542,15 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
         <WorkspacePanel
           contentClassName="flex flex-col gap-4"
           description={
-            isReviewing
-              ? "逐个检查标题、口播全文与分镜；确认后再完成整条内容的审核。"
-              : "查看当前内容的语言版本、文案与分镜。"
+            pendingReview?.payload.kind === "script"
+              ? "检查标题和完整文案；确认后系统才会继续规划分镜或进入下一步。"
+              : pendingReview
+                ? "当前只展示这一站需要确认的内容；上一站文案收起为参考。"
+                : "查看当前内容的语言版本、文案与分镜。"
           }
           id="content-editor"
           tabIndex={-1}
-          title={isReviewing ? "审核与编辑" : "内容版本"}
+          title={pendingReview ? "审核与编辑" : "内容版本"}
         >
           {item.status === "idea" && item.kind === "text" ? (
             <EmptyState
@@ -705,372 +570,44 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
             />
           ) : null}
 
-          {item.scene_manifest ? (
-            <div className="flex flex-col gap-3 rounded-lg border bg-muted/10 p-3">
-              <div>
-                <div className="text-sm font-medium">
-                  {isAgentImageManifest
-                    ? "Agent 配图分镜"
-                    : isImagePagesManifest
-                      ? "图文分页"
-                      : "视频分镜"}{" "}
-                  ·{" "}
-                  {item.scene_manifest.scenes.length} 镜
-                </div>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  {item.scene_manifest.confirmed
-                    ? isAgentImageManifest
-                      ? "分镜文案和图片提示词已确认。"
-                      : isImagePagesManifest
-                        ? "图文分页已确认。"
-                        : "视频分镜已确认。"
-                    : isAgentImageManifest
-                      ? "请确认每镜口播和画面提示词；确认后 Agent 才会生成图片。"
-                      : isImagePagesManifest
-                        ? "请确认每页内容；确认后原生产任务会自动继续。"
-                        : "请确认每镜内容；确认后原生产任务会自动继续。"}
-                </p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {sceneDrafts.map((scene, sceneIndex) => (
-                  <article
-                    className="overflow-hidden rounded-lg border bg-background"
-                    key={scene.scene_id}
-                  >
-                    {isAgentImageManifest && scene.asset_id ? (
-                      <img
-                        alt={`第 ${scene.order} 镜`}
-                        className="aspect-video w-full object-cover"
-                        loading="lazy"
-                        src={contentSceneImageUrl(item.item_id, scene.scene_id)}
-                      />
-                    ) : isAgentImageManifest ? (
-                      <div className="flex aspect-video items-center justify-center bg-muted text-xs text-muted-foreground">
-                        确认后等待 Agent 配图
-                      </div>
-                    ) : null}
-                    <div className="space-y-2 p-3">
-                      <div className="flex items-center justify-between gap-2 text-xs font-medium">
-                        <span>
-                          第 {scene.order} {isImagePagesManifest ? "页" : "镜"}
-                        </span>
-                        {canEditScenes ? (
-                          <label className="inline-flex cursor-pointer items-center gap-1.5 text-muted-foreground">
-                            <input
-                              checked={selectedSceneIds.includes(scene.scene_id)}
-                              className="size-4 accent-primary"
-                              onChange={(event) =>
-                                setSelectedSceneIds((current) =>
-                                  event.target.checked
-                                    ? [...current, scene.scene_id]
-                                    : current.filter((id) => id !== scene.scene_id)
-                                )
-                              }
-                              type="checkbox"
-                            />
-                            选择
-                          </label>
-                        ) : null}
-                      </div>
-                      {canEditScenes ? (
-                        <Textarea
-                          aria-label={`第 ${scene.order} 镜文案`}
-                          className="min-h-24 resize-y text-sm leading-6"
-                          onChange={(event) =>
-                            setSceneDrafts((current) =>
-                              current.map((candidate, index) =>
-                                index === sceneIndex
-                                  ? { ...candidate, narration: event.target.value }
-                                  : candidate
-                              )
-                            )
-                          }
-                          value={scene.narration}
-                        />
-                      ) : (
-                        <p className="text-sm leading-6">{scene.narration}</p>
-                      )}
-                      {isAgentImageManifest && canEditScenes ? (
-                        <Textarea
-                          aria-label={`第 ${scene.order} 镜画面提示词`}
-                          className="min-h-20 resize-y text-xs leading-5"
-                          onChange={(event) =>
-                            setSceneDrafts((current) =>
-                              current.map((candidate, index) =>
-                                index === sceneIndex
-                                  ? { ...candidate, image_prompt: event.target.value }
-                                  : candidate
-                              )
-                            )
-                          }
-                          value={scene.image_prompt}
-                        />
-                      ) : isAgentImageManifest ? (
-                        <p className="border-t pt-2 text-xs leading-5 text-muted-foreground">
-                          画面：{scene.image_prompt}
-                        </p>
-                      ) : null}
-                      {scene.duration ? (
-                        <p className="text-xs text-muted-foreground">
-                          预计 {scene.duration} 秒
-                        </p>
-                      ) : null}
-                    </div>
-                  </article>
-                ))}
-              </div>
-              {canEditScenes ? (
-                <div className="space-y-3 border-t pt-3">
-                  <Textarea
-                    aria-label="重新生成修改意见"
-                    className="min-h-20 resize-y"
-                    onChange={(event) => setRevisionInstruction(event.target.value)}
-                    placeholder="修改方向（选填）"
-                    value={revisionInstruction}
-                  />
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <Button
-                      disabled={busy || selectedSceneIds.length === 0}
-                      onClick={() =>
-                        void run(() => reviseCurrentReview("regenerate_selected"))
-                      }
-                      size="sm"
-                      variant="ghost"
-                    >
-                      重新生成选中项
-                    </Button>
-                    <Button
-                      disabled={busy}
-                      onClick={() =>
-                        void run(() => reviseCurrentReview("regenerate_all"))
-                      }
-                      size="sm"
-                      variant="ghost"
-                    >
-                      整套重新生成
-                    </Button>
-                    <Button
-                      disabled={busy || sceneDrafts.some((scene) => !scene.narration.trim())}
-                      onClick={() => void run(saveSceneManifest)}
-                      size="sm"
-                      variant="outline"
-                    >
-                      保存直接修改
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {languages.length > 0 ? (
+          {pendingReview ? (
+            <CurrentReviewWorkspace
+              itemId={item.item_id}
+              onChanged={refresh}
+              review={pendingReview}
+            />
+          ) : item.scene_manifest && languages.length > 0 ? (
             <Tabs
-              onValueChange={setActiveLanguage}
-              value={currentLanguage ?? undefined}
+              onValueChange={(value) =>
+                setContentView(value as "manuscript" | "scenes")
+              }
+              value={contentView}
             >
-              <div className="overflow-x-auto">
-                <TabsList
-                  aria-label="语言版本"
-                  className="h-11 w-max min-w-full justify-start"
-                  variant="line"
-                >
-                  {languages.map((language) => {
-                    const status = item.variants[language]?.status ?? "pending"
-                    return (
-                      <TabsTrigger
-                        className="h-11 shrink-0 px-3"
-                        key={language}
-                        value={language}
-                      >
-                        {languageLabel(language)} ·{" "}
-                        {status === "rejected"
-                          ? "已打回"
-                          : VARIANT_STATUS_LABELS[status]}
-                      </TabsTrigger>
-                    )
-                  })}
-                </TabsList>
-              </div>
-
-              <TabsContent className="mt-4" value={currentLanguage ?? ""}>
-                {currentLanguage && isReviewing ? (
-                  <div className="flex flex-col gap-4">
-                    <FieldGroup>
-                      <Field>
-                        <FieldLabel
-                          htmlFor={`content-title-${currentLanguage}`}
-                        >
-                          标题
-                        </FieldLabel>
-                        <Input
-                          autoComplete="off"
-                          id={`content-title-${currentLanguage}`}
-                          name={`title-${currentLanguage}`}
-                          onChange={(event) =>
-                            patchCurrentDraft({ title: event.target.value })
-                          }
-                          placeholder="输入发布标题…"
-                          value={currentDraft.title}
-                        />
-                      </Field>
-
-                      <Field>
-                        <FieldLabel
-                          htmlFor={`content-script-${currentLanguage}`}
-                        >
-                          口播全文
-                        </FieldLabel>
-                        <Textarea
-                          autoComplete="off"
-                          className="min-h-44 resize-y leading-7"
-                          id={`content-script-${currentLanguage}`}
-                          name={`script-${currentLanguage}`}
-                          onChange={(event) =>
-                            patchCurrentDraft({ script: event.target.value })
-                          }
-                          placeholder="输入完整口播文案…"
-                          value={currentDraft.script}
-                        />
-                      </Field>
-                    </FieldGroup>
-
-                    <FieldSet>
-                      <FieldLegend variant="label">分镜</FieldLegend>
-                      <FieldDescription>
-                        每行一镜，出片按行直出；当前{" "}
-                        {cleanNarrations(currentDraft.narrations).length} 镜。
-                      </FieldDescription>
-                      <FieldGroup className="gap-2">
-                        {currentDraft.narrations.map((line, index) => (
-                          <Field
-                            className="min-w-0"
-                            key={index}
-                            orientation="horizontal"
-                          >
-                            <FieldLabel
-                              className="sr-only"
-                              htmlFor={`content-scene-${currentLanguage}-${index}`}
-                            >
-                              第 {index + 1} 镜
-                            </FieldLabel>
-                            <span className="w-5 text-right text-xs text-muted-foreground">
-                              {index + 1}
-                            </span>
-                            <Input
-                              autoComplete="off"
-                              className="min-w-0 flex-1"
-                              id={`content-scene-${currentLanguage}-${index}`}
-                              name={`scene-${currentLanguage}-${index}`}
-                              onChange={(event) => {
-                                const next = [...currentDraft.narrations]
-                                next[index] = event.target.value
-                                patchCurrentDraft({ narrations: next })
-                              }}
-                              placeholder="一句 = 一个画面 + 一段配音…"
-                              value={line}
-                            />
-                            <Button
-                              aria-label="删除这一镜"
-                              className="size-11 shrink-0 sm:size-7"
-                              onClick={() => {
-                                const next = currentDraft.narrations.filter(
-                                  (_, i) => i !== index
-                                )
-                                patchCurrentDraft({
-                                  narrations: next.length > 0 ? next : [""],
-                                })
-                              }}
-                              size="icon-sm"
-                              variant="ghost"
-                            >
-                              <X />
-                            </Button>
-                          </Field>
-                        ))}
-                        <Button
-                          className="h-11 self-start sm:h-7"
-                          onClick={() =>
-                            patchCurrentDraft({
-                              narrations: [...currentDraft.narrations, ""],
-                            })
-                          }
-                          size="sm"
-                          variant="ghost"
-                        >
-                          <Plus data-icon="inline-start" />
-                          加一镜
-                        </Button>
-                      </FieldGroup>
-                    </FieldSet>
-
-                    <div className="flex justify-end gap-2 border-t pt-3">
-                      <Button
-                        className="h-11 sm:h-8"
-                        disabled={busy}
-                        onClick={() =>
-                          void run(() => reviseCurrentReview("rewrite_script"))
-                        }
-                        variant="ghost"
-                      >
-                        让系统重写
-                      </Button>
-                      <Button
-                        className="h-11 sm:h-8"
-                        disabled={busy}
-                        onClick={() =>
-                          void run(() => rejectVariant(currentLanguage))
-                        }
-                        variant="ghost"
-                      >
-                        打回这版
-                      </Button>
-                      <Button
-                        className="h-11 sm:h-8"
-                        disabled={busy}
-                        onClick={() =>
-                          void run(() => confirmVariant(currentLanguage))
-                        }
-                        variant="outline"
-                      >
-                        确认{languageLabel(currentLanguage)}版
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  currentLanguage && (
-                    <div className="flex flex-col gap-3">
-                      {currentVariant?.title && (
-                        <div className="text-sm font-medium">
-                          {currentVariant.title}
-                        </div>
-                      )}
-                      <p className="text-sm leading-7 whitespace-pre-wrap text-muted-foreground">
-                        {currentVariant?.script || "（暂无文案）"}
-                      </p>
-                      {(currentVariant?.narrations?.length ?? 0) > 0 && (
-                        <div className="overflow-hidden rounded-lg border">
-                          {currentVariant!.narrations.map((line, index) => (
-                            <div
-                              className={
-                                index > 0
-                                  ? "flex gap-2 border-t px-3 py-1.5 text-sm"
-                                  : "flex gap-2 px-3 py-1.5 text-sm"
-                              }
-                              key={index}
-                            >
-                              <span className="text-xs text-muted-foreground">
-                                {index + 1}
-                              </span>
-                              {line}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                )}
+              <TabsList aria-label="内容版本视图" variant="line">
+                <TabsTrigger value="manuscript">稿件</TabsTrigger>
+                <TabsTrigger value="scenes">分镜</TabsTrigger>
+              </TabsList>
+              <TabsContent className="mt-4" value="scenes">
+                <SceneManifestView item={item} />
+              </TabsContent>
+              <TabsContent className="mt-4" value="manuscript">
+                <ReadOnlyManuscript
+                  activeLanguage={currentLanguage}
+                  item={item}
+                  languages={languages}
+                  onLanguageChange={setActiveLanguage}
+                />
               </TabsContent>
             </Tabs>
+          ) : item.scene_manifest ? (
+            <SceneManifestView item={item} />
+          ) : languages.length > 0 ? (
+            <ReadOnlyManuscript
+              activeLanguage={currentLanguage}
+              item={item}
+              languages={languages}
+              onLanguageChange={setActiveLanguage}
+            />
           ) : item.status !== "idea" && item.kind !== "asset" ? (
             <EmptyState
               className="min-h-56 border-0 bg-muted/20"
@@ -1457,8 +994,62 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
           />
         </aside>
       </div>
-
     </PageFrame>
+  )
+}
+
+function ReadOnlyManuscript({
+  activeLanguage,
+  item,
+  languages,
+  onLanguageChange,
+}: {
+  activeLanguage: string | null
+  item: ContentItem
+  languages: string[]
+  onLanguageChange: (language: string) => void
+}) {
+  const variant = activeLanguage ? item.variants[activeLanguage] : undefined
+
+  return (
+    <Tabs onValueChange={onLanguageChange} value={activeLanguage ?? undefined}>
+      <div className="overflow-x-auto">
+        <TabsList
+          aria-label="语言版本"
+          className="h-11 w-max min-w-full justify-start"
+          variant="line"
+        >
+          {languages.map((language) => {
+            const status = item.variants[language]?.status ?? "pending"
+            return (
+              <TabsTrigger
+                className="h-11 shrink-0 px-3"
+                key={language}
+                value={language}
+              >
+                {languageLabel(language)} ·{" "}
+                {status === "rejected"
+                  ? "已打回"
+                  : VARIANT_STATUS_LABELS[status]}
+              </TabsTrigger>
+            )
+          })}
+        </TabsList>
+      </div>
+
+      <TabsContent className="mt-4" value={activeLanguage ?? ""}>
+        {activeLanguage ? (
+          <div className="flex flex-col gap-3">
+            {variant?.title ? (
+              <div className="text-sm font-medium">{variant.title}</div>
+            ) : null}
+            <p className="text-sm leading-7 whitespace-pre-wrap text-muted-foreground">
+              {variant?.script || "（暂无文案）"}
+            </p>
+          </div>
+        ) : null}
+      </TabsContent>
+    </Tabs>
   )
 }
 

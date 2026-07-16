@@ -478,8 +478,6 @@ class AssetBasedPipeline(LinearVideoPipeline):
             "inference_mode", "local"
         )
         tts_voice = context.params.get("tts_voice") or context.params.get("voice_id")
-        if tts_mode == "local":
-            tts_voice = tts_voice or "zh-CN-YunjianNeural"
 
         # Create StoryboardConfig
         context.config = StoryboardConfig(

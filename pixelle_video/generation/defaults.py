@@ -141,7 +141,11 @@ def _topic_to_video_manifest() -> PipelineManifest:
         input=_input(
             description="提供一个主题，由 Pixelle 起草并等待人工确认。",
             required=[_field("topic", description="Topic or idea to turn into video")],
-            optional=[_field("title", description="Optional user-provided title")],
+            optional=[
+                _field("title", description="Optional user-provided title"),
+                _field("script", description="Approved script resolved by the workflow"),
+                _field("scenes", "array", "Approved scene plan resolved by the workflow"),
+            ],
         ),
         stages=[
             _stage(
@@ -180,7 +184,10 @@ def _script_to_video_manifest() -> PipelineManifest:
         input=_input(
             description="提供可直接用于生产的完整文案。",
             required=[_field("script", description="Confirmed narration script")],
-            optional=[_field("title", description="Optional user-provided title")],
+            optional=[
+                _field("title", description="Optional user-provided title"),
+                _field("scenes", "array", "Approved scene plan resolved by the workflow"),
+            ],
         ),
         stages=_video_production_stages(),
         quick_setting_keys=[
@@ -315,6 +322,7 @@ def _image_post_manifest() -> PipelineManifest:
             optional=[
                 _field("title", description="Optional cover title"),
                 _field("split_mode", description="Pagination mode", default="line"),
+                _field("pages", "array", "Approved pages resolved by the workflow"),
             ],
         ),
         stages=[
@@ -366,7 +374,11 @@ def _topic_to_image_post_manifest() -> PipelineManifest:
         input=_input(
             description="提供一个图文主题或创作方向。",
             required=[_field("topic", description="Topic or idea for the image post")],
-            optional=[_field("title", description="Optional cover title")],
+            optional=[
+                _field("title", description="Optional cover title"),
+                _field("script", description="Approved copy resolved by the workflow"),
+                _field("pages", "array", "Approved pages resolved by the workflow"),
+            ],
         ),
         stages=[
             _stage(

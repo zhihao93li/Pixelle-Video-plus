@@ -35,11 +35,10 @@ def _scenes(tmp_path, count):
 def test_codex_scene_validation_accepts_variable_user_confirmed_counts(tmp_path):
     assert len(validate_codex_scenes(_scenes(tmp_path, 1))) == 1
     assert len(validate_codex_scenes(_scenes(tmp_path, 7))) == 7
+    assert len(validate_codex_scenes(_scenes(tmp_path, 21))) == 21
 
-    with pytest.raises(ValueError, match="between 1 and 20"):
+    with pytest.raises(ValueError, match="at least one"):
         validate_codex_scenes([])
-    with pytest.raises(ValueError, match="between 1 and 20"):
-        validate_codex_scenes(_scenes(tmp_path, 21))
 
 
 def test_codex_scene_validation_rejects_duplicate_ids_and_missing_images(tmp_path):

@@ -282,6 +282,13 @@ def set_task_state(
         task.action_type = action_type
         task.action_label = action_label
         task.error = error
+        # A stage transition invalidates progress reported by the previous
+        # stage.  The generation-task synchronizer will populate real numbers
+        # again when the new runtime can measure them; until then the UI shows
+        # an honest indeterminate state instead of a stale percentage.
+        task.progress_current = None
+        task.progress_total = None
+        task.progress_percentage = None
         task.updated_at = timestamp
         task.waiting_since = timestamp if state == "needs_user" else None
         task.failed_at = timestamp if state == "failed" else task.failed_at

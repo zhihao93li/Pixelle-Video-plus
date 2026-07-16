@@ -50,6 +50,7 @@ async def test_image_analysis_uses_per_call_runninghub_instance_type(monkeypatch
     assert created_configs == [
         {
             "comfyui_url": "http://127.0.0.1:8188",
+            "runninghub_url": "https://www.runninghub.cn",
             "runninghub_api_key": "test-key",
             "runninghub_instance_type": "plus",
         }

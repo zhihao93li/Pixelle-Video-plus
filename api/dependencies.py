@@ -92,3 +92,16 @@ async def get_config_manager() -> ConfigManager:
 PixelleVideoDep = Annotated[PixelleVideoCore, Depends(get_pixelle_video)]
 GenerationServiceDep = Annotated[GenerationService, Depends(get_generation_service)]
 ConfigManagerDep = Annotated[ConfigManager, Depends(get_config_manager)]
+
+
+def refresh_runtime_tts_config(config) -> None:
+    """Apply saved TTS settings to the already-running local service instance."""
+
+    if _pixelle_video_instance is None or _pixelle_video_instance.tts is None:
+        return
+    runtime_config = config.to_dict()
+    _pixelle_video_instance.config = runtime_config
+    _pixelle_video_instance.tts.global_config = runtime_config.get("comfyui", {})
+    _pixelle_video_instance.tts.config = _pixelle_video_instance.tts.global_config.get(
+        "tts", {}
+    )

@@ -111,16 +111,28 @@ test("recipe and run mode use different permission keys without filling gaps", (
   )
 })
 
-test("expert workflows stay gated while unknown backend keys stay visible read-only", () => {
-  const normal = fields("run", ["media_workflow", "future_parameter"])
-  const expert = fields("run", ["media_workflow", "future_parameter"], true)
+test("image workflows stay available while expert-only workflows remain gated", () => {
+  const normal = fields("run", [
+    "media_workflow",
+    "workflow_key",
+    "future_parameter",
+  ])
+  const expert = fields(
+    "run",
+    ["media_workflow", "workflow_key", "future_parameter"],
+    true
+  )
 
   assert.equal(
-    normal.some((field) => field.key === "media_workflow"),
+    normal.find((field) => field.key === "media_workflow")?.control,
+    "workflow"
+  )
+  assert.equal(
+    normal.some((field) => field.key === "workflow_key"),
     false
   )
   assert.equal(
-    expert.find((field) => field.key === "media_workflow")?.control,
+    expert.find((field) => field.key === "workflow_key")?.control,
     "workflow"
   )
   assert.equal(

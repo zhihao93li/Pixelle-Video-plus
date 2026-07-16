@@ -43,8 +43,8 @@ class CodexSceneSpec(BaseModel):
 def validate_codex_scenes(scenes: Any) -> list[CodexSceneSpec]:
     if not isinstance(scenes, list):
         raise ValueError("Agent scene video requires scenes to be a list")
-    if not 1 <= len(scenes) <= 20:
-        raise ValueError("Agent scene video requires between 1 and 20 confirmed scenes")
+    if not scenes:
+        raise ValueError("Agent scene video requires at least one confirmed scene")
 
     normalized = [CodexSceneSpec.model_validate(scene) for scene in scenes]
     scene_ids = [scene.scene_id for scene in normalized]

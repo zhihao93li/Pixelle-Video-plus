@@ -22,18 +22,70 @@ from pydantic import BaseModel, Field, model_validator
 
 AIHUBMIX_BASE_URL = "https://aihubmix.com/v1"
 
+LLMProviderType = Literal[
+    "aihubmix",
+    "openai",
+    "deepseek",
+    "minimax",
+    "kimi",
+    "anthropic",
+    "xai",
+    "aliyun_bailian",
+    "volcengine_ark",
+    "custom_openai",
+]
+
+# The backend owns the supported connection presets. The console reads this
+# catalog at runtime instead of maintaining a second, easily stale list.
+LLM_PROVIDER_PRESETS: dict[LLMProviderType, dict[str, str]] = {
+    "aihubmix": {
+        "label": "AiHubMix",
+        "base_url": AIHUBMIX_BASE_URL,
+    },
+    "openai": {
+        "label": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "base_url": "https://api.deepseek.com",
+    },
+    "minimax": {
+        "label": "MiniMax",
+        "base_url": "https://api.minimaxi.com/v1",
+    },
+    "kimi": {
+        "label": "Kimi / Moonshot AI",
+        "base_url": "https://api.moonshot.cn/v1",
+    },
+    "anthropic": {
+        "label": "Anthropic / Claude",
+        "base_url": "https://api.anthropic.com/v1/",
+    },
+    "xai": {
+        "label": "xAI / Grok",
+        "base_url": "https://api.x.ai/v1",
+    },
+    "aliyun_bailian": {
+        "label": "阿里百炼",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    },
+    "volcengine_ark": {
+        "label": "火山方舟",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    },
+    "custom_openai": {
+        "label": "自定义 OpenAI 兼容服务",
+        "base_url": "",
+    },
+}
+
 
 class LLMProviderConfig(BaseModel):
     """One real LLM connection, with its own credentials and request path."""
 
     name: str = ""
-    provider_type: Literal[
-        "aihubmix",
-        "openai",
-        "aliyun_bailian",
-        "volcengine_ark",
-        "custom_openai",
-    ] = "custom_openai"
+    provider_type: LLMProviderType = "custom_openai"
     enabled: bool = True
     api_key: str = ""
     base_url: str = ""
@@ -78,7 +130,7 @@ class LLMConfig(BaseModel):
 
 
 class TTSLocalConfig(BaseModel):
-    """Local TTS configuration (Edge TTS)"""
+    """Microsoft Edge online TTS configuration."""
 
     voice: str = Field(default="zh-CN-YunjianNeural", description="Edge TTS voice ID")
     speed: float = Field(
@@ -150,7 +202,7 @@ class TTSSubConfig(BaseModel):
         default="local", description="TTS inference mode: 'local', 'comfyui', or 'fish'"
     )
     local: TTSLocalConfig = Field(
-        default_factory=TTSLocalConfig, description="Local TTS (Edge TTS) configuration"
+        default_factory=TTSLocalConfig, description="Microsoft Edge online TTS configuration"
     )
     comfyui: TTSComfyUIConfig = Field(
         default_factory=TTSComfyUIConfig, description="ComfyUI TTS configuration"
@@ -188,6 +240,10 @@ class ComfyUIConfig(BaseModel):
 
     comfyui_url: str = Field(default="http://127.0.0.1:8188", description="ComfyUI Server URL")
     comfyui_api_key: Optional[str] = Field(default=None, description="ComfyUI API Key (optional)")
+    runninghub_url: str = Field(
+        default="https://www.runninghub.cn",
+        description="RunningHub API base URL",
+    )
     runninghub_api_key: Optional[str] = Field(
         default=None, description="RunningHub API Key (optional)"
     )

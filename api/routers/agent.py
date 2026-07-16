@@ -95,6 +95,7 @@ async def get_agent_capabilities(
             "agent_can_confirm": True,
             "requires": [
                 "explicit_user_confirmation",
+                "review_id",
                 "content_version",
                 "client_name",
                 "agent_session_id",

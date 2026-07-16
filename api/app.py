@@ -23,6 +23,7 @@ Or with custom settings:
 """
 
 import argparse
+import asyncio
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -42,7 +43,12 @@ from loguru import logger
 
 from api.config import api_config
 from api.console import resolve_console_dist
-from api.dependencies import shutdown_pixelle_video
+from api.dependencies import (
+    get_generation_service,
+    get_pixelle_video,
+    shutdown_pixelle_video,
+)
+from api.production_recovery import recover_pre_generation_stages
 from api.routers import (
     agent_router,
     content_flows_router,
@@ -77,6 +83,16 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting Pixelle-Video API...")
     ensure_agent_token()
     recover_running_operations()
+
+    async def recover_production() -> None:
+        try:
+            pixelle_video = await get_pixelle_video()
+            generation_service = await get_generation_service(pixelle_video)
+            await recover_pre_generation_stages(pixelle_video, generation_service)
+        except Exception:  # noqa: BLE001 - startup remains available; tasks expose failures
+            logger.exception("恢复未完成生产阶段时发生异常。")
+
+    recovery_task = asyncio.create_task(recover_production())
     if api_config.host not in {"127.0.0.1", "localhost", "::1"}:
         logger.warning(
             "Pixelle API 正监听非本机地址；普通用户接口无登录认证，局域网内任何设备都可能操作。"
@@ -87,6 +103,9 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("🛑 Shutting down Pixelle-Video API...")
+    if not recovery_task.done():
+        recovery_task.cancel()
+        await asyncio.gather(recovery_task, return_exceptions=True)
     await shutdown_pixelle_video()
     logger.info("✅ Pixelle-Video API shutdown complete")
 
@@ -191,7 +210,11 @@ async def root():
                 "inside apps/console before starting the production service."
             ),
         )
-    return FileResponse(_console_dist / "index.html", media_type="text/html")
+    return FileResponse(
+        _console_dist / "index.html",
+        media_type="text/html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 if __name__ == "__main__":

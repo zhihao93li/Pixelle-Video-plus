@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  Clock3,
   FileText,
   Layers,
   Loader2,
   Play,
   RefreshCcw,
-  Send,
   UploadCloud,
   X,
 } from "lucide-react"
@@ -25,19 +23,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/components/ui/toast"
-import {
-  Fact,
-  InlineError,
-  QualityBadge,
-  QualityMessages,
-  TechDetails,
-} from "@/components/shared/feedback"
-import {
-  formatBytes,
-  formatDuration,
-  readableError,
-  voiceLabel,
-} from "@/lib/format"
+import { InlineError } from "@/components/shared/feedback"
+import { readableError, voiceLabel } from "@/lib/format"
 import {
   Card,
   CardContent,
@@ -52,7 +39,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
+import { Progress } from "@/components/ui/progress"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -73,7 +60,6 @@ import {
   type ParsedScriptItem,
 } from "@/lib/batchInput"
 import { RecipeSelect } from "@/components/shared/RecipeSelect"
-import { SingleTaskPanel } from "@/components/shared/SingleTaskPanel"
 import { PageFrame } from "@/components/shared/PageFrame"
 import {
   isActiveProductTemplate,
@@ -81,17 +67,12 @@ import {
 } from "@/lib/templatePresentation"
 import { useExpertMode } from "@/lib/expertMode"
 import { navigate } from "@/lib/router"
-import { useTaskCenter } from "@/lib/taskCenter"
 import { useCurrentProject } from "@/lib/currentProject"
 import { useLocalStorageState } from "@/lib/useLocalStorageState"
 import { frameTemplateLabel } from "@/lib/templateLabels"
 import {
-  adaptRunStatus,
   createGenerationDraft,
   resolveGenerationDraft,
-  runStatusIsActive,
-  runStatusIsCancellable,
-  statusIs,
   updateGenerationDraft,
   type GenerationDraft,
 } from "@/lib/productViewModels"
@@ -119,38 +100,27 @@ import {
   type StandardGenerationSettings,
 } from "@/lib/productionDrafts"
 import { resolveGenerateTemplate } from "@/lib/productionTemplateResolution"
-import { productionRunViewModel } from "@/lib/productionRunAdapters"
 import {
   useProductionSettingsResources,
   type ProductionSettingsResources,
 } from "@/lib/useProductionSettingsResources"
 import {
   apiResourceUrl,
-  cancelProductionTask,
   createGenerationTemplateTask,
   createProductionTask,
   generateMediaPreview,
   getFrameTemplateParams,
   getTask,
-  getTaskResult,
   listTemplates,
   renderFramePreview,
   synthesizeTtsPreview,
   uploadGenerationAssets,
   uploadResourceBgm,
-  type GenerationResult,
-  type GenerationTask,
   type ProductionTemplate,
   type ResourceBgm,
   type ResourceTemplate,
   type UploadedGenerationAsset,
 } from "@/lib/generationApi"
-import {
-  buildAssetItems,
-  buildQualitySummary,
-  type AssetManifestInput,
-  type QualityReviewInput,
-} from "@/lib/resultSummary"
 import { cn } from "@/lib/utils"
 
 const sampleScript =
@@ -182,9 +152,9 @@ const OVERRIDE_TRACKED: Array<{
   { key: "ttsWorkflow", label: "配音 workflow" },
   { key: "ttsSpeed", label: "语速" },
   { key: "frameTemplate", label: "画面模板" },
-  { key: "imageProvider", label: "图片 Provider" },
+  { key: "imageProvider", label: "图片生成方式" },
   { key: "imageModel", label: "图片模型" },
-  { key: "mediaWorkflow", label: "每镜画面 workflow" },
+  { key: "mediaWorkflow", label: "图片 Workflow" },
   { key: "mediaWidth", label: "画面宽度" },
   { key: "mediaHeight", label: "画面高度" },
   { key: "promptPrefix", label: "生图提示词前缀" },
@@ -288,25 +258,12 @@ export function GenerateWorkspace({
   const [longFormDraft, setLongFormDraft] = useState<
     GenerationDraft<LongFormAdvancedSettings>
   >(() => createGenerationDraft(defaultLongFormSettings))
-  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
-  const [currentProductionTaskId, setCurrentProductionTaskId] = useState<
-    string | null
-  >(null)
-  const [result, setResult] = useState<GenerationResult | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isCancellingTask, setIsCancellingTask] = useState(false)
-  const [taskActionError, setTaskActionError] = useState<string | null>(null)
-  const [resultFetchError, setResultFetchError] = useState<string | null>(null)
-  const [resultReloadToken, setResultReloadToken] = useState(0)
   // 批量提交模式（本页内存态，不持久化）
   const [batchMode, setBatchMode] = useState(false)
   const [batchText, setBatchText] = useState("")
-  const taskCenter = useTaskCenter()
   const toast = useToast()
-  const task = currentTaskId
-    ? (taskCenter.getTask(currentTaskId)?.task ?? null)
-    : null
 
   useEffect(() => {
     if (!remakeTaskId || !template) return
@@ -318,13 +275,7 @@ export function GenerateWorkspace({
           throw new Error("上一次生产缺少可复用的输入快照。")
         }
         const input = previousTask.request.input
-        const confirmedScript = previousTask.request.metadata.confirmed_script
-        const finalScript =
-          typeof confirmedScript === "string"
-            ? confirmedScript
-            : typeof input.script === "string"
-              ? input.script
-              : ""
+        const finalScript = typeof input.script === "string" ? input.script : ""
         if (finalScript) setScript(finalScript)
         if (typeof input.topic === "string") setTopic(input.topic)
         const previousTemplate = {
@@ -485,14 +436,11 @@ export function GenerateWorkspace({
     : templateNeedsTopic
       ? trimmedTopic.length > 0
       : trimmedScript.length > 0
-  const adaptedTaskState = adaptRunStatus(task?.status)
-  const hasActiveTask = task ? runStatusIsActive(adaptedTaskState) : false
   const canSubmit =
     loadState === "ready" &&
     templateCanSubmit &&
     hasRequiredTemplateInput &&
-    !isSubmitting &&
-    !hasActiveTask
+    !isSubmitting
   const submitDisabledReason = canSubmit
     ? null
     : isSubmitting
@@ -501,13 +449,11 @@ export function GenerateWorkspace({
         ? "正在读取可用模板"
         : !templateCanSubmit
           ? "当前模板暂不支持在此页提交"
-          : hasActiveTask
-            ? "有任务正在生成中，完成后可再次提交"
-            : templateNeedsAssets
-              ? "请先选择素材文件"
-              : templateNeedsTopic
-                ? "请先输入选题"
-                : "请先输入文案"
+          : templateNeedsAssets
+            ? "请先选择素材文件"
+            : templateNeedsTopic
+              ? "请先输入选题"
+              : "请先输入文案"
 
   useEffect(() => {
     let cancelled = false
@@ -564,39 +510,6 @@ export function GenerateWorkspace({
     }
   }, [reloadToken, templateId, projectId])
 
-  // 轮询与终态通知由全局任务中心负责；这里只在完成后拉取结果。
-  useEffect(() => {
-    if (
-      !task ||
-      !statusIs(adaptRunStatus(task.status), "completed") ||
-      result?.task_id === task.task_id
-    ) {
-      return
-    }
-
-    let cancelled = false
-    const completedTaskId = task.task_id
-    async function loadResult() {
-      try {
-        const taskResult = await getTaskResult(completedTaskId)
-        if (!cancelled) {
-          setResult(taskResult)
-          setResultFetchError(null)
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setResultFetchError(readableError(error))
-        }
-      }
-    }
-
-    loadResult()
-
-    return () => {
-      cancelled = true
-    }
-  }, [result?.task_id, resultReloadToken, task])
-
   async function submitTask() {
     if (!template || !canSubmit || !projectId) {
       if (!projectId) setSubmitError("请先选择项目。")
@@ -605,11 +518,6 @@ export function GenerateWorkspace({
 
     setIsSubmitting(true)
     setSubmitError(null)
-    setTaskActionError(null)
-    setResultFetchError(null)
-    setCurrentTaskId(null)
-    setCurrentProductionTaskId(null)
-    setResult(null)
 
     try {
       let response
@@ -648,15 +556,12 @@ export function GenerateWorkspace({
           productionOverrides
         )
       }
-      setCurrentProductionTaskId(response.production_task_id)
-      const generationTaskId = response.task.generation_task_ids.at(-1)
-      if (generationTaskId) {
-        const generationTask = await getTask(generationTaskId)
-        taskCenter.trackTask(generationTask, template.display_name)
-        setCurrentTaskId(generationTask.task_id)
-      } else {
-        navigate("/board")
-      }
+      toast({
+        title: "生产任务已创建",
+        description: response.task.stage_label,
+        variant: "success",
+      })
+      navigate(`/board/tasks/${response.production_task_id}`)
     } catch (error) {
       setSubmitError(readableError(error))
     } finally {
@@ -722,40 +627,6 @@ export function GenerateWorkspace({
       setSubmitError(readableError(error))
     } finally {
       setIsSubmitting(false)
-    }
-  }
-
-  async function cancelCurrentTask() {
-    if (
-      !task ||
-      !runStatusIsCancellable(adaptRunStatus(task.status)) ||
-      isCancellingTask
-    ) {
-      return
-    }
-
-    setIsCancellingTask(true)
-    setTaskActionError(null)
-    try {
-      if (!currentProductionTaskId) {
-        throw new Error("当前运行缺少统一生产任务，不能从旧执行记录取消。")
-      }
-      const cancelled = await cancelProductionTask(currentProductionTaskId)
-      if (cancelled.state === "cancelled") {
-        taskCenter.updateTask({
-          ...task,
-          status: "cancelled",
-          progress: {
-            ...task.progress,
-            stage: "cancelled",
-            message: "任务已取消",
-          },
-        })
-      }
-    } catch (error) {
-      setTaskActionError(readableError(error))
-    } finally {
-      setIsCancellingTask(false)
     }
   }
 
@@ -994,20 +865,10 @@ export function GenerateWorkspace({
                   artifactKind={nonVideoArtifact}
                   confirmationSummary={confirmationSummary}
                   framePreviewUrl={selectedFramePreviewUrl}
-                  isCancellingTask={isCancellingTask}
                   isSubmitting={isSubmitting}
-                  onCancelTask={cancelCurrentTask}
-                  onRetryResult={() => {
-                    setResultFetchError(null)
-                    setResultReloadToken((value) => value + 1)
-                  }}
                   previewText={previewSourceText}
-                  result={result}
-                  resultFetchError={resultFetchError}
                   overrideSummary={overrideSummary}
                   settingsSummary={settingsSummary}
-                  task={task}
-                  taskActionError={taskActionError}
                   template={template}
                 />
               )}
@@ -1642,18 +1503,90 @@ function StoryboardPreviewPanel({
   settingsSummary: string
   template: ProductionTemplate | null
 }) {
-  const title =
-    artifactKind === "text"
-      ? "长文结构预览"
-      : artifactKind === "image_set"
-        ? "图集分页预览"
-        : "分镜预览"
+  if (artifactKind === "video") {
+    const startsFromTopic = template?.input_requirements.includes("topic")
+    return (
+      <aside
+        className="min-w-0 xl:sticky xl:top-[5.5rem] xl:self-start"
+        data-slot="production-rail"
+      >
+        <Card className="rounded-lg">
+          <CardHeader className="border-b">
+            <CardTitle>本次生产概览</CardTitle>
+            <CardDescription>
+              这里只展示已确定的路线和设置；真实文案、分镜和进度会在任务页出现。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5 p-5">
+            <ol className="space-y-3" aria-label="本次生产路线">
+              {(startsFromTopic
+                ? [
+                    "输入主题",
+                    "AI 生成文案",
+                    "确认文案",
+                    "AI 规划分镜",
+                    "确认分镜",
+                    "生成视频",
+                  ]
+                : ["输入文案", "AI 规划分镜", "确认分镜", "生成视频"]
+              ).map((step, index, steps) => (
+                <li className="flex gap-3" key={step}>
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium tabular-nums">
+                    {index + 1}
+                  </span>
+                  <div
+                    className={cn(
+                      "min-w-0 flex-1 text-sm",
+                      index < steps.length - 1 && "border-b pb-3"
+                    )}
+                  >
+                    {step}
+                    {index < steps.length - 1 ? (
+                      <span className="sr-only">然后</span>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ol>
+
+            <dl className="grid grid-cols-2 gap-4 border-t pt-4">
+              <div>
+                <dt className="text-xs text-muted-foreground">当前模板</dt>
+                <dd className="mt-1 text-sm font-medium">
+                  {template?.display_name || "当前模板"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">预计耗时</dt>
+                <dd className="mt-1 text-sm font-medium">
+                  {template?.estimated_turnaround || "约 2 分钟"}
+                </dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="text-xs text-muted-foreground">人工确认站</dt>
+                <dd className="mt-1 text-sm font-medium">
+                  {confirmationSummary}
+                </dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="text-xs text-muted-foreground">本次设置</dt>
+                <dd className="mt-1 text-sm leading-6">{settingsSummary}</dd>
+                <dd className="mt-1 text-xs text-muted-foreground">
+                  {overrideSummary}
+                </dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
+      </aside>
+    )
+  }
+
+  const title = artifactKind === "text" ? "长文结构预览" : "图集分页预览"
   const description =
     artifactKind === "text"
       ? "根据当前文案预估文章结构，正式生成时可能调整。"
-      : artifactKind === "image_set"
-        ? "根据当前换行预估图集页面，正式生成时可能调整。"
-        : "提交后由分镜 LLM 根据内容转折、画面变化和节奏决定镜头数量。"
+      : "根据当前换行预估图集页面，正式生成时可能调整。"
 
   return (
     <aside
@@ -1670,15 +1603,9 @@ function StoryboardPreviewPanel({
             <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
               <FileText className="size-6 text-muted-foreground" />
               <div>
-                <div className="text-sm font-medium">
-                  {artifactKind === "video"
-                    ? "分镜数量由 AI 决定"
-                    : "输入内容后显示预估"}
-                </div>
+                <div className="text-sm font-medium">输入内容后显示预估</div>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  {artifactKind === "video"
-                    ? "不再手动填写或在本地假算镜头数；实际分镜以生产任务结果为准。"
-                    : "这里会跟随内容更新，不会创建真实任务。"}
+                  这里会跟随内容更新，不会创建真实任务。
                 </p>
               </div>
             </div>
@@ -1703,18 +1630,11 @@ function StoryboardPreviewPanel({
                     <h3 className="text-sm font-medium">
                       {artifactKind === "text"
                         ? `段落 ${index + 1}`
-                        : artifactKind === "image_set"
-                          ? `页面 ${index + 1}`
-                          : `场景 ${index + 1}`}
+                        : `页面 ${index + 1}`}
                     </h3>
                     <p className="mt-2 line-clamp-4 text-sm leading-6 text-muted-foreground">
                       {scene}
                     </p>
-                    {artifactKind === "video" && (
-                      <div className="mt-auto flex items-center gap-1.5 pt-3 text-xs text-muted-foreground">
-                        <Clock3 className="size-3.5" />约 15 秒
-                      </div>
-                    )}
                   </div>
                 </article>
               ))}
@@ -1759,45 +1679,24 @@ function TaskPanel({
   artifactKind,
   confirmationSummary,
   framePreviewUrl,
-  isCancellingTask,
   isSubmitting,
-  onCancelTask,
-  onRetryResult,
   previewText,
   overrideSummary,
-  task,
-  result,
-  resultFetchError,
   settingsSummary,
   template,
-  taskActionError,
 }: {
   artifactKind: ArtifactKind
   confirmationSummary: string
   framePreviewUrl: string | null
-  isCancellingTask: boolean
   isSubmitting: boolean
-  onCancelTask: () => void
-  onRetryResult: () => void
   previewText: string
   overrideSummary: string
-  task: GenerationTask | null
-  result: GenerationResult | null
-  resultFetchError: string | null
   settingsSummary: string
   template: ProductionTemplate | null
-  taskActionError: string | null
 }) {
-  const expertMode = useExpertMode()
-  const run = productionRunViewModel({
-    isSubmitting,
-    result,
-    task,
-    template,
-  })
   const previewScenes = previewContentSections(previewText, artifactKind)
 
-  if (!run) {
+  if (!isSubmitting) {
     return (
       <StoryboardPreviewPanel
         artifactKind={artifactKind}
@@ -1811,138 +1710,26 @@ function TaskPanel({
     )
   }
 
-  const qualitySummary = buildQualitySummary(
-    result?.metadata?.quality_review as QualityReviewInput | undefined
-  )
-  const assetManifest = result?.metadata?.asset_manifest as
-    AssetManifestInput | undefined
-  const assetItems = buildAssetItems(assetManifest)
-  const assetCount = assetManifest?.assets?.length ?? assetItems.length
-  const artifactDetail =
-    run.artifact?.kind === "text"
-      ? `${run.artifact.article.length} 字`
-      : run.artifact?.kind === "image_set"
-        ? (run.artifact.images[0]?.url ?? "（图集）")
-        : run.artifact?.src
-
-  const resultDetails =
-    result && run.artifact ? (
-      <div className="flex flex-col gap-4">
-        <Button
-          onClick={() => navigate(`/library?task=${result.task_id}`)}
-          size="lg"
-        >
-          <Send data-icon="inline-start" />
-          前往发布
-        </Button>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Fact
-            label="生产模板"
-            value={productionTemplateLabel(result, template)}
-          />
-          <Fact label="时长" value={formatDuration(result.duration)} />
-          <Fact label="文件大小" value={formatBytes(result.file_size)} />
-          <Fact label="发布判断" value={qualitySummary.label} />
-          <Fact
-            label="素材记录"
-            value={assetCount ? `${assetCount} 项` : "未返回"}
-          />
-        </div>
-
-        <Separator />
-
-        <div className="rounded-lg border bg-background p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm font-medium">质量检查</div>
-            <QualityBadge summary={qualitySummary} />
-          </div>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            {qualitySummary.summary}
-          </p>
-          <QualityMessages
-            failures={qualitySummary.failures}
-            warnings={qualitySummary.warnings}
-          />
-        </div>
-
-        <div className="rounded-lg border bg-background p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm font-medium">素材清单</div>
-            <Badge variant="outline">
-              {assetCount ? `${assetCount} 项` : "未返回"}
-            </Badge>
-          </div>
-          {assetItems.length > 0 ? (
-            <div className="mt-3 flex flex-col gap-2">
-              {assetItems.map((asset, index) => (
-                <div
-                  className="rounded-lg bg-muted/40 p-3"
-                  key={`${asset.label}-${index}`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-medium">{asset.label}</div>
-                    <Badge
-                      variant={
-                        asset.statusLabel === "缺失"
-                          ? "destructive"
-                          : "secondary"
-                      }
-                    >
-                      {asset.statusLabel}
-                    </Badge>
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {asset.kind}
-                  </div>
-                  {expertMode ? (
-                    <div className="mt-2 line-clamp-2 font-mono text-xs break-all text-muted-foreground">
-                      {asset.detail}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-3 rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
-              后端没有返回素材清单。
-            </div>
-          )}
-        </div>
-
-        <Separator />
-
-        <TechDetails
-          items={[
-            {
-              label:
-                run.artifact.kind === "text"
-                  ? "长文字数"
-                  : run.artifact.kind === "image_set"
-                    ? "图集封面"
-                    : "成片路径",
-              value: artifactDetail,
-            },
-          ]}
-        />
-      </div>
-    ) : null
-
   return (
-    <SingleTaskPanel
-      actionError={taskActionError}
-      artifactError={
-        result && !run.artifact
-          ? "产物已经生成，但当前结果没有可用的预览地址或正文。"
-          : null
-      }
-      isCancelling={isCancellingTask}
-      onCancel={onCancelTask}
-      onRetryResult={onRetryResult}
-      resultDetails={resultDetails}
-      resultFetchError={resultFetchError}
-      run={run}
-    />
+    <aside
+      className="min-w-0 xl:sticky xl:top-[5.5rem] xl:self-start"
+      data-slot="production-rail"
+    >
+      <Card className="rounded-lg border-primary/20 bg-primary/5">
+        <CardContent className="space-y-4 p-5" aria-live="polite">
+          <div className="flex items-center gap-3">
+            <Loader2 className="size-5 animate-spin text-primary" />
+            <div>
+              <div className="text-sm font-medium">正在创建生产任务</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                任务建立后会立即打开任务详情。
+              </p>
+            </div>
+          </div>
+          <Progress aria-label="正在创建生产任务" indeterminate />
+        </CardContent>
+      </Card>
+    </aside>
   )
 }
 function previewCopy(
@@ -2060,26 +1847,4 @@ function buildStandardTemplateInput({
     ? { topic }
     : { script }
   return title ? { ...baseInput, title } : baseInput
-}
-
-function productionTemplateLabel(
-  result: GenerationResult,
-  fallbackTemplate: ProductionTemplate | null
-) {
-  const metadataTemplate = result.metadata.production_template
-  if (
-    metadataTemplate &&
-    typeof metadataTemplate === "object" &&
-    "name" in metadataTemplate
-  ) {
-    const name = String((metadataTemplate as { name?: unknown }).name ?? "")
-    const version = String(
-      (metadataTemplate as { version?: unknown }).version ?? ""
-    )
-    return [name, version].filter(Boolean).join(" · ") || "未返回"
-  }
-
-  return fallbackTemplate
-    ? `${fallbackTemplate.display_name} · ${fallbackTemplate.version}`
-    : "未返回"
 }

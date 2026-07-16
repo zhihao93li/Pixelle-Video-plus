@@ -207,6 +207,24 @@ export type ProductionTask = {
   error: GenerationError | null
 }
 
+export type ProductionTimelineEntry = {
+  event_id: string
+  event_type: string
+  category: "output" | "activity"
+  title: string
+  occurred_at: string
+  actor: "user" | "system" | "agent"
+  stage: string | null
+  revision_id: string | null
+  generation_task_id: string | null
+  detail: Record<string, unknown>
+}
+
+export type ProductionTimelinePage = {
+  items: ProductionTimelineEntry[]
+  next_cursor: string | null
+}
+
 export type ProductionTaskCreateResponse = {
   production_task_id: string
   content_item_id: string
@@ -281,12 +299,14 @@ export type LlmModelProvider = {
   label: string
   provider_type: string
   configured: boolean
+  default_model: string
   error?: string | null
   models: Array<{ id: string; label: string }>
 }
 
 export type LlmModelCatalogResponse = {
   configured: boolean
+  default_provider_id: string
   providers: LlmModelProvider[]
 }
 
@@ -488,7 +508,7 @@ export type AppSettingsConfig = {
     runninghub_instance_type?: string | null
     runninghub_timeout?: number | null
     tts: {
-      inference_mode?: string
+      inference_mode?: "local" | "comfyui" | "fish"
       fish_audio: {
         api_key: string
         api_key_configured?: boolean
@@ -529,6 +549,11 @@ export type LlmProviderConfig = {
   provider_type:
     | "aihubmix"
     | "openai"
+    | "deepseek"
+    | "minimax"
+    | "kimi"
+    | "anthropic"
+    | "xai"
     | "aliyun_bailian"
     | "volcengine_ark"
     | "custom_openai"
@@ -538,6 +563,12 @@ export type LlmProviderConfig = {
   clear_api_key?: boolean
   base_url: string
   default_model: string
+}
+
+export type LlmProviderPreset = {
+  id: LlmProviderConfig["provider_type"]
+  label: string
+  base_url: string
 }
 
 export type SettingsConfigResponse = {
@@ -747,6 +778,19 @@ export async function getProductionTask(taskId: string) {
   return fetchJson<ProductionTask>(`/production-tasks/${taskId}`)
 }
 
+export async function getProductionTaskTimeline(
+  taskId: string,
+  input?: { cursor?: string; limit?: number }
+) {
+  const search = new URLSearchParams()
+  if (input?.cursor) search.set("cursor", input.cursor)
+  if (input?.limit != null) search.set("limit", String(input.limit))
+  const query = search.toString()
+  return fetchJson<ProductionTimelinePage>(
+    `/production-tasks/${encodeURIComponent(taskId)}/timeline${query ? `?${query}` : ""}`
+  )
+}
+
 export async function cancelProductionTask(taskId: string) {
   const requestId = newContentRequestId("cancel")
   return fetchJson<ProductionTask>(
@@ -918,6 +962,12 @@ export async function getLlmModelCatalog() {
   return fetchJson<LlmModelCatalogResponse>("/settings/llm/model-catalog")
 }
 
+export async function getLlmProviderPresets() {
+  return fetchJson<{ providers: LlmProviderPreset[] }>(
+    "/settings/llm/provider-presets"
+  )
+}
+
 export async function updateLlmProvider(
   providerId: string,
   provider: LlmProviderConfig
@@ -960,7 +1010,6 @@ export type ContentVariant = {
   status: ContentVariantStatus
   title: string
   script: string
-  narrations: string[]
 }
 
 export type ContentEvent = {
@@ -972,6 +1021,7 @@ export type ContentEvent = {
 
 export type ContentItemLinks = {
   task_ids?: string[]
+  production_task_ids?: string[]
   batch_ids?: string[]
   publish_record_ids?: string[]
   [key: string]: unknown
@@ -1002,8 +1052,38 @@ export type SceneManifest = {
   updated_at: string
 }
 
+export type ReviewAction =
+  | "direct_edit"
+  | "rewrite_script"
+  | "regenerate_selected"
+  | "regenerate_all"
+  | "confirm"
+
+export type ReviewReference = {
+  title: string
+  variants: Record<string, ContentVariant>
+}
+
+export type PendingReviewSession = {
+  review_id: string
+  item_id: string
+  version: string
+  payload:
+    | {
+        kind: "script"
+        variants: Record<string, ContentVariant>
+      }
+    | {
+        kind: "video_scenes" | "agent_image_scenes" | "image_pages"
+        scene_manifest: SceneManifest
+      }
+  reference?: ReviewReference | null
+  allowed_actions: ReviewAction[]
+}
+
 export type ContentPublication = {
   publication_id: string
+  production_task_id?: string | null
   platform: string
   published_at: string
   evidence_type: "url" | "platform_post_id" | "buffer_id" | "manual"
@@ -1152,18 +1232,28 @@ export async function getContentOperation(operationId: string) {
   return fetchJson<ContentFlowOperation>(`/agent/operations/${operationId}`)
 }
 
+export async function getPendingContentReview(itemId: string) {
+  return fetchJson<{ item: ContentItem; review: PendingReviewSession | null }>(
+    `/content-items/${encodeURIComponent(itemId)}/pending-review`
+  )
+}
+
 export async function confirmContentItem(
   itemId: string,
-  variants?: Record<string, ContentVariant>,
-  requestId?: string
+  input: {
+    reviewId: string
+    contentVersion: string
+    requestId?: string
+  }
 ) {
   return fetchJson<ContentItem>(`/content-items/${itemId}/confirm`, {
     method: "POST",
     body: JSON.stringify({
-      request_id: requestId ?? newContentRequestId("confirm"),
+      request_id: input.requestId ?? newContentRequestId("confirm"),
       client_name: "react-console",
       source: "react",
-      variants: variants ?? null,
+      review_id: input.reviewId,
+      content_version: input.contentVersion,
     }),
   })
 }
@@ -1172,6 +1262,7 @@ export async function reviseContentReview(input: {
   itemId: string
   action:
     "direct_edit" | "rewrite_script" | "regenerate_selected" | "regenerate_all"
+  reviewId: string
   contentVersion: string
   selectedSceneIds?: string[]
   instruction?: string
@@ -1185,6 +1276,7 @@ export async function reviseContentReview(input: {
       method: "POST",
       body: JSON.stringify({
         action: input.action,
+        review_id: input.reviewId,
         content_version: input.contentVersion,
         selected_scene_ids: input.selectedSceneIds ?? [],
         instruction: input.instruction?.trim() || null,
@@ -1230,6 +1322,7 @@ export async function produceContentItem(input: {
 
 export async function markContentPublished(input: {
   itemId: string
+  productionTaskId?: string
   platform: string
   publishedAt: string
   publishUrl?: string
@@ -1241,6 +1334,7 @@ export async function markContentPublished(input: {
     {
       method: "POST",
       body: JSON.stringify({
+        production_task_id: input.productionTaskId ?? null,
         platform: input.platform,
         published_at: input.publishedAt,
         publish_url: input.publishUrl || null,
@@ -1255,6 +1349,7 @@ export async function markContentPublished(input: {
 
 export async function recordContentMetrics(input: {
   itemId: string
+  productionTaskId?: string
   likes?: number
   favorites?: number
   comments?: number
@@ -1265,6 +1360,7 @@ export async function recordContentMetrics(input: {
   return fetchJson<ContentItem>(`/content-items/${input.itemId}/metrics`, {
     method: "POST",
     body: JSON.stringify({
+      production_task_id: input.productionTaskId ?? null,
       likes: input.likes ?? null,
       favorites: input.favorites ?? null,
       comments: input.comments ?? null,

@@ -257,7 +257,14 @@ class ComfyBaseService:
             or "http://127.0.0.1:8188"
         )
         kit_config["comfyui_url"] = final_comfyui_url
-        
+
+        # RunningHub API URL (priority: global config > env > official CN endpoint)
+        kit_config["runninghub_url"] = (
+            self.global_config.get("runninghub_url")
+            or os.getenv("RUNNINGHUB_BASE_URL")
+            or "https://www.runninghub.cn"
+        )
+
         # RunningHub API key (priority: param > global config > env)
         final_rh_key = (
             runninghub_api_key

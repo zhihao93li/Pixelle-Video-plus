@@ -192,6 +192,7 @@ def _prepare_production_locked(
         for key in declared_input_keys
         if key in input_payload and input_payload[key] not in (None, "")
     }
+    compiled.params = _snapshot_system_tts_defaults(compiled.params, setting_keys)
 
     item = load_item(content_item_id) if content_item_id else None
     created_item = item is None
@@ -265,6 +266,39 @@ def _prepare_production_locked(
     )
 
 
+def _snapshot_system_tts_defaults(
+    params: dict[str, Any], setting_keys: set[str]
+) -> dict[str, Any]:
+    """Resolve a template's system-level TTS inheritance when the task is created."""
+
+    if "tts_inference_mode" not in setting_keys or params.get("tts_inference_mode"):
+        return params
+
+    from pixelle_video.config import config_manager
+
+    resolved = dict(params)
+    tts = config_manager.config.comfyui.tts
+    resolved["tts_inference_mode"] = tts.inference_mode
+    if "tts_voice" in setting_keys and not resolved.get("tts_voice"):
+        if tts.inference_mode == "local":
+            resolved["tts_voice"] = tts.local.voice
+        elif tts.inference_mode == "fish" and tts.fish_audio.reference_id:
+            resolved["tts_voice"] = tts.fish_audio.reference_id
+    if "tts_speed" in setting_keys and resolved.get("tts_speed") is None:
+        if tts.inference_mode == "local":
+            resolved["tts_speed"] = tts.local.speed
+        elif tts.inference_mode == "fish":
+            resolved["tts_speed"] = tts.fish_audio.speed
+    if (
+        tts.inference_mode == "comfyui"
+        and "tts_workflow" in setting_keys
+        and not resolved.get("tts_workflow")
+        and tts.comfyui.default_workflow
+    ):
+        resolved["tts_workflow"] = tts.comfyui.default_workflow
+    return resolved
+
+
 def _new_ledger_item(
     *,
     project_id: str,
@@ -285,7 +319,6 @@ def _new_ledger_item(
                 status="confirmed",
                 title=title,
                 script=script,
-                narrations=[],
             )
         }
         if script

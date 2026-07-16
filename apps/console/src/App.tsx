@@ -1,5 +1,12 @@
-import { lazy, Suspense, useEffect, type ReactNode } from "react"
-import { ArrowLeft, LoaderCircle } from "lucide-react"
+import {
+  Component,
+  lazy,
+  Suspense,
+  useEffect,
+  type ErrorInfo,
+  type ReactNode,
+} from "react"
+import { ArrowLeft, LoaderCircle, RefreshCcw } from "lucide-react"
 
 import { AppShell } from "@/components/AppShell"
 import { PageFrame } from "@/components/shared/PageFrame"
@@ -78,9 +85,45 @@ export function App() {
       projectScoped={route.projectScoped}
       title={route.title}
     >
-      <Suspense fallback={<RouteLoading />}>{renderRoute(route)}</Suspense>
+      <RouteErrorBoundary key={path}>
+        <Suspense fallback={<RouteLoading />}>{renderRoute(route)}</Suspense>
+      </RouteErrorBoundary>
     </AppShell>
   )
+}
+
+class RouteErrorBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Pixelle 页面加载失败", error, info)
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children
+    return (
+      <PageFrame className="min-h-[55vh] justify-center p-6">
+        <div className="max-w-lg rounded-xl border bg-card p-5 shadow-sm">
+          <h2 className="text-base font-medium">页面需要重新加载</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Pixelle
+            可能刚刚完成更新。重新加载后会回到当前页面，任务数据不会丢失。
+          </p>
+          <Button className="mt-4" onClick={() => window.location.reload()}>
+            <RefreshCcw data-icon="inline-start" />
+            重新加载
+          </Button>
+        </div>
+      </PageFrame>
+    )
+  }
 }
 
 function renderRoute(route: ResolvedRoute): ReactNode {

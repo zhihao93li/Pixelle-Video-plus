@@ -24,6 +24,11 @@ from pixelle_video.content.production_tasks import (
 )
 from pixelle_video.content.projects import get_project
 from pixelle_video.content.store import load_item
+from pixelle_video.content.task_timeline import (
+    ProductionTimelinePage,
+    build_production_timeline,
+    paginate_timeline,
+)
 from pixelle_video.generation import ProductionTemplateError
 from pixelle_video.generation.schemas import GenerationError
 
@@ -61,6 +66,60 @@ class ProductionTaskRetryRequest(BaseModel):
     client_name: str | None = Field(default=None, max_length=120)
     agent_session_id: str | None = Field(default=None, max_length=200)
     source: str | None = Field(default=None, max_length=120)
+
+
+def _request_is_replayable(request, pipeline_registry) -> bool:
+    """Return whether a stored generation request still satisfies today's contract."""
+
+    try:
+        manifest = pipeline_registry.get_manifest(request.pipeline_id)
+    except (KeyError, ValueError):
+        return False
+    for field in manifest.input.required_fields:
+        value = request.input.get(field.name)
+        if value is None or value == "" or value == []:
+            return False
+    # Topic routes have a human-confirmation output in addition to their public
+    # topic input. Old snapshots stored that script only in metadata and cannot
+    # safely be replayed under the current pipeline contract.
+    if request.pipeline_id in {"topic_to_video", "topic_to_image_post"}:
+        script = request.input.get("script")
+        return isinstance(script, str) and bool(script.strip())
+    return True
+
+
+def _queue_confirmed_content_retry(
+    *,
+    task: ProductionTask,
+    request: ProductionTaskRetryRequest,
+    background_tasks: BackgroundTasks,
+    identity: RequestIdentity,
+    generation_service,
+) -> ProductionTask:
+    from api.routers.content_flows import ProduceRequest, _run_confirmed_content_production
+
+    set_task_state(
+        task.production_task_id,
+        state="in_progress",
+        stage_id="split_scenes",
+        stage_label="正在从已确认内容恢复生产",
+        next_actor="system",
+    )
+    background_tasks.add_task(
+        _run_confirmed_content_production,
+        item_id=task.content_item_id,
+        production_task_id=task.production_task_id,
+        request=ProduceRequest(
+            request_id=request.request_id,
+            recipe_id=task.recipe_id,
+            client_name=request.client_name,
+            agent_session_id=request.agent_session_id,
+            source=request.source,
+        ),
+        identity=identity,
+        generation_service=generation_service,
+    )
+    return load_production_task(task.production_task_id) or task
 
 
 class WorkbenchStage(BaseModel):
@@ -118,6 +177,7 @@ class WorkbenchTaskListResponse(BaseModel):
 async def _plan_digital_human_script(*, item, task, input_payload, pixelle_video):
     from pixelle_video.content.drafting import draft_digital_human_script
     from pixelle_video.content.models import ContentVariant, now_iso
+    from pixelle_video.content.reviews import create_item_stage_revision
     from pixelle_video.content.store import save_item
 
     if pixelle_video.llm is None:
@@ -144,6 +204,7 @@ async def _plan_digital_human_script(*, item, task, input_payload, pixelle_video
     }
     item.status = "pending_review"
     item.updated_at = now_iso()
+    create_item_stage_revision(item, created_by="system", source="system")
     item.add_event(
         "draft_generated",
         "system",
@@ -159,6 +220,64 @@ async def _plan_digital_human_script(*, item, task, input_payload, pixelle_video
         action_type="confirm_script",
         action_label="确认文案",
     )
+
+
+async def _run_digital_human_script_stage(
+    *, task_id: str, input_payload: dict[str, Any], pixelle_video
+) -> None:
+    """Generate reviewable digital-human copy without holding the create request open."""
+
+    task = load_production_task(task_id)
+    if task is None or task.state == "cancelled":
+        return
+    item = load_item(task.content_item_id)
+    if item is None:
+        set_task_state(
+            task_id,
+            state="failed",
+            stage_id="generate_script",
+            stage_label="数字人口播写稿失败",
+            next_actor="user",
+            action_type="retry",
+            action_label="原样重试",
+            error=GenerationError(layer="persistence", message="关联内容已不可读。"),
+        )
+        return
+    if item.status == "pending_review" and any(
+        variant.script.strip() for variant in item.variants.values()
+    ):
+        set_task_state(
+            task_id,
+            state="needs_user",
+            stage_id="review_script",
+            stage_label="确认数字人口播文案",
+            next_actor="user",
+            action_type="confirm_script",
+            action_label="确认文案",
+        )
+        return
+    try:
+        await _plan_digital_human_script(
+            item=item,
+            task=task,
+            input_payload=input_payload,
+            pixelle_video=pixelle_video,
+        )
+    except Exception as exc:  # noqa: BLE001 - durable task failure is the contract
+        set_task_state(
+            task_id,
+            state="failed",
+            stage_id="generate_script",
+            stage_label="数字人口播写稿失败",
+            next_actor="user",
+            action_type="retry",
+            action_label="原样重试",
+            error=GenerationError(
+                layer="runtime",
+                message="数字人口播文案未能生成，请查看本机 API 日志。",
+                exception_type=type(exc).__name__,
+            ),
+        )
 
 
 @router.post("", response_model=ProductionTaskCreateResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -234,11 +353,11 @@ async def create_production_task(
                 raise exc
         elif prepared.task.pipeline_id == "codex_scene_video":
             from pixelle_video.content.models import (
-                ContentVariant,
                 SceneDraft,
                 SceneManifest,
                 now_iso,
             )
+            from pixelle_video.content.reviews import create_item_stage_revision
             from pixelle_video.content.store import save_item
 
             raw_scenes = request.input.get("scenes") or []
@@ -253,15 +372,6 @@ async def create_production_task(
                     )
                     for index, scene in enumerate(raw_scenes, start=1)
                 ]
-                language = prepared.item.languages[0] if prepared.item.languages else "Chinese"
-                prepared.item.languages = [language]
-                prepared.item.variants[language] = ContentVariant(
-                    language=language,
-                    status="pending",
-                    title=prepared.item.title,
-                    script="\n".join(scene.narration for scene in scenes),
-                    narrations=[scene.narration for scene in scenes],
-                )
                 prepared.item.scene_manifest = SceneManifest(
                     review_kind="agent_image_scenes",
                     scenes=scenes,
@@ -269,6 +379,11 @@ async def create_production_task(
                 )
                 prepared.item.status = "pending_review"
                 prepared.item.updated_at = now_iso()
+                create_item_stage_revision(
+                    prepared.item,
+                    created_by=identity.actor,
+                    source="agent",
+                )
                 save_item(prepared.item)
                 set_task_state(
                     prepared.task.production_task_id,
@@ -290,7 +405,7 @@ async def create_production_task(
                 )
                 raise HTTPException(status_code=422, detail=str(exc)) from None
         elif prepared.task.pipeline_id in {"script_to_video", "image_post"}:
-            from api.routers.content_flows import plan_video_scenes
+            from api.routers.content_flows import run_scene_planning
 
             set_task_state(
                 prepared.task.production_task_id,
@@ -299,60 +414,32 @@ async def create_production_task(
                 stage_label="正在规划分镜",
                 next_actor="system",
             )
-            try:
-                await plan_video_scenes(
-                    item=prepared.item,
-                    production_task=prepared.task,
-                    pixelle_video=pixelle_video,
-                    review_kind=(
-                        "image_pages"
-                        if prepared.task.pipeline_id == "image_post"
-                        else "video_scenes"
-                    ),
-                )
-            except Exception as exc:
-                set_task_state(
-                    prepared.task.production_task_id,
-                    state="failed",
-                    stage_id="plan_scenes",
-                    stage_label="分镜规划失败",
-                    next_actor="user",
-                    action_type="retry",
-                    action_label="原样重试",
-                    error=GenerationError(
-                        layer="runtime",
-                        message="分镜规划未能完成，请查看本机 API 日志。",
-                        exception_type=type(exc).__name__,
-                    ),
-                )
-                raise HTTPException(status_code=502, detail="分镜规划失败。") from exc
+            background_tasks.add_task(
+                run_scene_planning,
+                item_id=prepared.item.item_id,
+                production_task_id=prepared.task.production_task_id,
+                pixelle_video=pixelle_video,
+                review_kind=(
+                    "image_pages" if prepared.task.pipeline_id == "image_post" else "video_scenes"
+                ),
+            )
         elif (
             prepared.task.pipeline_id == "digital_human"
             and not str(request.input.get("script") or "").strip()
         ):
-            try:
-                await _plan_digital_human_script(
-                    item=prepared.item,
-                    task=prepared.task,
-                    input_payload=request.input,
-                    pixelle_video=pixelle_video,
-                )
-            except Exception as exc:
-                set_task_state(
-                    prepared.task.production_task_id,
-                    state="failed",
-                    stage_id="generate_script",
-                    stage_label="数字人口播写稿失败",
-                    next_actor="user",
-                    action_type="retry",
-                    action_label="原样重试",
-                    error=GenerationError(
-                        layer="runtime",
-                        message="数字人口播文案未能生成，请查看本机 API 日志。",
-                        exception_type=type(exc).__name__,
-                    ),
-                )
-                raise HTTPException(status_code=502, detail="数字人口播写稿失败。") from exc
+            set_task_state(
+                prepared.task.production_task_id,
+                state="in_progress",
+                stage_id="generate_script",
+                stage_label="正在生成数字人口播文案",
+                next_actor="system",
+            )
+            background_tasks.add_task(
+                _run_digital_human_script_stage,
+                task_id=prepared.task.production_task_id,
+                input_payload=request.input,
+                pixelle_video=pixelle_video,
+            )
         else:
             if prepared.generation_request is None:
                 raise HTTPException(status_code=500, detail="生产请求没有生成执行合同。")
@@ -468,6 +555,29 @@ async def get_production_task(
     return _visible_task(_refresh_task(task, generation_service), identity)
 
 
+@router.get("/{task_id}/timeline", response_model=ProductionTimelinePage)
+async def get_production_task_timeline(
+    task_id: str,
+    generation_service: GenerationServiceDep,
+    identity: IdentityDep,
+    cursor: str | None = None,
+    limit: int = Query(default=30, ge=1, le=100),
+):
+    task = load_production_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="未找到生产任务。")
+    visible = _visible_task(_refresh_task(task, generation_service), identity)
+    item = load_item(visible.content_item_id)
+    try:
+        return paginate_timeline(
+            build_production_timeline(visible, item),
+            cursor=cursor,
+            limit=limit,
+        )
+    except ValueError:
+        raise HTTPException(status_code=422, detail="cursor 无效。") from None
+
+
 @router.delete("/{task_id}", response_model=ProductionTask)
 async def cancel_production_task(
     task_id: str,
@@ -527,7 +637,6 @@ async def retry_production_task(
             DraftRequest,
             ProduceRequest,
             draft_item,
-            produce_item,
         )
 
         item = load_item(task.content_item_id)
@@ -563,9 +672,16 @@ async def retry_production_task(
                 and not str(task.input_snapshot.get("script") or "").strip()
                 and item.status in {"producing", "idea"}
             ):
-                await _plan_digital_human_script(
-                    item=item,
-                    task=task,
+                set_task_state(
+                    task.production_task_id,
+                    state="in_progress",
+                    stage_id="generate_script",
+                    stage_label="正在重新生成数字人口播文案",
+                    next_actor="system",
+                )
+                background_tasks.add_task(
+                    _run_digital_human_script_stage,
+                    task_id=task.production_task_id,
                     input_payload=task.input_snapshot,
                     pixelle_video=pixelle_video,
                 )
@@ -579,6 +695,37 @@ async def retry_production_task(
                     next_actor="user",
                     action_type="confirm_scenes" if review_scenes else "confirm_script",
                     action_label="确认分镜" if review_scenes else "确认文案",
+                )
+            elif (
+                item.status == "confirmed"
+                and task.stage_id == "plan_scenes"
+                and task.pipeline_id
+                in {
+                    "topic_to_video",
+                    "topic_to_image_post",
+                    "script_to_video",
+                    "image_post",
+                }
+            ):
+                from api.routers.content_flows import run_scene_planning
+
+                set_task_state(
+                    task.production_task_id,
+                    state="in_progress",
+                    stage_id="plan_scenes",
+                    stage_label="正在重新规划分镜",
+                    next_actor="system",
+                )
+                background_tasks.add_task(
+                    run_scene_planning,
+                    item_id=item.item_id,
+                    production_task_id=task.production_task_id,
+                    pixelle_video=pixelle_video,
+                    review_kind=(
+                        "image_pages"
+                        if task.pipeline_id in {"topic_to_image_post", "image_post"}
+                        else "video_scenes"
+                    ),
                 )
             elif item.status == "confirmed" and task.pipeline_id == "digital_human":
                 from pixelle_video.content.store import save_item
@@ -636,24 +783,12 @@ async def retry_production_task(
                 }
                 save_item(item)
             elif item.status == "confirmed":
-                set_task_state(
-                    task.production_task_id,
-                    state="in_progress",
-                    stage_id="split_scenes",
-                    stage_label="正在重新启动生产",
-                    next_actor="system",
-                )
-                await produce_item(
-                    task.content_item_id,
-                    ProduceRequest(
-                        request_id=request.request_id,
-                        recipe_id=task.recipe_id,
-                        client_name=request.client_name,
-                        agent_session_id=request.agent_session_id,
-                        source=request.source,
-                    ),
-                    identity,
-                    generation_service,
+                return _queue_confirmed_content_retry(
+                    task=task,
+                    request=request,
+                    background_tasks=background_tasks,
+                    identity=identity,
+                    generation_service=generation_service,
                 )
             else:
                 raise HTTPException(
@@ -683,13 +818,29 @@ async def retry_production_task(
             status_code=409,
             detail="没有可复用的执行快照，请从原内容新建一次生产。",
         )
-    try:
-        previous = generation_service.get_task(task.generation_task_ids[-1])
-    except KeyError:
+    previous = None
+    for generation_task_id in reversed(task.generation_task_ids):
+        try:
+            candidate = generation_service.get_task(generation_task_id)
+        except KeyError:
+            continue
+        if _request_is_replayable(candidate.request, generation_service.pipeline_registry):
+            previous = candidate
+            break
+    if previous is None:
+        item = load_item(task.content_item_id)
+        if item is not None and item.status in {"confirmed", "produced"}:
+            return _queue_confirmed_content_retry(
+                task=task,
+                request=request,
+                background_tasks=background_tasks,
+                identity=identity,
+                generation_service=generation_service,
+            )
         raise HTTPException(
             status_code=409,
-            detail="上一次执行记录已不可读，请从原内容新建一次生产。",
-        ) from None
+            detail="没有可安全重放的执行快照，请从原内容新建一次生产。",
+        )
 
     retry_request = previous.request.model_copy(deep=True)
     retry_request.idempotency_key = request.request_id

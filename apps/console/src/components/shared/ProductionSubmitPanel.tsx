@@ -279,12 +279,12 @@ export function ProductionSubmitPanel({
     setTtsPreview(null)
     setTtsPreviewError(null)
     try {
-      const mode = String(effectiveParams.tts_inference_mode ?? "local") as
-        "local" | "comfyui" | "fish"
+      const mode = String(effectiveParams.tts_inference_mode ?? "") as
+        "local" | "comfyui" | "fish" | ""
       const voice = String(effectiveParams.tts_voice ?? "").trim()
       const response = await synthesizeTtsPreview({
         text: previewText.trim() || "预览示例文案",
-        inferenceMode: mode,
+        inferenceMode: mode || undefined,
         workflow: String(effectiveParams.tts_workflow ?? "") || undefined,
         voiceId: mode === "fish" ? undefined : voice || undefined,
         referenceId: mode === "fish" ? voice || undefined : undefined,
@@ -567,7 +567,9 @@ export function ProductionSubmitPanel({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__default__">使用模板默认</SelectItem>
-                      <SelectItem value="local">本地 / Edge Voice</SelectItem>
+                      <SelectItem value="local">
+                        Microsoft Edge 在线语音
+                      </SelectItem>
                       <SelectItem value="comfyui">ComfyUI workflow</SelectItem>
                       <SelectItem value="fish">Fish Audio</SelectItem>
                     </SelectContent>

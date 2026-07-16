@@ -12,18 +12,21 @@ import api.security as security
 import pixelle_video.content.operations as operations
 import pixelle_video.content.production_tasks as production_tasks
 import pixelle_video.content.projects as projects
+import pixelle_video.content.stage_revisions as stage_revisions
 import pixelle_video.content.store as content_store
 import pixelle_video.generation.agent_images as agent_images
 import pixelle_video.generation.task_store as task_store
 from api.app import app
 from api.dependencies import get_generation_service, get_pixelle_video
 from pixelle_video.content.models import (
+    ContentItem,
     ContentVariant,
     SceneDraft,
     SceneManifest,
     new_content_item,
     now_iso,
 )
+from pixelle_video.content.reviews import build_pending_review
 from pixelle_video.generation.schemas import GenerationProgress, GenerationTask
 
 
@@ -55,6 +58,7 @@ async def get_fake_generation_service():
 @pytest.fixture(autouse=True)
 def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(content_store, "CONTENT_ITEMS_DIR", tmp_path / "content-items")
+    monkeypatch.setattr(stage_revisions, "STAGE_REVISIONS_DIR", tmp_path / "stage-revisions")
     monkeypatch.setattr(operations, "CONTENT_FLOW_OPERATION_DIR", tmp_path / "operations")
     monkeypatch.setattr(task_store, "GENERATION_TASK_DIR", tmp_path / "tasks")
     monkeypatch.setattr(production_tasks, "PRODUCTION_TASKS_DIR", tmp_path / "production-tasks")
@@ -95,6 +99,13 @@ def _project_id():
     return projects.list_projects()[1][0].project_id
 
 
+def _review_identity(item):
+    model = ContentItem.model_validate(item) if isinstance(item, dict) else item
+    review = build_pending_review(model)
+    assert review is not None
+    return {"review_id": review.review_id, "content_version": review.version}
+
+
 def _review_task(item, *, pipeline_id: str, recipe_id: str):
     task, _ = production_tasks.create_production_task(
         content_item_id=item.item_id,
@@ -124,6 +135,110 @@ def _review_task(item, *, pipeline_id: str, recipe_id: str):
     return task
 
 
+def test_pending_review_contract_projects_one_authoritative_payload(client):
+    item = new_content_item(
+        title="猫为什么喜欢纸箱",
+        project=_project_id(),
+        status="pending_review",
+        variants={
+            "Chinese": ContentVariant(
+                language="Chinese", status="confirmed", script="这是原始文案。"
+            )
+        },
+    )
+    item.scene_manifest = SceneManifest(
+        review_kind="video_scenes",
+        scenes=[
+            SceneDraft(
+                scene_id="scene-1",
+                order=1,
+                narration="第一镜。",
+                image_prompt="纸箱里的猫",
+            )
+        ],
+    )
+    content_store.save_item(item)
+
+    response = client.get(f"/api/content-items/{item.item_id}/pending-review")
+
+    assert response.status_code == 200, response.text
+    context = response.json()
+    assert context["item"]["item_id"] == item.item_id
+    assert context["review"]["review_id"]
+    assert context["review"]["version"] == "v1"
+    assert context["review"]["payload"]["kind"] == "video_scenes"
+    assert context["review"]["payload"]["scene_manifest"]["scenes"][0]["narration"] == "第一镜。"
+    assert context["review"]["reference"]["variants"]["Chinese"]["script"] == ("这是原始文案。")
+
+
+def test_confirm_rejects_wrong_review_object_and_accepts_idempotent_retry(client):
+    item = new_content_item(
+        title="猫为什么喜欢纸箱",
+        project=_project_id(),
+        status="pending_review",
+        variants={
+            "Chinese": ContentVariant(language="Chinese", status="pending", script="待确认文案")
+        },
+    )
+    content_store.save_item(item)
+    identity = _review_identity(item)
+
+    wrong = client.post(
+        f"/api/content-items/{item.item_id}/confirm",
+        json={
+            **_trace("wrong-review"),
+            **identity,
+            "review_id": f"{item.item_id}:video_scenes",
+        },
+    )
+    assert wrong.status_code == 409
+
+    payload = {**_trace("confirm-idempotent"), **identity}
+    first = client.post(f"/api/content-items/{item.item_id}/confirm", json=payload)
+    repeated = client.post(f"/api/content-items/{item.item_id}/confirm", json=payload)
+    assert first.status_code == 200, first.text
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["status"] == "confirmed"
+
+
+def test_direct_edit_does_not_require_an_llm_service(client):
+    item = new_content_item(
+        title="猫为什么喜欢纸箱",
+        project=_project_id(),
+        status="pending_review",
+        variants={"Chinese": ContentVariant(language="Chinese", status="pending", script="修改前")},
+    )
+    content_store.save_item(item)
+    _review_task(
+        item,
+        pipeline_id="topic_to_video",
+        recipe_id="pipeline_topic_to_video_base_v1",
+    )
+
+    async def core_without_llm():
+        return SimpleNamespace(llm=None)
+
+    app.dependency_overrides[get_pixelle_video] = core_without_llm
+    response = client.post(
+        f"/api/content-items/{item.item_id}/revise-review",
+        json={
+            **_trace("direct-edit-without-llm"),
+            **_review_identity(item),
+            "action": "direct_edit",
+            "variants": {
+                "Chinese": {
+                    "language": "Chinese",
+                    "status": "pending",
+                    "title": item.title,
+                    "script": "修改后",
+                }
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["variants"]["Chinese"]["script"] == "修改后"
+
+
 def test_rewrite_script_keeps_the_same_production_task(client, monkeypatch):
     import pixelle_video.content.drafting as drafting
 
@@ -131,11 +246,7 @@ def test_rewrite_script_keeps_the_same_production_task(client, monkeypatch):
         title="猫为什么喜欢纸箱",
         project=_project_id(),
         status="pending_review",
-        variants={
-            "Chinese": ContentVariant(
-                language="Chinese", status="pending", script="旧文案"
-            )
-        },
+        variants={"Chinese": ContentVariant(language="Chinese", status="pending", script="旧文案")},
     )
     content_store.save_item(item)
     task = _review_task(
@@ -148,11 +259,7 @@ def test_rewrite_script_keeps_the_same_production_task(client, monkeypatch):
         return SimpleNamespace(llm=object())
 
     async def fake_draft(**_kwargs):
-        return {
-            "language_drafts": {
-                "Chinese": {"title": "新标题", "script": "系统重写后的文案"}
-            }
-        }
+        return {"language_drafts": {"Chinese": {"title": "新标题", "script": "系统重写后的文案"}}}
 
     monkeypatch.setattr(drafting, "draft_topic", fake_draft)
     app.dependency_overrides[get_pixelle_video] = fake_core
@@ -160,12 +267,15 @@ def test_rewrite_script_keeps_the_same_production_task(client, monkeypatch):
         f"/api/content-items/{item.item_id}/revise-review",
         json={
             "action": "rewrite_script",
-            "content_version": item.updated_at,
+            **_review_identity(item),
             **_trace("rewrite-script"),
         },
     )
     assert response.status_code == 200, response.text
-    assert response.json()["variants"]["Chinese"]["script"] == "系统重写后的文案"
+    # The request acknowledges the durable background stage immediately.  The
+    # completed review is read from the canonical content item afterwards.
+    updated = client.get(f"/api/content-items/{item.item_id}").json()
+    assert updated["variants"]["Chinese"]["script"] == "系统重写后的文案"
     assert production_tasks.load_production_task(task.production_task_id) is not None
     assert len(production_tasks.list_production_tasks()) == 1
 
@@ -210,20 +320,19 @@ def test_selected_scene_regeneration_preserves_unselected_scene(client, monkeypa
         json={
             "action": "regenerate_selected",
             "selected_scene_ids": ["scene-1"],
-            "content_version": item.updated_at,
+            **_review_identity(item),
             **_trace("rewrite-scene"),
         },
     )
     assert response.status_code == 200, response.text
-    scenes = response.json()["scene_manifest"]["scenes"]
+    updated = client.get(f"/api/content-items/{item.item_id}").json()
+    scenes = updated["scene_manifest"]["scenes"]
     assert [scene["narration"] for scene in scenes] == ["只改第一段。", "第二段。"]
     assert production_tasks.load_production_task(task.production_task_id) is not None
     assert len(production_tasks.list_production_tasks()) == 1
 
 
-def test_topic_image_post_uses_script_and_page_confirmation_on_one_task(
-    client, monkeypatch
-):
+def test_topic_image_post_uses_script_and_page_confirmation_on_one_task(client, monkeypatch):
     import pixelle_video.content.drafting as drafting
 
     async def fake_core():
@@ -271,6 +380,7 @@ def test_topic_image_post_uses_script_and_page_confirmation_on_one_task(
             "request_id": "topic-image-confirm-script",
             "client_name": "react-console",
             "source": "react",
+            **_review_identity(first_review),
         },
     )
     assert script_confirmed.status_code == 200, script_confirmed.text
@@ -279,29 +389,37 @@ def test_topic_image_post_uses_script_and_page_confirmation_on_one_task(
     assert second_review["scene_manifest"]["review_kind"] == "image_pages"
     assert len(second_review["scene_manifest"]["scenes"]) == 2
 
+    confirm_pages_payload = {
+        "request_id": "topic-image-confirm-pages",
+        "client_name": "react-console",
+        "source": "react",
+        **_review_identity(second_review),
+    }
+    # Confirmation identifies the already-persisted review version. It must
+    # never resend (or accidentally replace) its authoritative scene manifest.
+    assert "scenes" not in confirm_pages_payload
+    assert "scene_manifest" not in confirm_pages_payload
     page_confirmed = client.post(
         f"/api/content-items/{item_id}/confirm",
-        json={
-            "request_id": "topic-image-confirm-pages",
-            "client_name": "react-console",
-            "source": "react",
-        },
+        json=confirm_pages_payload,
     )
     assert page_confirmed.status_code == 200, page_confirmed.text
     assert len(fake_generation_service.requests) == 1
     generation_request, _surface = fake_generation_service.requests[0]
     assert generation_request.pipeline_id == "topic_to_image_post"
-    assert generation_request.metadata["confirmed_scenes"] == [
+    assert generation_request.input["pages"] == [
         "纸箱给猫安全感。",
         "纸板也能保温。",
     ]
+    assert generation_request.input["script"] == "纸箱给猫安全感。纸板也能保温。"
+    assert "scenes" not in generation_request.input
+    assert "confirmed_scenes" not in generation_request.metadata
+    assert "confirmed_script" not in generation_request.metadata
     assert production_tasks.load_production_task(task_id) is not None
     assert len(production_tasks.list_production_tasks()) == 1
 
 
-def test_system_generated_digital_human_copy_is_confirmed_before_video(
-    client, monkeypatch
-):
+def test_system_generated_digital_human_copy_is_confirmed_before_video(client, monkeypatch):
     import pixelle_video.content.drafting as drafting
 
     async def fake_core():
@@ -342,10 +460,15 @@ def test_system_generated_digital_human_copy_is_confirmed_before_video(
             "request_id": "digital-human-confirm",
             "client_name": "react-console",
             "source": "react",
+            **_review_identity(pending),
         },
     )
     assert confirmed.status_code == 200, confirmed.text
-    assert confirmed.json()["status"] == "producing"
+    # Confirmation is persisted before the potentially slow provider
+    # submission starts.  The canonical item reflects the completed
+    # background hand-off.
+    confirmed_item = client.get(f"/api/content-items/{item_id}").json()
+    assert confirmed_item["status"] == "producing"
     assert len(fake_generation_service.requests) == 1
     generation_request, _surface = fake_generation_service.requests[0]
     assert generation_request.pipeline_id == "digital_human"
@@ -455,7 +578,11 @@ def test_complete_agent_story_route_confirms_exact_version_and_auto_produces(cli
     inferred = client.post(
         f"/api/content-items/{item_id}/confirm",
         headers=_agent_headers(),
-        json={**_trace("confirm-inferred"), "agent_session_id": "session-1"},
+        json={
+            **_trace("confirm-inferred"),
+            **_review_identity(item),
+            "agent_session_id": "session-1",
+        },
     )
     assert inferred.status_code == 403
 
@@ -464,8 +591,8 @@ def test_complete_agent_story_route_confirms_exact_version_and_auto_produces(cli
         headers=_agent_headers(),
         json={
             **_trace("confirm-explicit"),
+            **_review_identity(item),
             "agent_session_id": "session-1",
-            "content_version": item["updated_at"],
             "explicit_user_confirmation": True,
         },
     )
@@ -508,10 +635,7 @@ def _legacy_topics_and_two_stage_agent_story_flow(client):
     assert manifest.status_code == 200, manifest.text
     payload = manifest.json()
     assert payload["status"] == "pending_review"
-    assert payload["variants"]["Chinese"]["narrations"] == [
-        "纸箱给猫提供狭小而安全的空间。",
-        "纸板还能帮助猫保持温暖。",
-    ]
+    assert "narrations" not in payload["variants"]["Chinese"]
     assert payload["scene_manifest"]["confirmed"] is False
 
     before_confirm = client.post(
@@ -527,20 +651,20 @@ def _legacy_topics_and_two_stage_agent_story_flow(client):
     agent_confirm = client.post(
         f"/api/content-items/{item['item_id']}/confirm",
         headers=_agent_headers(),
-        json=_trace("confirm-agent"),
+        json={**_trace("confirm-agent"), **_review_identity(payload)},
     )
     assert agent_confirm.status_code == 403
 
     invalid_token_confirm = client.post(
         f"/api/content-items/{item['item_id']}/confirm",
         headers={"X-Pixelle-Agent-Token": "wrong-token"},
-        json=_trace("confirm-invalid-token"),
+        json={**_trace("confirm-invalid-token"), **_review_identity(payload)},
     )
     assert invalid_token_confirm.status_code == 403
 
     confirmed = client.post(
         f"/api/content-items/{item['item_id']}/confirm",
-        json=_trace("confirm-user"),
+        json={**_trace("confirm-user"), **_review_identity(payload)},
     )
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["scene_manifest"]["confirmed"] is True
@@ -683,6 +807,57 @@ def test_publish_evidence_and_mock_metrics_are_separate(client):
     assert official.json()["metrics"]["likes"] == 12
 
 
+def test_publish_and_metrics_are_linked_to_the_exact_production_timeline(client):
+    item = new_content_item(title="猫为什么喜欢纸箱", project=_project_id())
+    item.status = "produced"
+    content_store.save_item(item)
+    task = _review_task(
+        item,
+        pipeline_id="script_to_video",
+        recipe_id="pipeline_standard_base_v1",
+    )
+    production_tasks.set_task_state(
+        task.production_task_id,
+        state="produced",
+        stage_id="completed",
+        stage_label="已产出",
+        next_actor="user",
+    )
+
+    published = client.post(
+        f"/api/content-items/{item.item_id}/mark-published",
+        json={
+            "production_task_id": task.production_task_id,
+            "platform": "xiaohongshu",
+            "published_at": now_iso(),
+            "publish_url": "https://example.com/post/task-linked",
+            **_trace("publish-task-linked"),
+        },
+    )
+    assert published.status_code == 200, published.text
+    publication = published.json()["publications"][0]
+    assert publication["production_task_id"] == task.production_task_id
+
+    measured = client.post(
+        f"/api/content-items/{item.item_id}/metrics",
+        json={
+            "production_task_id": task.production_task_id,
+            "publication_id": publication["publication_id"],
+            "likes": 12,
+            **_trace("metrics-task-linked"),
+        },
+    )
+    assert measured.status_code == 200, measured.text
+
+    timeline = client.get(f"/api/production-tasks/{task.production_task_id}/timeline")
+    assert timeline.status_code == 200, timeline.text
+    assert [
+        entry["event_type"]
+        for entry in timeline.json()["items"]
+        if entry["event_type"] in {"published", "metrics_recorded"}
+    ] == ["metrics_recorded", "published"]
+
+
 def _legacy_manifest_conflicts_locking_and_idempotency(client):
     item = _create_topic(client)
     stored = content_store.load_item(item["item_id"])
@@ -691,7 +866,6 @@ def _legacy_manifest_conflicts_locking_and_idempotency(client):
         "Chinese": ContentVariant(
             language="Chinese",
             script="另一份草稿",
-            narrations=["另一份草稿"],
         )
     }
     content_store.save_item(stored)
@@ -729,7 +903,7 @@ def _legacy_manifest_conflicts_locking_and_idempotency(client):
 
     confirmed = client.post(
         f"/api/content-items/{item['item_id']}/confirm",
-        json=_trace("confirm-lock"),
+        json={**_trace("confirm-lock"), **_review_identity(accepted.json())},
     )
     assert confirmed.status_code == 200
     locked = client.put(
@@ -922,7 +1096,6 @@ def test_async_draft_is_server_owned_and_operation_is_pollable(client, monkeypat
                 "Chinese": {
                     "title": topic,
                     "script": "猫喜欢纸箱，因为它安全又保暖。",
-                    "narrations": ["猫喜欢纸箱。", "因为它安全又保暖。"],
                 }
             },
         }

@@ -109,10 +109,10 @@ def test_text_and_image_routes_translate_content_input_to_runtime_text():
     topic_image_kwargs = service._build_pipeline_kwargs(
         GenerationRequest(
             pipeline_id="topic_to_image_post",
-            input={"topic": "猫为什么喜欢纸箱"},
-            metadata={
-                "confirmed_script": "完整图文文案",
-                "confirmed_scenes": ["第一页", "第二页"],
+            input={
+                "topic": "猫为什么喜欢纸箱",
+                "script": "完整图文文案",
+                "pages": ["第一页", "第二页"],
             },
         )
     )
@@ -143,11 +143,13 @@ async def test_generation_service_runs_pipeline_and_returns_structured_result():
     task = service.submit(
         GenerationRequest(
             pipeline_id="topic_to_video",
-            input={"topic": "How to keep cats hydrated"},
+            input={
+                "topic": "How to keep cats hydrated",
+                "script": "Confirmed hydration script.",
+            },
             params={"frame_template": "1080x1920/image_default.html"},
             metadata={
                 "experiment_id": "exp-1",
-                "confirmed_script": "Confirmed hydration script.",
                 "language": "English",
             },
         )
@@ -195,8 +197,10 @@ async def test_generation_result_exposes_persisted_storyboard_path(tmp_path):
     task = service.submit(
         GenerationRequest(
             pipeline_id="topic_to_video",
-            input={"topic": "storyboard contract"},
-            metadata={"confirmed_script": "Confirmed storyboard script."},
+            input={
+                "topic": "storyboard contract",
+                "script": "Confirmed storyboard script.",
+            },
         )
     )
     completed = await service.wait_for_task(task.task_id)

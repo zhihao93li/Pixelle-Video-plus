@@ -237,9 +237,9 @@ class StandardPipeline(LinearVideoPipeline):
         final_tts_workflow = tts_workflow
 
         if final_tts_mode == "local":
-            final_voice_id = tts_voice or "zh-CN-YunjianNeural"
+            final_voice_id = tts_voice
             final_tts_workflow = None
-            logger.debug(f"TTS Mode: local (voice={final_voice_id})")
+            logger.debug(f"TTS Mode: local (voice={final_voice_id or 'default'})")
         elif final_tts_mode == "fish":
             final_voice_id = tts_voice
             final_tts_workflow = None

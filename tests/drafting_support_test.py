@@ -162,8 +162,14 @@ def test_render_language_script_prompt_wraps_templates_without_language_variable
     assert "Write a short script for Money patterns." in prompt
 
 
-def test_llm_service_defaults_to_aihubmix_relay_base_url():
-    client = LLMService()._create_client(api_key="test-key")
+def test_llm_service_defaults_to_aihubmix_relay_base_url(monkeypatch):
+    service = LLMService()
+
+    def no_configured_provider(_provider_id):
+        raise ValueError("no configured provider")
+
+    monkeypatch.setattr(service, "_resolve_provider", no_configured_provider)
+    client = service._create_client(api_key="test-key")
 
     assert str(client.base_url).rstrip("/") == AIHUBMIX_BASE_URL
 

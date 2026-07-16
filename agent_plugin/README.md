@@ -37,8 +37,11 @@ pending version and received an explicit approval from the user.
   ledger `content_item_id` and stable `production_task_id`.
 - `add_topics`, `draft_items`, and `produce_item` are not production-entry
   tools. Start a complete route once with `start_production`.
-- `confirm_pending_item` requires the exact pending item's `updated_at` as
-  `content_version` and an explicit user decision. Stale versions are rejected.
+- Read `get_pending_review` before editing or confirming. It returns the one
+  current `review_id`, its exact `version`, and the authoritative payload.
+- `confirm_pending_item` requires that exact `review_id` and `version` as
+  `content_version`, plus an explicit user decision. Stale or wrong review
+  objects are rejected.
 - `edit_pending_review` saves direct user edits; `regenerate_pending_review`
   rewrites a script, selected scenes/pages, or the complete plan. Both keep the
   same stable production task and invalidate any older pending version.

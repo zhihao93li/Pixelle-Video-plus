@@ -12,7 +12,7 @@ export const PART_EDIT_OPTIONS: Record<
     { value: "runninghub", label: "RunningHub 云端" },
   ],
   tts_inference_mode: [
-    { value: "local", label: "本机 TTS" },
+    { value: "local", label: "Microsoft Edge 在线语音" },
     { value: "fish", label: "Fish Audio" },
     { value: "comfyui", label: "ComfyUI TTS" },
   ],
@@ -41,8 +41,8 @@ export const PART_KEY_LABELS: Record<string, string> = {
   split_mode: "内容拆分方式",
   frame_template: "画面模板",
   template_params: "模板排版参数",
-  media_workflow: "每镜画面 workflow",
-  image_provider: "图片 Provider",
+  media_workflow: "图片 Workflow",
+  image_provider: "图片生成方式",
   image_model: "图片模型",
   media_width: "画面宽度",
   media_height: "画面高度",
@@ -69,15 +69,16 @@ export const PART_KEY_LABELS: Record<string, string> = {
 
 /** 就地编辑：零件填写提示（不同引擎/格式的填法说明）。 */
 export const PART_EDIT_HINTS: Record<string, string> = {
-  script_template_name: "提示词决定 AI 如何把主题写成完整文案，可选择已有版本或当场编辑。",
-  script_model: "留空使用系统默认模型。",
+  script_template_name:
+    "提示词决定 AI 如何把主题写成完整文案，可选择已有版本或当场编辑。",
   language_script_models: "按语言分别选择真实的 LLM 服务和模型。",
-  split_template_name: "提示词决定分镜 LLM 如何判断内容转折、画面变化和节奏，可选择已有版本或当场编辑。",
-  split_model: "留空使用系统默认模型；分镜数量不需要手动填写。",
+  split_template_name:
+    "提示词决定分镜 LLM 如何判断内容转折、画面变化和节奏，可选择已有版本或当场编辑。",
+  split_model: "分镜数量由模型根据内容转折、画面变化和节奏决定。",
   tts_voice:
-    "本机 TTS 填系统音色名（如 zh-CN-YunjianNeural）；Fish Audio 填你的 reference_id。",
-  media_workflow: "填 workflow 文件相对路径；runninghub/ 开头表示走云端。",
-  image_provider: "选择 RunningHub / ComfyUI、阿里百炼或火山方舟。",
+    "Microsoft Edge 在线语音填写音色名（如 zh-CN-YunjianNeural）；Fish Audio 填写 reference_id；留空跟随所选服务的默认音色。",
+  media_workflow: "选择用于生成每个分镜图片的 Workflow。",
+  image_provider: "选择 Workflow 生成、阿里百炼或火山方舟。",
   image_model: "由所选图片 Provider 提供的模型标识。",
   workflow_key: "填 workflows/ 目录下的相对路径；填错会提示可用文件列表。",
   compose_runtime:

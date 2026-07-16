@@ -144,6 +144,19 @@ def test_skeletons_fixed_params_have_no_brand_words():
         assert template.channel is None
 
 
+def test_builtin_video_templates_inherit_the_system_tts_service():
+    registry = build_default_production_template_registry()
+    for template_id in (
+        TOPIC_SKELETON,
+        STANDARD_SKELETON,
+        ASSET_SKELETON,
+        "pixelle_digital_human_basic_v1",
+    ):
+        params = registry.get(template_id).fixed_params
+        assert "tts_inference_mode" not in params
+        assert "tts_voice" not in params
+
+
 def test_asset_skeleton_compiles_to_asset_based_request():
     registry = build_default_production_template_registry()
 

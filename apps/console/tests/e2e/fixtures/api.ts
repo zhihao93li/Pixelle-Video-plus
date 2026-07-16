@@ -29,6 +29,9 @@ export type ApiFixtureOptions = {
   contentState?: "ready" | "loading" | "empty" | "error" | "stale"
   contentDetailState?: "ready" | "loading" | "error" | "stale"
   contentItemStatus?: string
+  productionReviewKind?: "script" | "scenes" | "pages"
+  transitionScriptToScenes?: boolean
+  linkContentToProductionTask?: boolean
   taskState?: "ready" | "loading" | "empty" | "error" | "stale"
   historyState?: "ready" | "loading" | "empty" | "error" | "stale"
   historyPages?: number
@@ -424,7 +427,6 @@ const contentItem = {
       status: "confirmed",
       title: "猫咪为什么喜欢猫薄荷",
       script: "猫薄荷会通过嗅觉让一部分猫咪短暂兴奋。",
-      narrations: ["猫薄荷会让一部分猫咪短暂兴奋。"],
     },
   },
   asset_paths: [],
@@ -502,11 +504,12 @@ function workbenchCard(
 }
 
 function productionTaskFixture(
-  state: "needs_user" | "in_progress" | "failed" | "produced",
+  state: "needs_user" | "in_progress" | "failed" | "produced" | "cancelled",
   taskId = `production-${state}`,
   generationTaskIds: string[] = []
 ) {
-  const card = workbenchCard(state)
+  const baseState = state === "cancelled" ? "in_progress" : state
+  const card = workbenchCard(baseState)
   return {
     production_task_id: taskId,
     content_item_id: card.content_item_id,
@@ -522,12 +525,15 @@ function productionTaskFixture(
     agent_session_id: null,
     batch_id: null,
     state,
-    stage_id: card.stage.id,
-    stage_label: card.stage.label,
+    stage_id: state === "cancelled" ? "cancelled" : card.stage.id,
+    stage_label: state === "cancelled" ? "已取消" : card.stage.label,
     next_actor: card.next_actor,
-    progress_current: card.progress?.current ?? null,
-    progress_total: card.progress?.total ?? null,
-    progress_percentage: card.progress?.percentage ?? null,
+    progress_current:
+      state === "cancelled" ? null : (card.progress?.current ?? null),
+    progress_total:
+      state === "cancelled" ? null : (card.progress?.total ?? null),
+    progress_percentage:
+      state === "cancelled" ? null : (card.progress?.percentage ?? null),
     action_type: card.action?.type ?? null,
     action_label: card.action?.label ?? null,
     input_snapshot: { script: "猫薄荷会让一部分猫咪短暂兴奋。" },
@@ -554,9 +560,150 @@ function productionTaskFixture(
     waiting_since: card.waiting_since,
     failed_at: card.failed_at,
     produced_at: card.produced_at,
-    cancelled_at: null,
+    cancelled_at: state === "cancelled" ? "2026-07-10T08:06:00Z" : null,
     cancellation_request_id: null,
   }
+}
+
+function submittedProductionTaskFixture(
+  options: ApiFixtureOptions,
+  requestCounts: Map<string, number>
+) {
+  const taskId = "production-submitted-1"
+  const generationTaskIds = [SUBMITTED_TASK_ID]
+  if ((requestCounts.get(`DELETE /production-tasks/${taskId}`) ?? 0) > 0) {
+    return productionTaskFixture("cancelled", taskId, generationTaskIds)
+  }
+  if (
+    options.submissionState === "completed" ||
+    options.submissionState === "result-error"
+  ) {
+    return productionTaskFixture("produced", taskId, generationTaskIds)
+  }
+  if (options.submissionState === "failed") {
+    return productionTaskFixture("failed", taskId, generationTaskIds)
+  }
+  const task = productionTaskFixture("in_progress", taskId, generationTaskIds)
+  if (
+    options.submissionState === "running" ||
+    options.submissionState === "unknown"
+  ) {
+    return {
+      ...task,
+      stage_id: "plan_scenes",
+      stage_label: "正在规划分镜",
+      progress_current: null,
+      progress_total: null,
+      progress_percentage: null,
+    }
+  }
+  return task
+}
+
+function productionTimelineFixture(
+  taskId: string,
+  options: ApiFixtureOptions,
+  requestCounts: Map<string, number>
+) {
+  const task =
+    taskId === "production-submitted-1"
+      ? submittedProductionTaskFixture(options, requestCounts)
+      : productionTaskFixture("needs_user", taskId)
+  const entries: Array<Record<string, unknown>> = []
+  if (task.state === "needs_user") {
+    const context = reviewContextForOptions(options, requestCounts)
+    if (context.review) {
+      const kind = context.review.payload.kind
+      entries.push({
+        event_id: `revision:${context.review.review_id}`,
+        event_type:
+          kind === "script"
+            ? "script_generated"
+            : kind === "image_pages"
+              ? "pages_generated"
+              : "scenes_generated",
+        category: "output",
+        title:
+          kind === "script"
+            ? "文案已生成"
+            : kind === "image_pages"
+              ? "分页已生成"
+              : "分镜已生成",
+        occurred_at: "2026-07-10T08:05:00Z",
+        actor: "system",
+        stage: kind === "scenes" ? "scene_plan" : kind,
+        revision_id: context.review.review_id,
+        generation_task_id: null,
+        detail: { payload: context.review.payload },
+      })
+    }
+  } else if (task.state === "produced") {
+    entries.push({
+      event_id: `artifact-produced:${SUBMITTED_TASK_ID}`,
+      event_type: "artifact_produced",
+      category: "output",
+      title: "产物已生成",
+      occurred_at: "2026-07-10T08:07:00Z",
+      actor: "system",
+      stage: "compose_video",
+      revision_id: null,
+      generation_task_id: SUBMITTED_TASK_ID,
+      detail: { artifact_ids: ["artifact-submitted"] },
+    })
+  } else if (task.state === "failed") {
+    entries.push({
+      event_id: `attempt-failed:${SUBMITTED_TASK_ID}`,
+      event_type: "production_failed",
+      category: "activity",
+      title: "生产失败",
+      occurred_at: "2026-07-10T08:07:00Z",
+      actor: "system",
+      stage: "compose_video",
+      revision_id: null,
+      generation_task_id: SUBMITTED_TASK_ID,
+      detail: { message: "渲染节点暂时不可用。", layer: "runtime" },
+    })
+  } else if (task.state === "cancelled") {
+    entries.push({
+      event_id: `task-cancelled:${taskId}`,
+      event_type: "task_cancelled",
+      category: "activity",
+      title: "任务已取消",
+      occurred_at: "2026-07-10T08:06:00Z",
+      actor: "user",
+      stage: "cancelled",
+      revision_id: null,
+      generation_task_id: null,
+      detail: {},
+    })
+  }
+  if (task.generation_task_ids.length > 0 && task.state !== "cancelled") {
+    entries.push({
+      event_id: "run-started:run-1",
+      event_type: "production_started",
+      category: "activity",
+      title: "开始生产",
+      occurred_at: "2026-07-10T08:06:00Z",
+      actor: "system",
+      stage: "compose_video",
+      revision_id: null,
+      generation_task_id: null,
+      detail: { run_id: "run-1" },
+    })
+  }
+  entries.push({
+    event_id: `task-created:${taskId}`,
+    event_type: "task_created",
+    category: "activity",
+    title: "任务已创建",
+    occurred_at: "2026-07-10T08:00:00Z",
+    actor: "user",
+    stage: "created",
+    revision_id: null,
+    generation_task_id: null,
+    detail: { title: task.title, input: task.input_snapshot },
+  })
+  return { items: entries, next_cursor: null }
 }
 
 const settings = {
@@ -904,18 +1051,115 @@ const historyDetails: Record<string, Record<string, unknown>> = {
   },
 }
 
-function contentItemForOptions(options: ApiFixtureOptions) {
-  if (!options.contentScript && !options.contentItemStatus) return contentItem
+function contentItemForOptions(
+  options: ApiFixtureOptions,
+  reviewKindOverride?: ApiFixtureOptions["productionReviewKind"]
+) {
+  const reviewKind = reviewKindOverride ?? options.productionReviewKind
+  if (
+    !options.contentScript &&
+    !options.contentItemStatus &&
+    !reviewKind &&
+    !options.linkContentToProductionTask
+  )
+    return contentItem
+  const isScriptReview = reviewKind === "script"
+  const isSceneReview = reviewKind === "scenes" || reviewKind === "pages"
   return {
     ...contentItem,
-    status: options.contentItemStatus ?? contentItem.status,
+    status:
+      options.contentItemStatus ??
+      (reviewKind ? "pending_review" : contentItem.status),
+    links: options.linkContentToProductionTask
+      ? {
+          ...contentItem.links,
+          production_task_ids: ["production-needs_user"],
+        }
+      : contentItem.links,
     variants: {
       ...contentItem.variants,
       Chinese: {
         ...contentItem.variants.Chinese,
-        script: options.contentScript,
-        narrations: [options.contentScript],
+        status:
+          options.contentItemStatus === "pending_review" || isScriptReview
+            ? "pending"
+            : contentItem.variants.Chinese.status,
+        script: options.contentScript ?? contentItem.variants.Chinese.script,
       },
+    },
+    scene_manifest: isSceneReview
+      ? {
+          review_kind: reviewKind === "pages" ? "image_pages" : "video_scenes",
+          confirmed: false,
+          updated_at: "2026-07-10T08:05:00Z",
+          scenes: [
+            {
+              scene_id: "scene-1",
+              order: 1,
+              narration: "猫咪先闻到猫薄荷。",
+              image_prompt: "猫咪靠近猫薄荷",
+            },
+            {
+              scene_id: "scene-2",
+              order: 2,
+              narration: "随后短暂兴奋起来。",
+              image_prompt: "猫咪开心翻滚",
+            },
+          ],
+        }
+      : null,
+  }
+}
+
+function reviewContextForOptions(
+  options: ApiFixtureOptions,
+  requestCounts: Map<string, number>
+) {
+  const revisionSequence =
+    (requestCounts.get(
+      `POST /content-items/${CONTENT_ITEM_ID}/revise-review`
+    ) ?? 0) > 0
+      ? 2
+      : 1
+  const transitionedToScenes =
+    options.transitionScriptToScenes &&
+    (requestCounts.get(`POST /content-items/${CONTENT_ITEM_ID}/confirm`) ?? 0) >
+      0
+  const item = contentItemForOptions(
+    options,
+    transitionedToScenes ? "scenes" : undefined
+  )
+  if (item.status !== "pending_review" && item.status !== "draft_ready") {
+    return { item, review: null }
+  }
+  if (item.scene_manifest) {
+    const kind = item.scene_manifest.review_kind
+    return {
+      item,
+      review: {
+        review_id: `revision-${kind}-${revisionSequence}`,
+        item_id: item.item_id,
+        version: `v${revisionSequence}`,
+        payload: { kind, scene_manifest: item.scene_manifest },
+        reference: { title: item.title, variants: item.variants },
+        allowed_actions: [
+          "direct_edit",
+          "regenerate_selected",
+          "regenerate_all",
+          "confirm",
+        ],
+      },
+    }
+  }
+  return {
+    item,
+    review: {
+      review_id: `revision-script-${revisionSequence}`,
+      item_id: item.item_id,
+      version: `v${revisionSequence}`,
+      payload: { kind: "script", variants: item.variants },
+      reference: null,
+      allowed_actions: ["direct_edit", "rewrite_script", "confirm"],
     },
   }
 }
@@ -1115,8 +1359,31 @@ function responseFor(
       body:
         options.contentState === "empty"
           ? []
-          : [contentItemForOptions(options)],
+          : [
+              contentItemForOptions(
+                options,
+                options.transitionScriptToScenes &&
+                  (requestCounts.get(
+                    `POST /content-items/${CONTENT_ITEM_ID}/confirm`
+                  ) ?? 0) > 0
+                  ? "scenes"
+                  : undefined
+              ),
+            ],
     }
+  }
+  if (
+    method === "GET" &&
+    path === `/content-items/${CONTENT_ITEM_ID}/pending-review`
+  ) {
+    const count = requestCounts.get(`${method} ${path}`) ?? 1
+    if (
+      options.contentDetailState === "error" ||
+      (options.contentDetailState === "stale" && count > 2)
+    ) {
+      return { status: 503, body: { detail: "内容详情暂时不可用。" } }
+    }
+    return { body: reviewContextForOptions(options, requestCounts) }
   }
   if (method === "GET" && path === `/content-items/${CONTENT_ITEM_ID}`) {
     const count = requestCounts.get(`${method} ${path}`) ?? 1
@@ -1126,7 +1393,67 @@ function responseFor(
     ) {
       return { status: 503, body: { detail: "内容详情暂时不可用。" } }
     }
-    return { body: contentItemForOptions(options) }
+    return {
+      body: contentItemForOptions(
+        options,
+        options.transitionScriptToScenes &&
+          (requestCounts.get(
+            `POST /content-items/${CONTENT_ITEM_ID}/confirm`
+          ) ?? 0) > 0
+          ? "scenes"
+          : undefined
+      ),
+    }
+  }
+  if (
+    method === "POST" &&
+    path === `/content-items/${CONTENT_ITEM_ID}/revise-review`
+  ) {
+    return {
+      body: {
+        ...reviewContextForOptions(options, requestCounts).item,
+        updated_at: "2026-07-10T08:10:00Z",
+      },
+    }
+  }
+  if (
+    method === "POST" &&
+    path === `/content-items/${CONTENT_ITEM_ID}/confirm`
+  ) {
+    const confirmationCount = requestCounts.get(`${method} ${path}`) ?? 1
+    if (options.transitionScriptToScenes && confirmationCount === 1) {
+      const nextReview = contentItemForOptions(options, "scenes")
+      return {
+        body: {
+          ...nextReview,
+          variants: Object.fromEntries(
+            Object.entries(nextReview.variants).map(([language, variant]) => [
+              language,
+              { ...variant, status: "confirmed" },
+            ])
+          ),
+        },
+      }
+    }
+    const current = contentItemForOptions(
+      options,
+      options.transitionScriptToScenes ? "scenes" : undefined
+    )
+    return {
+      body: {
+        ...current,
+        status: "confirmed",
+        variants: Object.fromEntries(
+          Object.entries(current.variants).map(([language, variant]) => [
+            language,
+            { ...variant, status: "confirmed" },
+          ])
+        ),
+        scene_manifest: current.scene_manifest
+          ? { ...current.scene_manifest, confirmed: true }
+          : null,
+      },
+    }
   }
   if (method === "GET" && path === "/production-tasks") {
     const count = requestCounts.get(`${method} ${path}`) ?? 1
@@ -1157,6 +1484,21 @@ function responseFor(
   if (method === "GET" && path === "/production-tasks/production-needs_user") {
     return { body: productionTaskFixture("needs_user") }
   }
+  if (method === "GET" && path === "/production-tasks/production-submitted-1") {
+    return { body: submittedProductionTaskFixture(options, requestCounts) }
+  }
+  const productionTimelineMatch = path.match(
+    /^\/production-tasks\/([^/]+)\/timeline$/
+  )
+  if (method === "GET" && productionTimelineMatch) {
+    return {
+      body: productionTimelineFixture(
+        decodeURIComponent(productionTimelineMatch[1]),
+        options,
+        requestCounts
+      ),
+    }
+  }
   if (method === "POST" && path === "/production-tasks") {
     if (options.submissionState === "submit-error") {
       return { status: 503, body: { detail: "生成服务暂时不可用。" } }
@@ -1177,7 +1519,11 @@ function responseFor(
     method === "DELETE" &&
     path === "/production-tasks/production-submitted-1"
   ) {
-    return { body: { state: "cancelled" } }
+    return {
+      body: productionTaskFixture("cancelled", "production-submitted-1", [
+        SUBMITTED_TASK_ID,
+      ]),
+    }
   }
   if (method === "GET" && path === "/generation/pipelines") {
     return {
@@ -1428,12 +1774,14 @@ function responseFor(
     return {
       body: {
         configured: true,
+        default_provider_id: "aihubmix",
         providers: [
           {
             id: "openai",
             label: "OpenAI 直连",
             provider_type: "openai",
             configured: true,
+            default_model: "gpt-4.1",
             models: [
               { id: "gpt-4.1", label: "gpt-4.1" },
               { id: "gpt-4.1-mini", label: "gpt-4.1-mini" },
@@ -1444,7 +1792,56 @@ function responseFor(
             label: "AiHubMix 主账号",
             provider_type: "aihubmix",
             configured: true,
+            default_model: "deepseek-v4",
             models: [{ id: "deepseek-v4", label: "deepseek-v4" }],
+          },
+        ],
+      },
+    }
+  }
+  if (method === "GET" && path === "/settings/llm/provider-presets") {
+    return {
+      body: {
+        providers: [
+          {
+            id: "aihubmix",
+            label: "AiHubMix",
+            base_url: "https://aihubmix.com/v1",
+          },
+          {
+            id: "openai",
+            label: "OpenAI",
+            base_url: "https://api.openai.com/v1",
+          },
+          {
+            id: "deepseek",
+            label: "DeepSeek",
+            base_url: "https://api.deepseek.com",
+          },
+          {
+            id: "minimax",
+            label: "MiniMax",
+            base_url: "https://api.minimaxi.com/v1",
+          },
+          {
+            id: "kimi",
+            label: "Kimi / Moonshot AI",
+            base_url: "https://api.moonshot.cn/v1",
+          },
+          {
+            id: "anthropic",
+            label: "Anthropic / Claude",
+            base_url: "https://api.anthropic.com/v1/",
+          },
+          {
+            id: "xai",
+            label: "xAI / Grok",
+            base_url: "https://api.x.ai/v1",
+          },
+          {
+            id: "custom_openai",
+            label: "自定义 OpenAI 兼容服务",
+            base_url: "",
           },
         ],
       },
@@ -1659,6 +2056,14 @@ function responseFor(
                   key: "selfhost/image_local.json",
                   workflow_id: null,
                 },
+                {
+                  name: "video_wan.json",
+                  display_name: "Wan 视频 · RunningHub",
+                  source: "runninghub",
+                  path: "workflows/runninghub/video_wan.json",
+                  key: "runninghub/video_wan.json",
+                  workflow_id: "workflow-video",
+                },
               ]
             : [
                 {
@@ -1794,7 +2199,11 @@ export async function installApiFixtures(
       options.captureJsonRequests &&
       ((method === "POST" &&
         (apiPath === "/production-tasks" ||
-          apiPath === "/generation/batches")) ||
+          apiPath === "/generation/batches" ||
+          /^\/content-items\/[^/]+\/(?:confirm|revise-review)$/.test(
+            apiPath
+          ))) ||
+        (method === "PATCH" && /^\/content-items\/[^/]+$/.test(apiPath)) ||
         (method === "PUT" &&
           /^\/generation\/templates\/[^/]+\/generation-config$/.test(apiPath)))
     ) {
@@ -1871,7 +2280,8 @@ function shouldDelayFixture(
   }
   if (
     options.contentDetailState === "loading" &&
-    /^\/content-items\/[^/]+$/.test(path)
+    (/^\/content-items\/[^/]+$/.test(path) ||
+      /^\/content-items\/[^/]+\/pending-review$/.test(path))
   ) {
     return true
   }

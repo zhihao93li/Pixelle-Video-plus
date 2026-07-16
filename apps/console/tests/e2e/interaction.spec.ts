@@ -204,7 +204,9 @@ test.describe("键盘与浏览器历史", () => {
   })
 })
 
-test("模板设置直接编辑，并按 Provider 条件展示 Workflow", async ({ page }) => {
+test("模板设置直接编辑，并按图片生成方式切换 Workflow 或模型", async ({
+  page,
+}) => {
   const requests: ApiFixtureRequest[] = []
   const unhandledApi = await installApiFixtures(page, {
     captureJsonRequests: requests,
@@ -229,13 +231,23 @@ test("模板设置直接编辑，并按 Provider 条件展示 Workflow", async (
     page.getByRole("button", { name: "调整", exact: true })
   ).toHaveCount(0)
 
+  await page.getByRole("button", { name: /^2\. 每镜画面/ }).click()
   await expect(
-    page.getByRole("combobox", { name: "每镜画面 workflow" })
+    page.getByRole("combobox", { name: "图片 Workflow" })
   ).toBeVisible()
-  await page.getByRole("combobox", { name: "图片 Provider" }).click()
+  await expect(page.getByRole("combobox", { name: "图片模型" })).toHaveCount(0)
+  await page.getByRole("combobox", { name: "图片 Workflow" }).click()
+  await expect(
+    page.getByRole("option", { name: "Flux · RunningHub" })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("option", { name: "Wan 视频 · RunningHub" })
+  ).toHaveCount(0)
+  await page.getByRole("option", { name: "Flux · RunningHub" }).click()
+  await page.getByRole("combobox", { name: "图片生成方式" }).click()
   await page.getByRole("option", { name: "阿里云百炼" }).click()
   await expect(
-    page.getByRole("combobox", { name: "每镜画面 workflow" })
+    page.getByRole("combobox", { name: "图片 Workflow" })
   ).toHaveCount(0)
   await page.getByRole("combobox", { name: "图片模型" }).click()
   await page.getByRole("option", { name: "Qwen-Image 2.0 Pro" }).click()
@@ -252,6 +264,7 @@ test("模板设置直接编辑，并按 Provider 条件展示 Workflow", async (
     overrides: {
       image_provider: "aliyun_bailian",
       image_model: "qwen-image-2.0-pro",
+      media_workflow: "",
     },
   })
   expect(unhandledApi).toEqual([])

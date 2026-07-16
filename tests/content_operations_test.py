@@ -28,7 +28,6 @@ def test_recovery_completes_persisted_draft_and_rolls_back_empty_draft():
         status="pending",
         title="有结果",
         script="已生成草稿",
-        narrations=["已生成草稿"],
     )
     content_store.save_item(recovered_item)
     recovered, _ = operations.begin_operation(

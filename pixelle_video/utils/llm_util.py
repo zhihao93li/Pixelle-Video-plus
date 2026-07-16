@@ -22,7 +22,12 @@ import httpx
 from loguru import logger
 
 
-def fetch_available_models(api_key: str, base_url: str, timeout: float = 10.0) -> List[str]:
+def fetch_available_models(
+    api_key: str,
+    base_url: str,
+    timeout: float = 10.0,
+    provider_type: str = "",
+) -> List[str]:
     """
     Fetch available models from an OpenAI-compatible API endpoint.
     
@@ -43,17 +48,26 @@ def fetch_available_models(api_key: str, base_url: str, timeout: float = 10.0) -
     # Normalize base_url - ensure it ends with /v1 or similar
     base_url = base_url.rstrip("/")
     
-    # Build the models endpoint URL
-    # Handle cases where base_url might or might not include /v1
-    if base_url.endswith("/v1"):
+    # DeepSeek's official OpenAI-compatible base URL is unversioned and its
+    # models endpoint is /models. Other presets use the conventional /v1 path.
+    if provider_type == "deepseek":
+        models_url = f"{base_url}/models"
+    elif base_url.endswith("/v1"):
         models_url = f"{base_url}/models"
     else:
         models_url = f"{base_url}/v1/models"
-    
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+
+    if provider_type == "anthropic":
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+    else:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
     
     logger.debug(f"Fetching models from: {models_url}")
     

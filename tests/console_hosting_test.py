@@ -29,6 +29,7 @@ def test_console_root_matches_the_available_build_and_api_info_stays_available()
     else:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/html")
+        assert response.headers["cache-control"] == "no-cache, no-store, must-revalidate"
         assert '<div id="root"></div>' in response.text
 
         asset_path = re.search(r'src="(/assets/[^"]+\.js)"', response.text)

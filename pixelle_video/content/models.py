@@ -54,7 +54,6 @@ class ContentVariant(BaseModel):
     status: Literal["pending", "confirmed", "rejected"] = "pending"
     title: str = ""
     script: str = ""
-    narrations: list[str] = Field(default_factory=list)
 
 
 class ContentEvent(BaseModel):
@@ -86,10 +85,8 @@ class SceneDraft(BaseModel):
 class SceneManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    review_kind: Literal["video_scenes", "agent_image_scenes", "image_pages"] = (
-        "agent_image_scenes"
-    )
-    scenes: list[SceneDraft] = Field(min_length=1, max_length=20)
+    review_kind: Literal["video_scenes", "agent_image_scenes", "image_pages"] = "agent_image_scenes"
+    scenes: list[SceneDraft] = Field(min_length=1)
     confirmed: bool = False
     updated_at: str = Field(default_factory=now_iso)
 
@@ -107,6 +104,7 @@ class SceneManifest(BaseModel):
 
 class Publication(BaseModel):
     publication_id: str
+    production_task_id: str | None = None
     platform: str
     published_at: str
     evidence_type: Literal["url", "platform_post_id", "buffer_id", "manual"]

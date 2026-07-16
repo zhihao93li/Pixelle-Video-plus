@@ -4,7 +4,7 @@
 调用现有 API，再通过这些端点回写条目状态；后端不做事件驱动重构。
 """
 
-from typing import Any, Literal
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -19,6 +19,13 @@ from pixelle_video.content.models import (
     now_iso,
 )
 from pixelle_video.content.projects import ensure_default_project, get_default_project
+from pixelle_video.content.reviews import PendingReviewResponse, build_pending_review
+from pixelle_video.content.stage_revisions import (
+    StageConfirmation,
+    StageRevision,
+    list_confirmations,
+    list_revisions,
+)
 from pixelle_video.content.store import (
     delete_item,
     list_items,
@@ -70,6 +77,11 @@ class ContentItemTransitionRequest(BaseModel):
     to: str
     actor: str = "user"
     detail: dict = Field(default_factory=dict)
+
+
+class ContentRevisionHistoryResponse(BaseModel):
+    revisions: list[StageRevision]
+    confirmations: list[StageConfirmation]
 
 
 # ---------------------------------------------------------------------------
@@ -138,11 +150,46 @@ async def get_content_item(item_id: str):
     return _reconcile_production_state(item)
 
 
+@router.get("/{item_id}/pending-review", response_model=PendingReviewResponse)
+async def get_pending_review(item_id: str):
+    """Return the one exact, versioned object currently waiting for approval."""
+
+    item = load_item(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"未找到内容条目：{item_id}")
+    item = _reconcile_production_state(item)
+    return PendingReviewResponse(item=item, review=build_pending_review(item))
+
+
+@router.get("/{item_id}/revisions", response_model=ContentRevisionHistoryResponse)
+async def get_content_revision_history(item_id: str):
+    """Return immutable stage versions and their independent approval evidence."""
+
+    if load_item(item_id) is None:
+        raise HTTPException(status_code=404, detail=f"未找到内容条目：{item_id}")
+    revisions = list_revisions(item_id=item_id)
+    revision_ids = {revision.revision_id for revision in revisions}
+    confirmations = [
+        confirmation
+        for confirmation in list_confirmations()
+        if confirmation.revision_id in revision_ids
+    ]
+    return ContentRevisionHistoryResponse(
+        revisions=revisions,
+        confirmations=confirmations,
+    )
+
+
 @router.patch("/{item_id}", response_model=ContentItem)
 async def patch_content_item(item_id: str, request: ContentItemPatchRequest):
     item = load_item(item_id)
     if item is None:
         raise HTTPException(status_code=404, detail=f"未找到内容条目：{item_id}")
+    if request.variants is not None or request.scene_manifest is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="文案和分镜必须通过当前确认站修改，以便生成新的可追溯版本。",
+        )
 
     changed: list[str] = []
     if request.title is not None:
@@ -154,54 +201,18 @@ async def patch_content_item(item_id: str, request: ContentItemPatchRequest):
     if request.asset_paths is not None:
         item.asset_paths = request.asset_paths
         changed.append("asset_paths")
-    if request.variants is not None:
-        for language, patch in request.variants.items():
-            existing = item.variants.get(language)
-            base: dict[str, Any] = existing.model_dump() if existing else {}
-            base.update(patch)
-            base["language"] = language
-            item.variants[language] = ContentVariant(**base)
-        changed.append("variants")
     if request.metrics is not None:
         item.metrics = {**item.metrics, **request.metrics}
         changed.append("metrics")
     if request.links is not None:
         item.links = {**item.links, **request.links}
         changed.append("links")
-    if request.scene_manifest is not None:
-        if item.status != "pending_review":
-            raise HTTPException(status_code=409, detail="只有待确认的分镜可以直接编辑。")
-        if request.content_version != item.updated_at:
-            raise HTTPException(status_code=409, detail="分镜已经更新，请刷新后再编辑。")
-        item.scene_manifest = request.scene_manifest.model_copy(
-            update={"confirmed": False, "updated_at": now_iso()}
-        )
-        changed.append("scene_manifest")
 
     if changed:
         event_type = "metrics_recorded" if changed == ["metrics"] else "note"
         item.add_event(event_type, "user", {"changed": changed})
         item.updated_at = now_iso()
         save_item(item)
-        if "scene_manifest" in changed:
-            from pixelle_video.content.production_tasks import (
-                latest_task_for_content,
-                set_task_state,
-            )
-
-            task = latest_task_for_content(
-                item.item_id, states={"needs_user", "in_progress"}
-            )
-            if task is not None:
-                set_task_state(
-                    task.production_task_id,
-                    state="needs_user",
-                    stage_id="review_scenes",
-                    stage_label="确认分镜",
-                    next_actor="user",
-                    action_type="confirm_scenes",
-                    action_label="确认分镜",
-                )
     return item
 
 

@@ -5,6 +5,7 @@ import pytest
 from pixelle_video.services.provider_execution import (
     execute_workflow_with_provider_progress,
 )
+from pixelle_video.config.schema import ComfyUIConfig
 
 
 class FakeRunningHubClient:
@@ -29,12 +30,16 @@ class FakeRunningHubExecutor:
         self.closed = True
 
 
+def test_runninghub_defaults_to_official_cn_api_endpoint():
+    assert ComfyUIConfig().runninghub_url == "https://www.runninghub.cn"
+
+
 @pytest.mark.asyncio
 async def test_runninghub_execution_reports_external_task_id_and_status():
     events = []
     executor = FakeRunningHubExecutor()
     kit = SimpleNamespace(
-        runninghub_url="https://www.runninghub.ai",
+        runninghub_url="https://www.runninghub.cn",
         runninghub_api_key="secret",
         runninghub_timeout=600,
         runninghub_retry_count=3,
