@@ -165,6 +165,7 @@ test.describe("生产模式与产物", () => {
         "split_template_name",
         "split_model",
         "frame_template",
+        "template_params",
         "image_provider",
         "media_workflow",
         "media_width",
@@ -179,7 +180,6 @@ test.describe("生产模式与产物", () => {
         "bgm_volume",
         "bgm_mode",
         "compose_runtime",
-        "template_params",
       ])
 
     await expect(

@@ -63,7 +63,7 @@ const FIELD_REGISTRY: Record<string, FieldSeed> = {
     scope: "both",
   },
   frame_template: { control: "frame_template", scope: "both" },
-  template_params: { control: "template_params", scope: "run" },
+  template_params: { control: "template_params", scope: "both" },
   image_provider: { control: "image_provider", scope: "both" },
   image_model: { control: "image_model", scope: "both" },
   media_workflow: {
@@ -88,7 +88,7 @@ const FIELD_REGISTRY: Record<string, FieldSeed> = {
   },
   tts_workflow: { control: "workflow", expert: true, scope: "both" },
   tts_voice: { control: "text", scope: "both" },
-  voice_id: { control: "text", scope: "run" },
+  voice_id: { control: "text", scope: "both" },
   tts_speed: { control: "slider", scope: "both" },
   ref_audio: { control: "audio", scope: "both" },
   bgm_path: { control: "bgm", scope: "both" },
@@ -106,6 +106,15 @@ const FIELD_REGISTRY: Record<string, FieldSeed> = {
   long_form_prompt: { control: "textarea", scope: "both" },
   word_count: { control: "number", scope: "both" },
   llm_model: { control: "text", scope: "both" },
+}
+
+// 这些键由另一个复合控件一并编辑，不应重复显示为独立参数。
+const COMPOSITE_SETTING_OWNER: Record<string, string> = {
+  script_prompt: "script_template_name",
+  script_provider_id: "script_model",
+  split_prompt: "split_template_name",
+  split_provider_id: "split_model",
+  llm_provider_id: "llm_model",
 }
 
 const SECTION_DESCRIPTIONS: Record<string, string> = {
@@ -177,11 +186,16 @@ export function productionSettingSections(
 
   stages.forEach((stage, index) => {
     const partKeys = stage.setting_keys.filter((key) => remaining.has(key))
-    for (const key of partKeys) remaining.delete(key)
     const fields = partKeys.flatMap((key) => {
       const field = fieldForKey(key, mode, expertMode)
+      if (field) remaining.delete(key)
       return field ? [field] : []
     })
+    const visibleFieldKeys = new Set(fields.map((field) => field.key))
+    for (const key of partKeys) {
+      const owner = COMPOSITE_SETTING_OWNER[key]
+      if (owner && visibleFieldKeys.has(owner)) remaining.delete(key)
+    }
     if (fields.length === 0) return
     visibleStep += 1
     sections.push({

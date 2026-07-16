@@ -296,6 +296,7 @@ const videoStages = [
     name: "每镜画面",
     setting_keys: [
       "frame_template",
+      "template_params",
       "image_provider",
       "image_model",
       "media_workflow",
@@ -346,6 +347,7 @@ const pipelineManifests = [
       name: "每页配图",
       setting_keys: [
         "frame_template",
+        "template_params",
         "image_provider",
         "image_model",
         "media_workflow",
@@ -1570,7 +1572,7 @@ function responseFor(
       body: {
         template_id: templateId,
         overridable_keys: (template?.allowed_user_params ?? []).filter(
-          (key) => !["title", "template_params", "voice_id"].includes(key)
+          (key) => key !== "title"
         ),
         overrides: {},
         base_params: template?.fixed_params ?? {},
@@ -1590,7 +1592,7 @@ function responseFor(
       body: {
         template_id: templateId,
         overridable_keys: (template?.allowed_user_params ?? []).filter(
-          (key) => !["title", "template_params", "voice_id"].includes(key)
+          (key) => key !== "title"
         ),
         overrides: { media_workflow: "runninghub/image_flux.json" },
         base_params: template?.fixed_params ?? {},

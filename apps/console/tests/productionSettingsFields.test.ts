@@ -35,7 +35,12 @@ function pipeline(id = "script_to_video"): PipelineManifest {
             id: "generate_media",
             name: "每镜画面",
             description: "",
-            setting_keys: ["image_provider", "image_model", "media_workflow"],
+            setting_keys: [
+              "image_provider",
+              "image_model",
+              "media_workflow",
+              "template_params",
+            ],
             actor: "system" as const,
           },
           {
@@ -142,19 +147,31 @@ test("image workflows stay available while expert-only workflows remain gated", 
 })
 
 test("asset production settings are projected through the same registry", () => {
-  const asset = fields(
-    "run",
-    ["voice_id", "tts_speed", "bgm_path", "bgm_volume", "bgm_mode"],
-    false,
-    "asset_based"
-  )
-  assert.deepEqual(asset.map((field) => field.key).sort(), [
-    "bgm_mode",
-    "bgm_path",
-    "bgm_volume",
-    "tts_speed",
-    "voice_id",
-  ])
+  for (const mode of ["recipe", "run"] as const) {
+    const asset = fields(
+      mode,
+      ["voice_id", "tts_speed", "bgm_path", "bgm_volume", "bgm_mode"],
+      false,
+      "asset_based"
+    )
+    assert.deepEqual(asset.map((field) => field.key).sort(), [
+      "bgm_mode",
+      "bgm_path",
+      "bgm_volume",
+      "tts_speed",
+      "voice_id",
+    ])
+  }
+})
+
+test("frame template parameters are editable as template defaults and run overrides", () => {
+  for (const mode of ["recipe", "run"] as const) {
+    const visible = fields(mode, ["template_params"])
+    assert.equal(
+      visible.find((field) => field.key === "template_params")?.control,
+      "template_params"
+    )
+  }
 })
 
 test("visible production sections are numbered without skipped drafting-only parts", () => {
@@ -185,6 +202,8 @@ test("topic writing and scene planning use the same controls in recipe and run m
       description: "",
       setting_keys: [
         "script_template_name",
+        "script_prompt",
+        "script_provider_id",
         "script_model",
         "language_script_models",
       ],
@@ -194,6 +213,8 @@ test("topic writing and scene planning use the same controls in recipe and run m
   ]
   const keys = [
     "script_template_name",
+    "script_prompt",
+    "script_provider_id",
     "script_model",
     "language_script_models",
     "split_template_name",
@@ -219,4 +240,21 @@ test("topic writing and scene planning use the same controls in recipe and run m
       false
     )
   }
+})
+
+test("a new stage setting cannot disappear when the frontend has no editor yet", () => {
+  const manifest = pipeline()
+  manifest.stages[0]?.setting_keys.push("future_stage_setting")
+
+  const visible = productionSettingSections(
+    manifest,
+    "run",
+    ["split_template_name", "future_stage_setting"],
+    false
+  ).flatMap((section) => section.fields)
+
+  assert.equal(
+    visible.find((field) => field.key === "future_stage_setting")?.readOnly,
+    true
+  )
 })

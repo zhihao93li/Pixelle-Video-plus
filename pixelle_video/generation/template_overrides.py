@@ -36,6 +36,7 @@ OVERRIDABLE_PARAMS: dict[str, type | tuple[type, ...]] = {
     "split_model": str,
     "split_mode": str,
     "frame_template": str,
+    "template_params": dict,
     "media_workflow": str,
     "image_provider": str,
     "image_model": str,
@@ -50,6 +51,7 @@ OVERRIDABLE_PARAMS: dict[str, type | tuple[type, ...]] = {
     "tts_inference_mode": str,
     "tts_workflow": str,
     "tts_voice": str,
+    "voice_id": str,
     "tts_speed": (int, float),
     "ref_audio": str,
     # 素材分析/媒体 workflow 的执行端（selfhost=本地 ComfyUI / runninghub=云端）

@@ -233,6 +233,9 @@ test("模板设置直接编辑，并按图片生成方式切换 Workflow 或模�
 
   await page.getByRole("button", { name: /^2\. 每镜画面/ }).click()
   await expect(
+    page.locator('[data-setting-key="template_params"]')
+  ).toBeVisible()
+  await expect(
     page.getByRole("combobox", { name: "图片 Workflow" })
   ).toBeVisible()
   await expect(page.getByRole("combobox", { name: "图片模型" })).toHaveCount(0)

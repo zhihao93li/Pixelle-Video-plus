@@ -551,6 +551,27 @@ def test_generation_config_exposes_base_values_before_overrides(tmp_path, monkey
     assert payload["overrides"]["tts_speed"] == 1.4
     assert payload["base_params"].get("tts_speed") != 1.4
     assert payload["effective_params"]["tts_speed"] == 1.4
+    assert "template_params" in payload["overridable_keys"]
+
+
+def test_all_template_stage_settings_have_a_template_override_contract():
+    """A setting shown for one run must not silently disappear from template defaults."""
+    from pixelle_video.generation.defaults import build_default_pipeline_registry
+    from pixelle_video.generation.template_overrides import OVERRIDABLE_PARAMS
+    from pixelle_video.generation.templates import build_default_production_template_registry
+
+    pipeline_registry = build_default_pipeline_registry()
+    missing: dict[str, list[str]] = {}
+    for template in build_default_production_template_registry().list():
+        manifest = pipeline_registry.get_manifest(template.pipeline_id)
+        stage_keys = {key for stage in manifest.stages for key in stage.setting_keys}
+        unsupported = sorted(
+            (set(template.allowed_user_params) & stage_keys) - set(OVERRIDABLE_PARAMS)
+        )
+        if unsupported:
+            missing[template.id] = unsupported
+
+    assert missing == {}
 
 
 def test_generation_task_status_and_result_endpoints_return_structured_task():

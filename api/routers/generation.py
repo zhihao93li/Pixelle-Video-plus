@@ -194,6 +194,25 @@ class TemplateGenerationConfigUpdateRequest(BaseModel):
     overrides: dict[str, Any]
 
 
+def _template_overridable_keys(template) -> list[str]:
+    """Resolve one template's setting contract without silently dropping drift."""
+    from pixelle_video.generation.template_overrides import OVERRIDABLE_PARAMS
+
+    manifest = build_default_pipeline_registry().get_manifest(template.pipeline_id)
+    pipeline_setting_keys = {key for stage in manifest.stages for key in stage.setting_keys}
+    template_setting_keys = set(template.allowed_user_params) & pipeline_setting_keys
+    missing_contract = sorted(template_setting_keys - set(OVERRIDABLE_PARAMS))
+    if missing_contract:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"模板 {template.id} 的生产设置合同不完整："
+                f"{', '.join(missing_contract)}"
+            ),
+        )
+    return [key for key in OVERRIDABLE_PARAMS if key in template_setting_keys]
+
+
 def _template_generation_config_response(
     template_id: str,
 ) -> TemplateGenerationConfigResponse:
@@ -209,10 +228,7 @@ def _template_generation_config_response(
     except ProductionTemplateError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
-    manifest = build_default_pipeline_registry().get_manifest(template.pipeline_id)
-    pipeline_setting_keys = {key for stage in manifest.stages for key in stage.setting_keys}
-    allowed = set(template.allowed_user_params) & pipeline_setting_keys
-    overridable = [key for key in OVERRIDABLE_PARAMS if key in allowed]
+    overridable = _template_overridable_keys(template)
     try:
         base_template = base_registry.get(template_id)
     except ProductionTemplateError as error:
@@ -264,18 +280,7 @@ async def update_template_generation_config(
     try:
         cleaned = validate_overrides(
             request.overrides,
-            allowed_user_params=[
-                key
-                for key in template.allowed_user_params
-                if key
-                in {
-                    setting_key
-                    for stage in build_default_pipeline_registry()
-                    .get_manifest(template.pipeline_id)
-                    .stages
-                    for setting_key in stage.setting_keys
-                }
-            ],
+            allowed_user_params=_template_overridable_keys(template),
         )
     except TemplateOverrideError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
