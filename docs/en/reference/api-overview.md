@@ -12,7 +12,7 @@ The routes below use the `/api` prefix. OpenAPI documentation is available at `/
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/projects` | Read projects and the default project |
+| `GET` | `/projects` | Read content spaces and the internal initial selection |
 | `GET` | `/generation/templates?project=<id>` | Read available and default templates for a project |
 | `GET` | `/generation/templates/{template_id}` | Read template details |
 

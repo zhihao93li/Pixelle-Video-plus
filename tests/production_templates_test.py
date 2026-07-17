@@ -119,9 +119,7 @@ def test_explicit_null_clears_an_inherited_per_run_setting():
 def test_registry_default_is_standard_skeleton():
     registry = build_default_production_template_registry()
 
-    assert (
-        registry.default_template_id(project="PetWoods", channel="xiaohongshu") == STANDARD_SKELETON
-    )
+    assert registry.initial_template_id() == STANDARD_SKELETON
     template = registry.get(STANDARD_SKELETON)
     assert template.pipeline_id == "script_to_video"
     assert template.enabled is True

@@ -103,7 +103,6 @@ async def get_agent_capabilities(
             "pending_review_actions": [
                 "direct_edit",
                 "rewrite_script",
-                "regenerate_selected",
                 "regenerate_all",
             ],
         },

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import {
+  CircleCheck,
   ArrowRight,
   Bot,
   Images,
@@ -7,6 +8,7 @@ import {
   Plus,
   Settings2,
   Sparkles,
+  TriangleAlert,
   UploadCloud,
   Video,
   type LucideIcon,
@@ -33,11 +35,14 @@ import { readableError } from "@/lib/format"
 import {
   cloneProductionTemplate,
   getTemplateGenerationConfig,
+  getSettingsDiagnostics,
   listPipelines,
   listTemplates,
   type PipelineManifest,
   type ProductionTemplate,
+  type SettingsDiagnosticCheck,
 } from "@/lib/generationApi"
+import { appSetupReadiness } from "@/lib/productionReadiness"
 import { PART_KEY_LABELS } from "@/lib/pipelineParts"
 import {
   productionArtifactSummary,
@@ -47,6 +52,7 @@ import {
   productionSubmissionSummary,
 } from "@/lib/productionSurface"
 import { navigate, routeHref } from "@/lib/router"
+import { settingsLink } from "@/lib/settingsLinks"
 import { cn } from "@/lib/utils"
 
 type LoadState = "loading" | "ready" | "error"
@@ -90,12 +96,10 @@ const FAMILY_PRESENTATION: Array<
 function RecipeCard({
   customizedSummary,
   defaultsState,
-  isProjectDefault,
   template,
 }: {
   customizedSummary: string | null
   defaultsState: RecipeDefaultsState
-  isProjectDefault: boolean
   template: ProductionTemplate
 }) {
   const defaultsSummary =
@@ -111,19 +115,14 @@ function RecipeCard({
 
   return (
     <article
-      className={cn(
-        "group flex min-h-64 flex-col rounded-lg border bg-card text-card-foreground transition-[border-color,box-shadow,transform] duration-[var(--motion-duration-fast)] ease-[var(--motion-easing-standard)] focus-within:border-primary/50 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-sm",
-        isProjectDefault && "border-primary/40 ring-1 ring-primary/20"
-      )}
+      className="group flex min-h-64 flex-col rounded-lg border bg-card text-card-foreground transition-[border-color,box-shadow,transform] duration-[var(--motion-duration-fast)] ease-[var(--motion-easing-standard)] focus-within:border-primary/50 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-sm"
     >
       <div className="flex flex-1 flex-col p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary">
             {productionArtifactSummary(template)}
           </Badge>
-          {isProjectDefault ? (
-            <Badge variant="success">项目默认</Badge>
-          ) : template.is_custom ? (
+          {template.is_custom ? (
             <Badge variant="outline">我的模板</Badge>
           ) : null}
         </div>
@@ -393,7 +392,7 @@ function NewRecipeForm({
 }
 
 export function CreateGallery() {
-  const { project, projectId } = useCurrentProject()
+  const { project } = useCurrentProject()
   const [loadState, setLoadState] = useState<LoadState>("loading")
   const [error, setError] = useState<string | null>(null)
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
@@ -409,6 +408,7 @@ export function CreateGallery() {
   const [configFailures, setConfigFailures] = useState<Record<string, string>>(
     {}
   )
+  const [diagnostics, setDiagnostics] = useState<SettingsDiagnosticCheck[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -419,7 +419,7 @@ export function CreateGallery() {
       setNewRecipeFamily(null)
       try {
         const [response, pipelineResponse] = await Promise.all([
-          listTemplates(projectId ?? undefined),
+          listTemplates(),
           listPipelines(),
         ])
         if (cancelled) {
@@ -444,7 +444,21 @@ export function CreateGallery() {
     return () => {
       cancelled = true
     }
-  }, [projectId, reloadToken])
+  }, [reloadToken])
+
+  useEffect(() => {
+    let cancelled = false
+    void getSettingsDiagnostics()
+      .then((response) => {
+        if (!cancelled) setDiagnostics(response.checks)
+      })
+      .catch(() => {
+        if (!cancelled) setDiagnostics([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [reloadToken])
 
   useEffect(() => {
     if (loadState !== "ready") {
@@ -545,17 +559,9 @@ export function CreateGallery() {
     [pipelines, productTemplates]
   )
   const visibleAgentTemplates = agentTemplates
-  const defaultTemplateId = project?.default_production_template_id || ""
-  const defaultTemplate = productTemplates.find(
-    (template) => template.id === defaultTemplateId
-  )
-  const defaultFamily = families.find((family) =>
-    family.pipelineIds.includes(defaultTemplate?.pipeline_id ?? "")
-  )
   const selectedFamily = families.find(
     (family) => family.id === selectedFamilyId
   ) ??
-    defaultFamily ??
     families[0] ?? {
       id: "unavailable",
       label: "生产方式",
@@ -584,6 +590,8 @@ export function CreateGallery() {
     )}${selectedConfigFailures.length > 2 ? "；还有其他模板未能读取" : ""}`
   const hasAnyProduction =
     families.length > 0 || visibleAgentTemplates.length > 0
+  const setupItems = appSetupReadiness(diagnostics, Boolean(project))
+  const missingSetupItems = setupItems.filter((item) => !item.ok)
 
   return (
     <PageFrame>
@@ -603,9 +611,55 @@ export function CreateGallery() {
         title="选择生产方式"
       />
 
+      {diagnostics.length > 0 && missingSetupItems.length > 0 ? (
+        <section className="rounded-lg border border-amber-300/70 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex min-w-0 gap-3">
+              <TriangleAlert className="mt-0.5 size-5 shrink-0 text-amber-700 dark:text-amber-400" />
+              <div>
+                <h2 className="text-sm font-medium">首次使用还需完成基础设置</h2>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  这些项目来自当前机器的真实检测；完成后提示会自动消失。
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={() =>
+                navigate(settingsLink({ kind: missingSetupItems[0].settingsKind }))
+              }
+              size="sm"
+              variant="outline"
+            >
+              去完成第一项
+              <ArrowRight data-icon="inline-end" />
+            </Button>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {setupItems.map((item) => (
+              <div
+                className="flex items-start gap-2 rounded-md border bg-background/80 px-3 py-2.5"
+                key={item.id}
+              >
+                {item.ok ? (
+                  <CircleCheck className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+                ) : (
+                  <span className="mt-1 size-2 shrink-0 rounded-full bg-amber-500" />
+                )}
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">{item.label}</div>
+                  <div className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                    {item.message}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {loadState === "loading" ? (
         <AsyncState
-          description="正在读取当前项目可用的模板。"
+          description="正在读取可用模板。"
           state="loading"
           title="正在读取模板"
         />
@@ -802,7 +856,6 @@ export function CreateGallery() {
                                 ? "error"
                                 : "ready"
                           }
-                          isProjectDefault={template.id === defaultTemplateId}
                           key={template.id}
                           template={template}
                         />

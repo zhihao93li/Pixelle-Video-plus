@@ -2,6 +2,7 @@ import { Copy, Download } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/toast"
+import { downloadFilename } from "@/lib/downloadFilename"
 
 /**
  * 长文（text 产物）展示：等宽纯文本滚动区 + 字数 +「复制全文」+「下载 .md」。
@@ -34,11 +35,8 @@ export function TextArticleView({
     const blob = new Blob([article], { type: "text/markdown;charset=utf-8" })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement("a")
-    const safeName =
-      (title || "long-form").replace(/[\\/:*?"<>|]/g, "_").slice(0, 60) ||
-      "long-form"
     anchor.href = url
-    anchor.download = `${safeName}.md`
+    anchor.download = downloadFilename(title, "md", "未命名长文")
     anchor.click()
     URL.revokeObjectURL(url)
   }

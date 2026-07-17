@@ -270,7 +270,7 @@ export function WorkbenchBoard() {
   )
 
   useEffect(() => {
-    void Promise.all([listPipelines(), listTemplates(projectId ?? undefined)])
+    void Promise.all([listPipelines(), listTemplates()])
       .then(([pipelineResponse, templateResponse]) => {
         setPipelines(pipelineResponse.pipelines)
         setRecipes(templatesForManagement(templateResponse))

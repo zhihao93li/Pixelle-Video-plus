@@ -7,29 +7,8 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
-  Star,
 } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
-import { Textarea } from "@/components/ui/textarea"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,76 +20,72 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/components/ui/toast"
-import { InlineError } from "@/components/shared/feedback"
 import { AsyncState } from "@/components/shared/AsyncState"
 import { EmptyState } from "@/components/shared/EmptyState"
+import { InlineError } from "@/components/shared/feedback"
 import { refreshProjects } from "@/lib/currentProject"
 import { readableError } from "@/lib/format"
-import { languageLabel } from "@/lib/languages"
 import { navigate } from "@/lib/router"
-import { cn } from "@/lib/utils"
 import {
   archiveProject,
   createProject,
   listProjects,
-  listTemplates,
   restoreProject,
-  setDefaultProject,
   type Project,
-  type ProductionTemplate,
 } from "@/lib/generationApi"
 
-const NONE = "__none__"
 type LoadState = "loading" | "ready" | "error" | "stale"
 
-/**
- * 项目卡片列表（设置页）：看概况、新建、设默认、归档/恢复。
- * 编辑进项目详情页 /settings/projects/:id（DESIGN.md §2.5：多分区编辑必须页面）。
- * 新建保持轻量 Sheet（3 个输入，合规），创建成功直接进详情页继续配置。
- */
+/** 内容空间只负责归属与筛选；生产默认统一由模板管理。 */
 export function ProjectsPanel() {
   const toast = useToast()
   const [projects, setProjects] = useState<Project[]>([])
-  const [defaultId, setDefaultId] = useState<string | null>(null)
-  const [templates, setTemplates] = useState<ProductionTemplate[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loadState, setLoadState] = useState<LoadState>("loading")
   const [isRefreshing, setIsRefreshing] = useState(true)
   const hasDataRef = useRef(false)
   const [busy, setBusy] = useState(false)
-
   const [createOpen, setCreateOpen] = useState(false)
   const [createName, setCreateName] = useState("")
   const [createDescription, setCreateDescription] = useState("")
-  const [copyFromId, setCopyFromId] = useState<string>(NONE)
   const [createError, setCreateError] = useState<string | null>(null)
 
-  const refresh = useCallback(
-    () =>
-      Promise.all([listProjects(), listTemplates()])
-        .then(([projectResponse, templateResponse]) => {
-          setProjects(projectResponse.projects)
-          setDefaultId(projectResponse.default_project_id)
-          setTemplates(templateResponse.templates)
-          setLoadError(null)
-          hasDataRef.current = true
-          setLoadState("ready")
-        })
-        .catch((error: unknown) => {
-          setLoadError(readableError(error))
-          setLoadState(hasDataRef.current ? "stale" : "error")
-        })
-        .finally(() => setIsRefreshing(false)),
-    []
-  )
+  const refresh = useCallback(async () => {
+    setIsRefreshing(true)
+    try {
+      const response = await listProjects()
+      setProjects(response.projects)
+      setLoadError(null)
+      hasDataRef.current = true
+      setLoadState("ready")
+    } catch (error) {
+      setLoadError(readableError(error))
+      setLoadState(hasDataRef.current ? "stale" : "error")
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [])
 
   useEffect(() => {
-    void refresh()
+    async function initialLoad() {
+      await refresh()
+    }
+    void initialLoad()
   }, [refresh])
 
-  const templateName = (id: string | null) =>
-    templates.find((template) => template.id === id)?.display_name ?? null
   async function refreshAll() {
     await refresh()
     await refreshProjects()
@@ -118,7 +93,7 @@ export function ProjectsPanel() {
 
   async function doCreate() {
     if (!createName.trim()) {
-      setCreateError("请先给项目起个名字。")
+      setCreateError("请先给内容空间起个名字。")
       return
     }
     setBusy(true)
@@ -127,17 +102,15 @@ export function ProjectsPanel() {
       const created = await createProject({
         name: createName.trim(),
         description: createDescription.trim(),
-        copyFromProjectId: copyFromId === NONE ? undefined : copyFromId,
       })
       toast({
-        title: "项目已创建",
-        description: "接下来在详情页补充品牌与生产默认。",
+        title: "内容空间已创建",
+        description: "之后的内容、任务和作品可以归入这个空间。",
         variant: "success",
       })
       setCreateOpen(false)
       setCreateName("")
       setCreateDescription("")
-      setCopyFromId(NONE)
       await refreshAll()
       navigate(`/settings/projects/${created.project_id}`)
     } catch (error) {
@@ -147,28 +120,11 @@ export function ProjectsPanel() {
     }
   }
 
-  async function makeDefault(projectId: string) {
-    setBusy(true)
-    try {
-      await setDefaultProject(projectId)
-      toast({ title: "已设为默认项目", variant: "success" })
-      await refreshAll()
-    } catch (error) {
-      toast({
-        title: "设置失败",
-        description: readableError(error),
-        variant: "error",
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
-
   async function doArchive(projectId: string) {
     setBusy(true)
     try {
       await archiveProject(projectId)
-      toast({ title: "项目已归档", variant: "success" })
+      toast({ title: "内容空间已归档", variant: "success" })
       await refreshAll()
     } catch (error) {
       toast({
@@ -185,7 +141,7 @@ export function ProjectsPanel() {
     setBusy(true)
     try {
       await restoreProject(projectId)
-      toast({ title: "项目已恢复", variant: "success" })
+      toast({ title: "内容空间已恢复", variant: "success" })
       await refreshAll()
     } catch (error) {
       toast({
@@ -198,71 +154,40 @@ export function ProjectsPanel() {
     }
   }
 
-  const activeProjects = projects.filter(
-    (project) => project.status === "active"
-  )
+  const activeProjects = projects.filter((item) => item.status === "active")
   const archivedProjects = projects.filter(
-    (project) => project.status === "archived"
+    (item) => item.status === "archived"
   )
 
   function renderCard(project: Project) {
-    const isDefault = project.project_id === defaultId
-    const isArchived = project.status === "archived"
+    const archived = project.status === "archived"
     return (
-      <div
-        className={cn(
-          "flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3",
-          isDefault && "border-primary/40 bg-primary/5"
-        )}
+      <article
+        className="flex flex-wrap items-center justify-between gap-4 rounded-lg border bg-card p-4"
         key={project.project_id}
       >
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">{project.name}</span>
-            {isDefault && (
-              <Badge variant="secondary">
-                <Star data-icon="inline-start" />
-                默认
-              </Badge>
-            )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-sm font-medium">{project.name}</h3>
+            {archived ? <Badge variant="outline">已归档</Badge> : null}
           </div>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            <Badge variant="outline">
-              模板：
-              {templateName(project.default_production_template_id) ??
-                "内置默认"}
-            </Badge>
-            <Badge variant="outline">
-              {project.languages.map(languageLabel).join(" / ") || "无语言"}
-            </Badge>
-            <Badge variant="outline">
-              发布平台 {project.publish_platforms.length}
-            </Badge>
-          </div>
+          <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
+            {project.description || "用于归集一组相关的内容、任务和作品。"}
+          </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {isArchived ? (
+        <div className="flex shrink-0 items-center gap-2">
+          {archived ? (
             <Button
               disabled={busy}
               onClick={() => void doRestore(project.project_id)}
               size="sm"
-              variant="ghost"
+              variant="outline"
             >
               <RotateCcw data-icon="inline-start" />
               恢复
             </Button>
           ) : (
             <>
-              {!isDefault && (
-                <Button
-                  disabled={busy}
-                  onClick={() => void makeDefault(project.project_id)}
-                  size="sm"
-                  variant="ghost"
-                >
-                  设为默认
-                </Button>
-              )}
               <Button
                 onClick={() =>
                   navigate(`/settings/projects/${project.project_id}`)
@@ -276,8 +201,8 @@ export function ProjectsPanel() {
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button
-                    aria-label="归档项目"
-                    disabled={busy || isDefault}
+                    aria-label={`归档${project.name}`}
+                    disabled={busy || activeProjects.length <= 1}
                     size="icon-sm"
                     variant="ghost"
                   >
@@ -286,11 +211,9 @@ export function ProjectsPanel() {
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>
-                      归档「{project.name}」？
-                    </AlertDialogTitle>
+                    <AlertDialogTitle>归档“{project.name}”？</AlertDialogTitle>
                     <AlertDialogDescription>
-                      归档后从切换器隐藏，数据保留，可随时恢复。
+                      这个空间会从日常切换列表中隐藏，已有内容、任务和作品仍会保留，之后可以恢复。
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -298,7 +221,7 @@ export function ProjectsPanel() {
                     <AlertDialogAction
                       onClick={() => void doArchive(project.project_id)}
                     >
-                      归档
+                      确认归档
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
@@ -306,7 +229,7 @@ export function ProjectsPanel() {
             </>
           )}
         </div>
-      </div>
+      </article>
     )
   }
 
@@ -315,28 +238,25 @@ export function ProjectsPanel() {
       <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
         <div>
           <h2 className="text-lg font-medium" id="projects-heading">
-            项目
+            内容空间
           </h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-            每个项目代表一个品牌或内容线，管理默认模板、语言音色与发布平台。
+            用来区分不同账号、品牌或工作方向的内容、任务和作品。生产效果请在模板中管理。
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button
-            aria-label="刷新项目"
+            aria-label="刷新内容空间"
             disabled={isRefreshing}
-            onClick={() => {
-              setIsRefreshing(true)
-              void refresh()
-            }}
+            onClick={() => void refresh()}
             size="icon-sm"
             variant="outline"
           >
-            <RefreshCw className={cn(isRefreshing && "animate-spin")} />
+            <RefreshCw className={isRefreshing ? "animate-spin" : undefined} />
           </Button>
-          <Button onClick={() => setCreateOpen(true)} size="sm">
+          <Button onClick={() => setCreateOpen(true)}>
             <Plus data-icon="inline-start" />
-            新建项目
+            新建内容空间
           </Button>
         </div>
       </div>
@@ -344,142 +264,110 @@ export function ProjectsPanel() {
       {loadState === "loading" ? (
         <AsyncState
           className="mt-5"
-          description="正在同步项目与模板默认值。"
+          description="正在读取内容空间。"
           state="loading"
-          title="正在读取项目"
+          title="正在读取"
         />
       ) : null}
       {loadState === "error" ? (
         <AsyncState
           action={
-            <Button
-              onClick={() => {
-                setIsRefreshing(true)
-                void refresh()
-              }}
-              size="sm"
-              variant="outline"
-            >
+            <Button onClick={() => void refresh()} variant="outline">
               重试
             </Button>
           }
           className="mt-5"
           description={loadError}
           state="error"
-          title="项目读取失败"
+          title="内容空间读取失败"
         />
       ) : null}
       {loadState === "stale" ? (
-        <AsyncState
-          action={
-            <Button
-              onClick={() => {
-                setIsRefreshing(true)
-                void refresh()
-              }}
-              size="sm"
-              variant="outline"
-            >
-              重新读取
-            </Button>
-          }
-          className="mt-5"
-          description={loadError}
-          state="stale"
-          title="项目列表可能不是最新状态"
-        />
+        <div className="mt-5">
+          <InlineError
+            message={loadError || "刷新失败，当前仍显示上次读取的内容。"}
+            title="刷新失败"
+          />
+        </div>
       ) : null}
 
-      {loadState === "ready" && projects.length === 0 ? (
-        <EmptyState
-          actions={
-            <Button onClick={() => setCreateOpen(true)} size="sm">
-              <Plus data-icon="inline-start" />
-              新建项目
-            </Button>
-          }
-          className="mt-5"
-          description="创建第一个项目后，可以配置品牌专属的生产默认值。"
-          icon={FolderKanban}
-          title="还没有项目"
-        />
-      ) : null}
+      {loadState !== "loading" && loadState !== "error" ? (
+        <div className="mt-5 space-y-6">
+          {activeProjects.length > 0 ? (
+            <div className="grid gap-3 xl:grid-cols-2">
+              {activeProjects.map(renderCard)}
+            </div>
+          ) : (
+            <EmptyState
+              actions={
+                <Button onClick={() => setCreateOpen(true)}>
+                  <Plus data-icon="inline-start" />
+                  新建内容空间
+                </Button>
+              }
+              description="创建后，内容、任务和作品都会按空间归类。"
+              icon={FolderKanban}
+              title="还没有内容空间"
+            />
+          )}
 
-      {projects.length > 0 ? (
-        <div className="mt-4 flex flex-col gap-2">
-          {activeProjects.map(renderCard)}
           {archivedProjects.length > 0 ? (
-            <>
-              <div className="mt-3 border-b pb-2 text-xs font-medium text-muted-foreground">
-                已归档
+            <div>
+              <h3 className="mb-3 text-sm font-medium">已归档</h3>
+              <div className="grid gap-3 xl:grid-cols-2">
+                {archivedProjects.map(renderCard)}
               </div>
-              {archivedProjects.map(renderCard)}
-            </>
+            </div>
           ) : null}
         </div>
       ) : null}
 
-      {/* 新建项目（3 个输入，轻量 Sheet 合规；创建后直接进详情页） */}
       <Sheet onOpenChange={setCreateOpen} open={createOpen}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        <SheetContent className="flex flex-col">
           <SheetHeader>
-            <SheetTitle>新建项目</SheetTitle>
-            <SheetDescription className="text-left">
-              创建后自动生成起草配置，进入详情页继续调整。
+            <SheetTitle>新建内容空间</SheetTitle>
+            <SheetDescription>
+              只需要一个容易识别的名字；生产模板在快速生产和模板管理中选择。
             </SheetDescription>
           </SheetHeader>
-          <div className="flex flex-col gap-4 px-4 pb-4">
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-xs text-muted-foreground">项目名称</span>
+          <div className="flex-1 space-y-5 px-4">
+            <label className="grid gap-2 text-sm font-medium">
+              名称
               <Input
+                autoFocus
                 onChange={(event) => setCreateName(event.target.value)}
                 placeholder="例如：PetWoods 小红书"
                 value={createName}
               />
             </label>
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-xs text-muted-foreground">
-                描述（可选）
-              </span>
+            <label className="grid gap-2 text-sm font-medium">
+              说明（选填）
               <Textarea
+                className="min-h-28"
                 onChange={(event) => setCreateDescription(event.target.value)}
-                rows={2}
+                placeholder="说明这个空间主要管理什么内容"
                 value={createDescription}
               />
             </label>
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-xs text-muted-foreground">
-                从现有项目复制默认值（可选）
-              </span>
-              <Select onValueChange={setCopyFromId} value={copyFromId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value={NONE}>不复制</SelectItem>
-                    {activeProjects.map((project) => (
-                      <SelectItem
-                        key={project.project_id}
-                        value={project.project_id}
-                      >
-                        {project.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </label>
-            {createError && (
-              <InlineError title="创建失败" message={createError} />
-            )}
+            {createError ? (
+              <InlineError message={createError} title="无法创建" />
+            ) : null}
           </div>
           <SheetFooter>
+            <Button
+              disabled={busy}
+              onClick={() => setCreateOpen(false)}
+              variant="outline"
+            >
+              取消
+            </Button>
             <Button disabled={busy} onClick={() => void doCreate()}>
-              {busy && (
+              {busy ? (
                 <Loader2 className="animate-spin" data-icon="inline-start" />
+              ) : (
+                <Plus data-icon="inline-start" />
               )}
-              创建并进入配置
+              创建内容空间
             </Button>
           </SheetFooter>
         </SheetContent>

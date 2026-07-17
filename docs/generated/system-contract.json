@@ -17,7 +17,8 @@
     "pixelle_video/generation/schemas.py",
     "pixelle_video/generation/templates.py",
     "pixelle_video/generation/template_overrides.py",
-    "pixelle_video/content/production_tasks.py"
+    "pixelle_video/content/production_tasks.py",
+    "pixelle_video/content/projects.py"
   ],
   "pipelines": [
     {
@@ -1297,6 +1298,19 @@
     "openapi": "/openapi.json"
   },
   "schema_version": 1,
+  "scopes": {
+    "project": {
+      "fields": [
+        "created_at",
+        "description",
+        "name",
+        "project_id",
+        "status",
+        "updated_at"
+      ],
+      "purpose": "content_task_artifact_scope"
+    }
+  },
   "settings": {
     "bgm_mode": {
       "accepted_types": [

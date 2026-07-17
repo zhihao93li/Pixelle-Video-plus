@@ -44,7 +44,6 @@ import { cn } from "@/lib/utils"
 import {
   cloneProductionTemplate,
   deleteProductionTemplate,
-  listProjects,
   listTemplates,
   setTemplateEnabled,
   templatesForManagement,
@@ -214,20 +213,17 @@ function TemplateDeleteButton({
   )
 }
 
-/** 用户侧启用/停用开关。停用走确认；被项目默认引用时禁用并说明原因。 */
+/** 用户侧启用/停用开关。停用前明确说明影响。 */
 function TemplateEnabledControl({
   template,
-  usedByProjects,
   onChanged,
 }: {
   template: ProductionTemplate
-  usedByProjects: string[]
   onChanged: () => void
 }) {
   const toast = useToast()
   const [isSaving, setIsSaving] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const lockedByProject = template.enabled && usedByProjects.length > 0
   const codexOnly = isCodexOnlyTemplate(template)
 
   async function apply(next: boolean) {
@@ -256,7 +252,7 @@ function TemplateEnabledControl({
       <Switch
         aria-label={template.enabled ? "停用模板" : "启用模板"}
         checked={template.enabled}
-        disabled={isSaving || lockedByProject}
+        disabled={isSaving}
         onCheckedChange={(next) => {
           if (next) {
             void apply(true)
@@ -266,11 +262,6 @@ function TemplateEnabledControl({
         }}
         size="sm"
       />
-      {lockedByProject && (
-        <span className="text-xs text-muted-foreground">
-          项目「{usedByProjects.join("、")}」正用它作默认，换默认后可停用
-        </span>
-      )}
       <AlertDialog onOpenChange={setConfirmOpen} open={confirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -304,27 +295,13 @@ export function TemplateStatusPanel() {
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
   const [isRefreshing, setIsRefreshing] = useState(true)
   const hasDataRef = useRef(false)
-  const [projectDefaults, setProjectDefaults] = useState<
-    Record<string, string[]>
-  >({})
   const expertMode = useExpertMode()
 
   const reload = useCallback(async () => {
     setIsRefreshing(true)
     try {
-      const [response, projectResponse] = await Promise.all([
-        listTemplates(),
-        listProjects(),
-      ])
+      const response = await listTemplates()
       setTemplates(templatesForManagement(response))
-      const usage: Record<string, string[]> = {}
-      for (const project of projectResponse.projects) {
-        const templateId = project.default_production_template_id
-        if (templateId) {
-          usage[templateId] = [...(usage[templateId] ?? []), project.name]
-        }
-      }
-      setProjectDefaults(usage)
       setError(null)
       hasDataRef.current = true
       setLoadState("ready")
@@ -356,7 +333,7 @@ export function TemplateStatusPanel() {
             模板管理
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            启用、停用或克隆生产模板，并查看项目默认占用情况。
+            启用、停用或克隆生产模板，管理长期生产效果。
           </p>
         </div>
         <Button
@@ -376,7 +353,7 @@ export function TemplateStatusPanel() {
       {loadState === "loading" ? (
         <AsyncState
           className="mt-5"
-          description="正在同步模板与项目默认占用情况。"
+          description="正在同步模板状态。"
           state="loading"
           title="正在读取模板"
         />
@@ -494,7 +471,6 @@ export function TemplateStatusPanel() {
                       <TemplateEnabledControl
                         onChanged={() => void reload()}
                         template={template}
-                        usedByProjects={projectDefaults[template.id] ?? []}
                       />
                     </div>
                   )}

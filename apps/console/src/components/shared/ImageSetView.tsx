@@ -1,6 +1,10 @@
 import { Download } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import {
+  downloadFilename,
+  extensionFromUrl,
+} from "@/lib/downloadFilename"
 
 /**
  * 图文帖图集展示：封面在首的缩略图网格（点开看原图）+「下载图集去发布」。
@@ -12,9 +16,11 @@ export type ImageSetItem = { url: string; label: string }
 export function ImageSetView({
   items,
   caption,
+  title,
 }: {
   items: ImageSetItem[]
   caption?: string | null
+  title?: string | null
 }) {
   if (items.length === 0) {
     return (
@@ -30,7 +36,11 @@ export function ImageSetView({
       window.setTimeout(() => {
         const anchor = document.createElement("a")
         anchor.href = item.url
-        anchor.download = ""
+        anchor.download = downloadFilename(
+          `${title || "未命名图集"}-${String(index + 1).padStart(2, "0")}`,
+          extensionFromUrl(item.url),
+          `未命名图集-${index + 1}`
+        )
         anchor.target = "_blank"
         anchor.rel = "noopener"
         anchor.click()

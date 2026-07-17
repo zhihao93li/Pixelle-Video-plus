@@ -38,7 +38,7 @@ router = APIRouter(prefix="/content-items", tags=["Content Items"])
 
 
 def _default_project_id() -> str:
-    """Return the current default project id, creating it for a new installation."""
+    """Return the internal fallback content-space id for a new installation."""
     ensure_default_project()
     project = get_default_project()
     return project.project_id if project else "PetWoods"
@@ -58,7 +58,7 @@ class ContentItemCreateRequest(BaseModel):
     # 可选：与 titles 等长的主语言确认稿（现成文案场景，initial_status=confirmed 时写入变体）
     scripts: list[str] | None = None
     asset_paths: list[str] | None = None
-    # 可选项目归属；缺省用默认项目
+    # 可选内容空间归属；缺省使用内部初始空间。
     project_id: str | None = None
 
 

@@ -17,6 +17,7 @@ from pixelle_video.content.production_tasks import (  # noqa: E402
     ProductionTask,
     ProductionTaskState,
 )
+from pixelle_video.content.projects import Project  # noqa: E402
 from pixelle_video.generation.defaults import (  # noqa: E402
     build_default_pipeline_manifests,
 )
@@ -58,6 +59,7 @@ def build_contract() -> dict[str, Any]:
             "pixelle_video/generation/templates.py",
             "pixelle_video/generation/template_overrides.py",
             "pixelle_video/content/production_tasks.py",
+            "pixelle_video/content/projects.py",
         ],
         "runtime_fact_sources": {
             "agent_capabilities": "/api/agent/capabilities",
@@ -75,6 +77,12 @@ def build_contract() -> dict[str, Any]:
             "generation_result": list(
                 get_args(GenerationResult.model_fields["artifact_type"].annotation)
             ),
+        },
+        "scopes": {
+            "project": {
+                "purpose": "content_task_artifact_scope",
+                "fields": sorted(Project.model_fields),
+            }
         },
         "settings": {
             key: {"accepted_types": _type_names(expected)}
@@ -125,6 +133,12 @@ def render_markdown(contract: dict[str, Any]) -> str:
         "",
         f"- 生产任务：`{' | '.join(contract['states']['production_task'])}`",
         f"- 执行任务：`{' | '.join(contract['states']['generation_task'])}`",
+        "",
+        "## 内容空间",
+        "",
+        "- 作用：归集和筛选内容、任务与作品。",
+        f"- 字段：`{' | '.join(contract['scopes']['project']['fields'])}`",
+        "- 不携带生产模板、语言、音色或发布平台默认值。",
         "",
         "## Pipeline",
         "",

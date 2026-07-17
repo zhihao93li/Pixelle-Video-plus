@@ -10,6 +10,7 @@ import {
   listResourceTtsWorkflows,
   listPromptTemplates,
   getLlmModelCatalog,
+  getSettingsDiagnostics,
   type ImageProviderSetting,
   type PipelineManifest,
   type ResourceBgm,
@@ -17,6 +18,7 @@ import {
   type ResourceWorkflow,
   type PromptTemplate,
   type LlmModelProvider,
+  type SettingsDiagnosticCheck,
 } from "./generationApi.ts"
 
 export type ProductionSettingsResources = {
@@ -30,6 +32,7 @@ export type ProductionSettingsResources = {
   scriptTemplates: PromptTemplate[]
   splitTemplates: PromptTemplate[]
   ttsWorkflows: ResourceWorkflow[]
+  diagnostics: SettingsDiagnosticCheck[]
 }
 
 const emptyResources: ProductionSettingsResources = {
@@ -43,6 +46,7 @@ const emptyResources: ProductionSettingsResources = {
   scriptTemplates: [],
   splitTemplates: [],
   ttsWorkflows: [],
+  diagnostics: [],
 }
 
 export function useProductionSettingsResources() {
@@ -63,10 +67,20 @@ export function useProductionSettingsResources() {
       listPipelines(),
       listPromptTemplates(),
       getLlmModelCatalog(),
+      getSettingsDiagnostics(),
     ]).then((results) => {
       if (cancelled) return
-      const [bgm, frames, media, tts, providers, pipelines, prompts, models] =
-        results
+      const [
+        bgm,
+        frames,
+        media,
+        tts,
+        providers,
+        pipelines,
+        prompts,
+        models,
+        diagnostics,
+      ] = results
       setResources({
         bgm: bgm.status === "fulfilled" ? bgm.value.bgm_files : [],
         frameTemplates:
@@ -86,6 +100,10 @@ export function useProductionSettingsResources() {
           prompts.status === "fulfilled" ? prompts.value.script_templates : [],
         splitTemplates:
           prompts.status === "fulfilled" ? prompts.value.split_templates : [],
+        diagnostics:
+          diagnostics.status === "fulfilled"
+            ? diagnostics.value.checks
+            : [],
       })
       const failures = results.flatMap((result) =>
         result.status === "rejected" ? [readableError(result.reason)] : []

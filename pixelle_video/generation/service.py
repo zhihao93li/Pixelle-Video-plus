@@ -252,7 +252,9 @@ class GenerationService:
             return {
                 "text": request.input["script"],
                 **({"title": request.input["title"]} if request.input.get("title") else {}),
-                **({"language": request.input["language"]} if request.input.get("language") else {}),
+                **(
+                    {"language": request.input["language"]} if request.input.get("language") else {}
+                ),
                 **params,
             }
 
@@ -441,6 +443,7 @@ class GenerationService:
         )
         duration = self._get_result_value(pipeline_result, "duration")
         storyboard = self._get_result_value(pipeline_result, "storyboard")
+        title = self._get_result_value(pipeline_result, "title") or getattr(storyboard, "title", "")
         storyboard_path = self._get_result_value(pipeline_result, "storyboard_path")
         if not storyboard_path:
             persisted_storyboard = Path(video_path).parent / "storyboard.json"
@@ -470,6 +473,7 @@ class GenerationService:
             storyboard_path=storyboard_path,
             metadata={
                 "source_result_type": type(pipeline_result).__name__,
+                "title": title,
                 "asset_manifest": asset_manifest,
                 "quality_review": quality_review,
                 "compose_runtime": compose_runtime,

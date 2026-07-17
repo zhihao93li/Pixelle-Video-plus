@@ -4,6 +4,24 @@ import { preparePage } from "./fixtures/app"
 import { fixtureIds, installApiFixtures } from "./fixtures/api"
 
 test.describe("专用生产", () => {
+  test("批量图生视频明确按上传图片区分任务", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page)
+    await preparePage(page)
+    await page.goto(
+      `/#/create/special/image_to_video/${fixtureIds.i2vTemplate}`,
+      { waitUntil: "networkidle" }
+    )
+
+    await page.getByRole("radio", { name: "批量", exact: true }).click()
+    const guide = page.getByRole("complementary", {
+      name: "批量图片如何区分",
+    })
+    await expect(guide).toContainText("每张上传图片创建一条独立视频")
+    await expect(guide).toContainText("不使用分隔线")
+    await expect(guide).toContainText("共用同一段运动描述")
+    expect(unhandledApi).toEqual([])
+  })
+
   test("保留精确模板身份，切换模式不带入旧草稿", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page)
     await preparePage(page)
@@ -110,11 +128,12 @@ test.describe("设置中心", () => {
     })
 
     await page.getByLabel("名称", { exact: true }).fill("")
-    const basicSection = page.locator("section").filter({ hasText: "基本信息" })
-    await basicSection.getByRole("button", { name: "保存" }).click()
-    await expect(basicSection.getByText("项目名称不能为空。")).toBeVisible()
+    const basicCard = page
+      .getByText("基本信息", { exact: true })
+      .locator("xpath=ancestor::*[@data-slot='card'][1]")
+    await basicCard.getByRole("button", { name: "保存更改" }).click()
     await expect(
-      basicSection.getByText("保存失败", { exact: true })
+      basicCard.getByText("内容空间名称不能为空。")
     ).toBeVisible()
     expect(unhandledApi).toEqual([])
   })

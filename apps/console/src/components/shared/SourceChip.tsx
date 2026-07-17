@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 export type SourceKind = "project" | "recipe" | "builtin" | "override"
 
 const LABELS: Record<SourceKind, string> = {
-  project: "项目默认",
+  project: "空间默认",
   recipe: "模板默认",
   builtin: "内置默认",
   override: "本次覆盖",

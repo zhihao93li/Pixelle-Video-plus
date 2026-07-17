@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/select"
 import { useTheme } from "@/components/theme-provider"
 import { useCurrentProject } from "@/lib/currentProject"
-import { languageLabel } from "@/lib/languages"
 import {
   isNavigationActive,
   navigate,
@@ -71,7 +70,7 @@ function ProjectSwitcher({
         )}
       >
         <Loader2 className="size-4 shrink-0 animate-spin" />
-        <span className="truncate">正在读取项目</span>
+        <span className="truncate">正在读取内容空间</span>
       </div>
     )
   }
@@ -86,9 +85,9 @@ function ProjectSwitcher({
         role="status"
       >
         <AlertCircle className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-xs">项目加载失败</span>
+        <span className="min-w-0 flex-1 truncate text-xs">内容空间加载失败</span>
         <Button
-          aria-label="重新读取项目"
+          aria-label="重新读取内容空间"
           className={cn(compact && "size-11")}
           onClick={() => void state.refresh()}
           size="icon-sm"
@@ -112,7 +111,7 @@ function ProjectSwitcher({
         )}
         href={routeHref(settingsLink({ kind: "projects" }))}
       >
-        新建项目
+        新建内容空间
       </a>
     )
   }
@@ -135,14 +134,14 @@ function ProjectSwitcher({
         value={selectedProject.project_id}
       >
         <SelectTrigger
-          aria-label={`切换项目，当前：${selectedProject.name}`}
+          aria-label={`切换内容空间，当前：${selectedProject.name}`}
           className={cn(
             "w-full",
             compact && "h-11 min-w-0 border-0 bg-muted/50"
           )}
           title={selectedProject.name}
         >
-          <SelectValue placeholder="选择项目">
+          <SelectValue placeholder="选择内容空间">
             {selectedProject.name}
           </SelectValue>
         </SelectTrigger>
@@ -153,9 +152,7 @@ function ProjectSwitcher({
                 <span className="flex flex-col gap-0.5">
                   <span>{project.name}</span>
                   <span className="text-xs text-muted-foreground">
-                    {project.languages.map(languageLabel).join(" / ") ||
-                      "无语言"}{" "}
-                    · {project.publish_platforms.length} 个平台
+                    内容、任务与作品空间
                   </span>
                 </span>
               </SelectItem>
@@ -163,7 +160,7 @@ function ProjectSwitcher({
           </SelectGroup>
           <SelectSeparator />
           <SelectGroup>
-            <SelectItem value={MANAGE_PROJECTS_VALUE}>管理项目…</SelectItem>
+            <SelectItem value={MANAGE_PROJECTS_VALUE}>管理内容空间…</SelectItem>
           </SelectGroup>
         </SelectContent>
       </Select>
@@ -213,9 +210,9 @@ function ProjectBoundary({
   return (
     <ProjectScopeBoundary
       className="mx-auto min-h-[45vh] w-full max-w-[var(--page-content-width)] px-4 lg:px-6"
-      emptyDescription="创建一个项目后，才能开始组织内容、生成作品和发布。"
-      emptyTitle="暂无可用项目"
-      errorMessage={state.error || "暂时无法读取项目，请重试。"}
+      emptyDescription="创建一个内容空间后，才能开始组织内容、生成作品和发布。"
+      emptyTitle="暂无可用内容空间"
+      errorMessage={state.error || "暂时无法读取内容空间，请重试。"}
       onManageProjects={() => navigate(settingsLink({ kind: "projects" }))}
       onRetry={() => void state.refresh()}
       state={boundaryState}

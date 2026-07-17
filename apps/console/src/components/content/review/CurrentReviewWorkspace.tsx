@@ -141,24 +141,16 @@ export function CurrentReviewWorkspace({
     })
   }
 
-  async function regenerateScenes(
-    action: "regenerate_selected" | "regenerate_all",
-    selectedSceneIds: string[],
-    instruction: string
-  ) {
+  async function regenerateScenes(instruction: string) {
     await reviseContentReview({
       itemId,
-      action,
+      action: "regenerate_all",
       reviewId: review.review_id,
       contentVersion: review.version,
-      selectedSceneIds,
       instruction,
     })
     toast({
-      title:
-        action === "regenerate_all"
-          ? "整套重新生成已开始"
-          : "选中内容重新生成已开始",
+      title: "整套重新生成已开始",
       variant: "success",
     })
   }
@@ -198,13 +190,8 @@ export function CurrentReviewWorkspace({
           onConfirm={(scenes) =>
             run("正在确认并进入生产…", () => confirmScenes(scenes))
           }
-          onRegenerate={(action, selectedIds, instruction) =>
-            run(
-              action === "regenerate_all"
-                ? "正在重新生成整套内容…"
-                : "正在重新生成选中内容…",
-              () => regenerateScenes(action, selectedIds, instruction)
-            )
+          onRegenerate={(instruction) =>
+            run("正在重新生成整套内容…", () => regenerateScenes(instruction))
           }
           onSave={(scenes) => run("正在保存修改…", () => saveScenes(scenes))}
           review={review}

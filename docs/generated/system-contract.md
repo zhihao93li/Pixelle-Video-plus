@@ -14,6 +14,12 @@
 - 生产任务：`needs_user | in_progress | failed | produced | cancelled`
 - 执行任务：`pending | running | completed | failed | cancelled | interrupted`
 
+## 内容空间
+
+- 作用：归集和筛选内容、任务与作品。
+- 字段：`created_at | description | name | project_id | status | updated_at`
+- 不携带生产模板、语言、音色或发布平台默认值。
+
 ## Pipeline
 
 | ID | 输入 | 阶段 | 必需产物 | 发起端 |

@@ -18,11 +18,9 @@ import { FrameTemplatePicker } from "@/components/shared/FrameTemplatePicker"
 import { RecipeSelect } from "@/components/shared/RecipeSelect"
 import { SourceChip } from "@/components/shared/SourceChip"
 import { isNonVideoPipeline, templateArtifactType } from "@/lib/artifactKind"
-import { useCurrentProject } from "@/lib/currentProject"
 import { useExpertMode } from "@/lib/expertMode"
 import { readableError } from "@/lib/format"
 import { navigate } from "@/lib/router"
-import { settingsLink } from "@/lib/settingsLinks"
 import { frameTemplateLabel } from "@/lib/templateLabels"
 import {
   fileUrlFromPath,
@@ -104,13 +102,12 @@ export function ProductionSubmitPanel({
   onOverridesChange: (overrides: ProductionOverrides) => void
   /** 流程强制项说明（如审核流固定按行拆分、每语言 Fish TTS） */
   lockedSummary?: string
-  /** 当前项目：默认模板 = 项目默认 > 全局 */
+  /** 当前内容空间，仅用于提交任务归属。 */
   projectId?: string
   /** 审核稿已由模板起草后，提交步骤必须锁定同一模板。 */
   templateSelectionDisabled?: boolean
 }) {
   const expertMode = useExpertMode()
-  const { project } = useCurrentProject()
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
   const [defaultTemplateId, setDefaultTemplateId] = useState<string | null>(
     null
@@ -147,19 +144,10 @@ export function ProductionSubmitPanel({
   // 非视频模板（图文/长文）：预览画面/试听声音、画面/BGM/TTS 覆盖项全部无意义，隐藏
   const selectedIsNonVideo = isNonVideoPipeline(selected?.pipeline_id)
 
-  // 来源判定：选中 === 项目默认模板 → 项目默认；=== 内置默认 → 内置默认；否则用户显式选择，无 chip。
-  const projectDefaultTemplate =
-    project?.project_id === projectId
-      ? (project?.default_production_template_id ?? null)
+  const templateSource: { source: "builtin"; to?: string } | null =
+    templateId && templateId === defaultTemplateId
+      ? { source: "builtin" }
       : null
-  const templateSource: { source: "project" | "builtin"; to?: string } | null =
-    projectDefaultTemplate && templateId === projectDefaultTemplate
-      ? { source: "project", to: settingsLink({ kind: "projects" }) }
-      : !projectDefaultTemplate &&
-          templateId &&
-          templateId === defaultTemplateId
-        ? { source: "builtin" }
-        : null
 
   useEffect(() => {
     let cancelled = false
@@ -168,7 +156,7 @@ export function ProductionSubmitPanel({
       setIsLoading(true)
       setLoadError(null)
       try {
-        const response = await listTemplates(projectId)
+        const response = await listTemplates()
         if (cancelled) {
           return
         }
@@ -192,7 +180,7 @@ export function ProductionSubmitPanel({
         setLoadError(
           templateId
             ? "当前生产模板不存在或不支持这个输入类型，请重新选择。"
-            : "当前项目没有可用于这个输入类型的默认生产模板。"
+            : "当前没有可用于这个输入类型的默认生产模板。"
         )
       } catch (error) {
         if (!cancelled) {

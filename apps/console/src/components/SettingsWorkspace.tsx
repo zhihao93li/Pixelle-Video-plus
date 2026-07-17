@@ -111,7 +111,7 @@ const SETTINGS_NAV: Array<{
   },
   {
     view: "projects",
-    label: "项目",
+    label: "内容空间",
     description: "品牌与内容线",
     icon: FolderKanban,
   },
@@ -580,7 +580,7 @@ export function SettingsWorkspace() {
             </Button>
           </>
         }
-        description="管理项目、模型、生成引擎、发布与模板。每个分区独立保存。"
+        description="管理内容空间、模型、生成引擎、发布与模板。每个分区独立保存。"
         title="设置中心"
       />
 

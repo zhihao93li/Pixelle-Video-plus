@@ -532,7 +532,7 @@ export function ProductionTaskDetailPage({ taskId }: { taskId: string }) {
           </summary>
           <dl className="grid gap-4 border-t px-4 py-4 text-sm sm:grid-cols-2">
             <div>
-              <dt className="text-xs text-muted-foreground">所属项目</dt>
+              <dt className="text-xs text-muted-foreground">内容空间</dt>
               <dd className="mt-1 break-all">{task.project_id}</dd>
             </div>
             <div>

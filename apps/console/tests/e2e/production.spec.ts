@@ -357,7 +357,7 @@ test.describe("生产模式与产物", () => {
 
     const script = page.getByLabel("视频文案", { exact: true })
     await script.fill("这是 PetWoods 项目专属的未提交草稿。")
-    await page.getByRole("combobox", { name: /切换项目/ }).click()
+    await page.getByRole("combobox", { name: /切换内容空间/ }).click()
     await page.getByRole("option", { name: /WhiskerLab 内容计划/ }).click()
 
     await expect(
@@ -441,6 +441,12 @@ test.describe("生产模式与产物", () => {
 
     await batch.click()
     await expect(batch).toBeChecked()
+    await expect(
+      page.getByRole("complementary", { name: "批量区分规则" })
+    ).toContainText("分隔线必须单独占一行")
+    await expect(
+      page.getByRole("complementary", { name: "批量区分规则" })
+    ).toContainText("第一行作为标题")
     const batchInput = page.getByLabel("文案列表", { exact: true })
     await batchInput.fill(
       "猫薄荷\n第一条完整文案\n\n---\n\n猫咪尾巴\n第二条完整文案"

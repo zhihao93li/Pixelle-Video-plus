@@ -104,32 +104,27 @@ test.describe("键盘与浏览器历史", () => {
     expect(unhandledApi).toEqual([])
   })
 
-  test("作品库选中项支持浏览器前进与后退", async ({ page }) => {
+  test("作品库列表与详情支持浏览器前进与后退", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page)
     await preparePage(page)
-    await page.goto(`/#/library?task=${fixtureIds.historyImageTask}`, {
+    await page.goto("/#/library", {
       waitUntil: "networkidle",
     })
 
-    const textRow = page
-      .getByRole("listitem")
-      .filter({ hasText: "第一次养猫的七天准备清单" })
-      .getByRole("button")
-    await textRow.click()
+    await page.getByText("猫咪为什么喜欢猫薄荷", { exact: true }).click()
+    await expect(page).toHaveURL(
+      new RegExp(`#/library\\?task=${fixtureIds.historyImageTask}$`)
+    )
+
+    await page.goBack()
+    await expect(page).toHaveURL(/#\/library$/)
+    await page.getByText("第一次养猫的七天准备清单", { exact: true }).click()
     await expect(page).toHaveURL(
       new RegExp(`#/library\\?task=${fixtureIds.historyTextTask}$`)
     )
 
     await page.goBack()
-    await expect(page).toHaveURL(
-      new RegExp(`#/library\\?task=${fixtureIds.historyImageTask}$`)
-    )
-    await expect(
-      page
-        .getByRole("listitem")
-        .filter({ hasText: "猫咪为什么喜欢猫薄荷" })
-        .getByRole("button")
-    ).toHaveAttribute("aria-pressed", "true")
+    await expect(page).toHaveURL(/#\/library$/)
 
     await page.goForward()
     await expect(page).toHaveURL(
@@ -144,19 +139,17 @@ test.describe("键盘与浏览器历史", () => {
     expect(unhandledApi).toEqual([])
   })
 
-  test("作品库筛选、页码和选中项共同进入 URL", async ({ page }) => {
+  test("作品库筛选和页码共同进入 URL", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page, { historyPages: 3 })
     await preparePage(page)
-    await page.goto(`/#/library?task=${fixtureIds.historyVideoTask}`, {
+    await page.goto("/#/library", {
       waitUntil: "networkidle",
     })
 
     await page.getByRole("combobox", { name: "筛选作品形态" }).click()
     await page.getByRole("option", { name: "图集", exact: true }).click()
     await expect(page).toHaveURL(/kind=image_set/)
-    await expect(page).toHaveURL(
-      new RegExp(`task=${fixtureIds.historyImageTask}`)
-    )
+    await expect(page).not.toHaveURL(/task=/)
 
     await page.getByRole("combobox", { name: "筛选作品状态" }).click()
     await page.getByRole("option", { name: "已完成", exact: true }).click()
@@ -166,6 +159,39 @@ test.describe("键盘与浏览器历史", () => {
     await expect(page).toHaveURL(/page=2/)
     await expect(page).toHaveURL(/kind=image_set/)
     await expect(page).toHaveURL(/status=completed/)
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("作品库支持多选并显示批量下载操作", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page)
+    await preparePage(page)
+    await page.goto("/#/library", { waitUntil: "networkidle" })
+
+    await page.getByRole("checkbox", { name: /选择猫咪尾巴语言/ }).check()
+    await page
+      .getByRole("checkbox", { name: /选择猫咪为什么喜欢猫薄荷/ })
+      .check()
+
+    await expect(page.getByText("已选 2 项", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "下载已选" })).toBeVisible()
+    expect(unhandledApi).toEqual([])
+  })
+
+  test("作品库封面使用竖版比例并完整显示媒体", async ({ page }) => {
+    const unhandledApi = await installApiFixtures(page)
+    await preparePage(page)
+    await page.goto("/#/library", { waitUntil: "networkidle" })
+
+    const cover = page.locator('[data-slot="library-cover"]').first()
+    await expect(cover).toBeVisible()
+    const box = await cover.boundingBox()
+    expect(box).not.toBeNull()
+    expect((box?.width ?? 0) / (box?.height ?? 1)).toBeCloseTo(0.75, 1)
+    expect(box?.width ?? Number.POSITIVE_INFINITY).toBeLessThan(260)
+
+    const media = cover.locator("img, video")
+    await expect(media).toHaveCount(1)
+    await expect(media).toHaveCSS("object-fit", "contain")
     expect(unhandledApi).toEqual([])
   })
 

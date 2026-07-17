@@ -72,12 +72,6 @@ const project = {
   name: "PetWoods 内容计划",
   description: "用于正式路由验收的本地项目。",
   status: "active",
-  default_production_template_id: VIDEO_TEMPLATE_ID,
-  languages: ["Chinese"],
-  tts_voice_by_language: {
-    Chinese: "zh-CN-YunjianNeural",
-  },
-  publish_platforms: ["youtube"],
   created_at: "2026-07-10T08:00:00Z",
   updated_at: "2026-07-10T08:00:00Z",
 }
@@ -1144,12 +1138,7 @@ function reviewContextForOptions(
         version: `v${revisionSequence}`,
         payload: { kind, scene_manifest: item.scene_manifest },
         reference: { title: item.title, variants: item.variants },
-        allowed_actions: [
-          "direct_edit",
-          "regenerate_selected",
-          "regenerate_all",
-          "confirm",
-        ],
+        allowed_actions: ["direct_edit", "regenerate_all", "confirm"],
       },
     }
   }
@@ -2107,7 +2096,7 @@ function responseFor(
                 {
                   question: "如何开始一次标准视频生产？",
                   answer:
-                    "## 从已确认的内容开始\n\n1. 在工作台确认选题与文案\n2. 选择 `图文口播视频` 模板\n3. 核对本次覆盖项后提交\n\n```text\n项目默认 → 模板默认 → 本次覆盖\n```",
+                    "## 从已确认的内容开始\n\n1. 在工作台确认选题与文案\n2. 选择 `图文口播视频` 模板\n3. 核对本次覆盖项后提交\n\n```text\n模板默认 → 本次覆盖\n```",
                 },
                 {
                   question: "任务失败后应该从哪里恢复？",

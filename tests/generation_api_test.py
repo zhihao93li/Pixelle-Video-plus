@@ -95,10 +95,7 @@ def isolated_production_project(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(content_store, "CONTENT_ITEMS_DIR", tmp_path / "content-items")
     monkeypatch.setattr(production_tasks, "PRODUCTION_TASKS_DIR", tmp_path / "production-tasks")
-    project = projects.create_project(
-        name="Batch test",
-        default_production_template_id="pipeline_standard_base_v1",
-    )
+    project = projects.create_project(name="Batch test")
     return project.project_id
 
 

@@ -71,10 +71,7 @@ def isolated_storage(tmp_path, monkeypatch):
         "detect_available_generation_capabilities",
         lambda: {"tts", "ffmpeg", "persistence", "llm", "media"},
     )
-    projects.create_project(
-        name="Test project",
-        default_production_template_id="pipeline_topic_to_video_base_v1",
-    )
+    projects.create_project(name="Test project")
     fake_generation_service.requests.clear()
     fake_generation_service.fail_on_submit_number = None
     app.dependency_overrides[get_generation_service] = get_fake_generation_service
@@ -280,9 +277,7 @@ def test_rewrite_script_keeps_the_same_production_task(client, monkeypatch):
     assert len(production_tasks.list_production_tasks()) == 1
 
 
-def test_selected_scene_regeneration_preserves_unselected_scene(client, monkeypatch):
-    import pixelle_video.content.drafting as drafting
-
+def test_selected_scene_regeneration_is_not_an_available_review_action(client):
     item = new_content_item(
         title="猫为什么喜欢纸箱",
         project=_project_id(),
@@ -301,20 +296,11 @@ def test_selected_scene_regeneration_preserves_unselected_scene(client, monkeypa
         ],
     )
     content_store.save_item(item)
-    task = _review_task(
+    _review_task(
         item,
         pipeline_id="script_to_video",
         recipe_id="pipeline_standard_base_v1",
     )
-
-    async def fake_core():
-        return SimpleNamespace(llm=object())
-
-    async def fake_rewrite(**_kwargs):
-        return "只改第一段。"
-
-    monkeypatch.setattr(drafting, "rewrite_review_unit", fake_rewrite)
-    app.dependency_overrides[get_pixelle_video] = fake_core
     response = client.post(
         f"/api/content-items/{item.item_id}/revise-review",
         json={
@@ -324,12 +310,7 @@ def test_selected_scene_regeneration_preserves_unselected_scene(client, monkeypa
             **_trace("rewrite-scene"),
         },
     )
-    assert response.status_code == 200, response.text
-    updated = client.get(f"/api/content-items/{item.item_id}").json()
-    scenes = updated["scene_manifest"]["scenes"]
-    assert [scene["narration"] for scene in scenes] == ["只改第一段。", "第二段。"]
-    assert production_tasks.load_production_task(task.production_task_id) is not None
-    assert len(production_tasks.list_production_tasks()) == 1
+    assert response.status_code == 422, response.text
 
 
 def test_topic_image_post_uses_script_and_page_confirmation_on_one_task(client, monkeypatch):

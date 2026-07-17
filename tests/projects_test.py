@@ -26,22 +26,13 @@ def test_first_project_becomes_default():
     assert len(all_projects) == 1
 
 
-def test_create_copies_defaults_from_source():
-    source = projects.create_project(
-        name="源项目",
-        default_production_template_id="tpl_a",
-        languages=["Chinese", "English"],
-        tts_voice_by_language={"Chinese": "ref-1"},
-        publish_platforms=["buffer"],
-    )
-    clone = projects.create_project(
-        name="复制项目", copy_from_project_id=source.project_id
-    )
-    assert clone.default_production_template_id == "tpl_a"
-    assert clone.languages == ["Chinese", "English"]
-    assert clone.tts_voice_by_language == {"Chinese": "ref-1"}
-    assert clone.publish_platforms == ["buffer"]
-    assert clone.name == "复制项目"  # 名称不复制
+def test_project_only_stores_content_space_identity():
+    project = projects.create_project(name="品牌 A", description="小红书内容")
+    assert project.name == "品牌 A"
+    assert project.description == "小红书内容"
+    assert set(project.model_fields_set) >= {"name", "description"}
+    assert "default_production_template_id" not in projects.Project.model_fields
+    assert "languages" not in projects.Project.model_fields
 
 
 def test_update_and_set_default():

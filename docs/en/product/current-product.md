@@ -10,11 +10,11 @@ comes from `GET /api/agent/capabilities`.
 Pixelle is an AI content production workspace for solo content operators:
 
 ```text
-Project → Content ledger → Production task → Artifact
-                       └→ Confirmation / publish evidence / metrics
+Content space → Content ledger → Production task → Artifact
+                             └→ Confirmation / publish evidence / metrics
 ```
 
-A project carries brand, channel, audience, language, and asset context, but does not bind one production route. People and agents create content-ledger records and production tasks through the same use-case APIs.
+A content space only groups and filters related content, tasks, and artifacts. It can represent an account, brand, or workstream, but it does not store template, language, voice, or publishing defaults. People and agents create content-ledger records and production tasks through the same use-case APIs.
 
 ## Product Surfaces
 
@@ -23,7 +23,7 @@ The React console in `apps/console` has four primary destinations:
 1. Workbench groups production tasks by confirmed facts: needs attention, in progress, failed, or produced.
 2. Quick Production is the only React surface that starts production and selects an artifact type and template.
 3. Library filters, previews, and publishes generated artifacts.
-4. Settings manages projects, AI, voice, generation engines, storage, and templates.
+4. Settings manages content spaces, AI, voice, generation engines, storage, and templates.
 
 Artifact types are declared by the generated executable contract rather than copied here.
 
@@ -61,13 +61,15 @@ One pipeline represents one input contract and one complete route. Different inp
 
 A template binds exactly one pipeline and stores long-lived defaults. Every formal production request creates or binds a content-ledger item and a stable `production_task_id` before starting a provider. The HTTP field remains `recipe_id` for compatibility. The old direct-generation write endpoints have been removed and are absent from OpenAPI. `/api/media/generate` is a settings preview and does not create a formal artifact.
 
+Batch production is a multi-task submission mode for the same pipeline, not a separate pipeline. Script batches use `---` on a standalone line to separate tasks; the first line of each block is the title and the remaining lines are the body. Image batches use each uploaded file as one task. Every batch input must explain its separation rule beside the input and preview the parsed task count before submission.
+
 Setting precedence is:
 
 ```text
-Project defaults → Effective template defaults → Run overrides
+Effective template defaults → Run overrides
 ```
 
-The workbench consumes only persisted production-task states declared by the generated contract.
+System settings own providers, credentials, and service-level defaults. Templates own long-lived production choices for one route. The workbench consumes only persisted production-task states declared by the generated contract.
 
 `produced` means execution succeeded and every required artifact is present and readable. Publishing and metrics do not alter that production fact. A service restart preserves terminal tasks and marks unfinished work as `interrupted` for explicit retry.
 

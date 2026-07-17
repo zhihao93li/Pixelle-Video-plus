@@ -4,6 +4,7 @@ import { ImageSetView } from "@/components/shared/ImageSetView"
 import { TextArticleView } from "@/components/shared/TextArticleView"
 import { Button } from "@/components/ui/button"
 import type { ArtifactViewModel } from "@/lib/productViewModels"
+import { downloadFilename } from "@/lib/downloadFilename"
 import { cn } from "@/lib/utils"
 
 /**
@@ -47,7 +48,11 @@ export function ArtifactPreview({
             {artifact.images.length} 张
           </span>
         </div>
-        <ImageSetView caption={artifact.caption} items={artifact.images} />
+        <ImageSetView
+          caption={artifact.caption}
+          items={artifact.images}
+          title={artifact.title}
+        />
       </section>
     )
   }
@@ -88,7 +93,10 @@ export function ArtifactPreview({
           <span className="truncate">视频文件</span>
         </div>
         <Button asChild size="sm" variant="outline">
-          <a download href={artifact.downloadUrl}>
+          <a
+            download={downloadFilename(artifact.title, "mp4", "未命名视频")}
+            href={artifact.downloadUrl}
+          >
             <Download data-icon="inline-start" />
             下载视频
           </a>

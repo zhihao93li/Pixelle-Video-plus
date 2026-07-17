@@ -11,7 +11,7 @@ test.describe("项目边界与页面异步状态", () => {
 
     const boundary = page.locator('[data-slot="project-scope-boundary"]')
     await expect(boundary).toHaveAttribute("data-state", "loading")
-    await expect(boundary.getByText("正在读取项目…")).toBeVisible()
+    await expect(boundary.getByText("正在读取内容空间…")).toBeVisible()
   })
 
   test("ProjectScope empty", async ({ page }) => {
@@ -23,8 +23,10 @@ test.describe("项目边界与页面异步状态", () => {
 
     const boundary = page.locator('[data-slot="project-scope-boundary"]')
     await expect(boundary).toHaveAttribute("data-state", "empty")
-    await expect(page.getByText("暂无可用项目")).toBeVisible()
-    await expect(page.getByRole("button", { name: "管理项目" })).toBeVisible()
+    await expect(page.getByText("暂无可用内容空间")).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "管理内容空间" })
+    ).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 
@@ -37,7 +39,7 @@ test.describe("项目边界与页面异步状态", () => {
 
     const boundary = page.locator('[data-slot="project-scope-boundary"]')
     await expect(boundary).toHaveAttribute("data-state", "error")
-    await expect(page.getByText("项目读取失败")).toBeVisible()
+    await expect(page.getByText("内容空间读取失败")).toBeVisible()
     await expect(
       page.getByRole("button", { name: "重新读取" }).last()
     ).toBeVisible()
@@ -328,7 +330,7 @@ test.describe("作品异步状态", () => {
       waitUntil: "networkidle",
     })
 
-    await page.getByRole("button", { name: "刷新作品库" }).click()
+    await page.getByRole("button", { name: "刷新作品详情" }).click()
     await expect(page.getByText("作品列表可能不是最新状态")).toBeVisible()
     await expect(
       page.getByRole("heading", { name: "猫咪尾巴语言", exact: true })

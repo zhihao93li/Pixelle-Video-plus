@@ -112,7 +112,7 @@ export function RecipeDetailPage({ templateId }: { templateId: string }) {
           title="模板详情"
         />
         <AsyncState
-          description="正在同步模板信息和项目引用。"
+          description="正在同步模板信息。"
           state="loading"
           title="正在读取模板"
         />

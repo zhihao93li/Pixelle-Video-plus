@@ -10,8 +10,7 @@ export type ParsedScriptItem = {
 
 /** 把多条粘贴文本解析成批量条目（每条一个生成任务的 input）。 */
 export function parseFixedScriptItems(text: string): ParsedScriptItem[] {
-  return text
-    .split(/\n\s*---\s*\n/g)
+  return splitScriptBlocks(text)
     .map((block) => block.trim())
     .filter(Boolean)
     .map((block, index) => {
@@ -22,12 +21,16 @@ export function parseFixedScriptItems(text: string): ParsedScriptItem[] {
 
 /** 从粘贴文本里移除第 index 条，返回重新拼好的文本。 */
 export function removeScriptItem(text: string, index: number): string {
-  const blocks = text
-    .split(/\n\s*---\s*\n/g)
+  const blocks = splitScriptBlocks(text)
     .map((block) => block.trim())
     .filter(Boolean)
   blocks.splice(index, 1)
   return blocks.join("\n\n---\n\n")
+}
+
+/** 分隔线按“单独一行”识别；这样连续分隔线和首尾空区块也能被安全忽略。 */
+function splitScriptBlocks(text: string): string[] {
+  return text.split(/^\s*---\s*$/gm)
 }
 
 export function getBatchPreviewTitle(

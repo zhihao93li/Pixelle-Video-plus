@@ -1,12 +1,12 @@
-"""项目（Project）：品牌级内容线实体，是控制台的全局作用域维度。
+"""项目（Project）：内容、任务、作品与运营记录的隔离范围。
 
-一个项目 = 一个品牌/内容线（发布渠道挂在项目下），管三类默认：默认生产模板、
-语言集 + 每语言 TTS 音色、发布平台预选。写稿规则属于生产模板。存储
+项目只负责归属和筛选，不携带生产默认。模板管理长期生产设置，系统设置
+管理 Provider 与凭据，本次设置管理单次覆盖。存储
 ``data/projects.json``：``{"default_project_id": str|None, "projects": {id: {...}}}``。
 
 实现使用 pydantic + tmp+os.replace + threading.Lock，并保留可 monkeypatch 的
-``_projects_path()``。归档而非删除：默认项目与最后一个 active
-项目不可归档（约束在 API 层校验）。"当前项目"是前端状态，服务端 default 仅作兜底。
+``_projects_path()``。归档而非删除；最后一个 active 内容空间不可归档
+（约束在 API 层校验）。"当前项目"是前端状态，服务端 default 仅作内部兜底。
 """
 
 import json
@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from pixelle_video.utils.os_util import get_data_path
 
@@ -30,10 +30,6 @@ class Project(BaseModel):
     name: str
     description: str = ""
     status: Literal["active", "archived"] = "active"
-    default_production_template_id: str | None = None
-    languages: list[str] = Field(default_factory=lambda: ["Chinese"])
-    tts_voice_by_language: dict[str, str] = Field(default_factory=dict)
-    publish_platforms: list[str] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
@@ -115,41 +111,12 @@ def create_project(
     *,
     name: str,
     description: str = "",
-    default_production_template_id: str | None = None,
-    languages: list[str] | None = None,
-    tts_voice_by_language: dict[str, str] | None = None,
-    publish_platforms: list[str] | None = None,
-    copy_from_project_id: str | None = None,
 ) -> Project:
-    source: Project | None = None
-    if copy_from_project_id:
-        source = get_project(copy_from_project_id)
-
     timestamp = _now_iso()
     project = Project(
         project_id=uuid.uuid4().hex,
         name=name,
         description=description,
-        default_production_template_id=(
-            default_production_template_id
-            if default_production_template_id is not None
-            else (source.default_production_template_id if source else None)
-        ),
-        languages=(
-            languages
-            if languages is not None
-            else (list(source.languages) if source else ["Chinese"])
-        ),
-        tts_voice_by_language=(
-            tts_voice_by_language
-            if tts_voice_by_language is not None
-            else (dict(source.tts_voice_by_language) if source else {})
-        ),
-        publish_platforms=(
-            publish_platforms
-            if publish_platforms is not None
-            else (list(source.publish_platforms) if source else [])
-        ),
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -219,18 +186,12 @@ def set_default_project(project_id: str) -> bool:
 
 def _bootstrap_default_project() -> None:
     """Create the first project for a new local installation."""
-    from pixelle_video.generation.templates import (
-        build_default_production_template_registry,
-    )
-
-    registry = build_default_production_template_registry()
-    template_id = registry.default_template_id(project="PetWoods", channel="xiaohongshu")
-
     create_project(
         name="PetWoods",
         description="",
-        default_production_template_id=template_id,
     )
+
+
 def ensure_default_project() -> None:
     """Ensure a new local installation always has one usable project."""
     if not _load_raw()["projects"]:

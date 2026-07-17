@@ -83,14 +83,11 @@ class ProductionTemplateRegistry:
         self,
         templates: list[ProductionTemplate],
         *,
-        defaults: dict[tuple[str, str], str] | None = None,
+        initial_template_id: str | None = None,
     ):
         self._templates = {template.id: template for template in templates}
         self._order = [template.id for template in templates]
-        self._defaults = {
-            (_normalize_key(project), _normalize_key(channel)): template_id
-            for (project, channel), template_id in (defaults or {}).items()
-        }
+        self._initial_template_id = initial_template_id
 
     def list(self) -> list[ProductionTemplate]:
         return [self._templates[template_id] for template_id in self._order]
@@ -115,8 +112,9 @@ class ProductionTemplateRegistry:
         except KeyError:
             raise ProductionTemplateError(f"Unknown production template: {template_id}") from None
 
-    def default_template_id(self, *, project: str, channel: str) -> str | None:
-        return self._defaults.get((_normalize_key(project), _normalize_key(channel)))
+    def initial_template_id(self) -> str | None:
+        """Return the global first-use suggestion, independent of content space."""
+        return self._initial_template_id
 
     def compile_request(
         self,
@@ -721,7 +719,7 @@ def build_builtin_production_template_registry() -> ProductionTemplateRegistry:
                 },
             ),
         ],
-        defaults={("PetWoods", "xiaohongshu"): "pipeline_standard_base_v1"},
+        initial_template_id="pipeline_standard_base_v1",
     )
 
 
@@ -744,7 +742,3 @@ def detect_available_generation_capabilities() -> set[str]:
     if shutil.which("npx"):
         capabilities.add("hyperframes")
     return capabilities
-
-
-def _normalize_key(value: str) -> str:
-    return value.strip().lower()

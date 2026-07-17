@@ -12,7 +12,7 @@ uv run uvicorn api.app:app --host 127.0.0.1 --port 8000
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `GET` | `/projects` | 读取项目和默认项目 |
+| `GET` | `/projects` | 读取内容空间和内部初始选择 |
 | `GET` | `/generation/templates?project=<id>` | 读取项目可用模板与默认模板 |
 | `GET` | `/generation/templates/{template_id}` | 读取模板详情 |
 

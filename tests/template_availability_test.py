@@ -43,16 +43,14 @@ def test_user_disabled_builtin_can_be_reenabled_by_clearing_override():
     assert build_default_production_template_registry().get(ASSET_SKELETON).enabled is True
 
 
-def test_enabled_endpoint_rejects_disable_when_used_as_project_default():
-    projects.create_project(
-        name="AssetProject", default_production_template_id=ASSET_SKELETON
-    )
+def test_enabled_endpoint_is_independent_from_content_spaces():
+    projects.create_project(name="AssetProject")
     response = TestClient(app).put(
         f"/api/generation/templates/{ASSET_SKELETON}/enabled",
         json={"enabled": False},
     )
-    assert response.status_code == 400
-    assert "AssetProject" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["enabled"] is False
 
 
 def test_enabled_endpoint_disables_then_reenables_builtin():

@@ -169,7 +169,7 @@ export const ROUTE_MANIFEST: readonly RouteDefinition[] = [
   {
     id: "settings-project",
     path: "/settings/projects/:projectId",
-    title: "项目详情",
+    title: "内容空间详情",
     layout: "standard",
     projectScoped: true,
     match: (segments) =>

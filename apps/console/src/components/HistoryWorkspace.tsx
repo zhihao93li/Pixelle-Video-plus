@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import {
+  ArrowLeft,
   Download,
   FileText,
   FolderOpen,
@@ -55,7 +56,7 @@ import {
 } from "@/components/ui/sheet"
 import { useToast } from "@/components/ui/toast"
 import { artifactKindLabel, type ArtifactKind } from "@/lib/artifactKind"
-import { useCurrentProject } from "@/lib/currentProject"
+import { downloadFilename, extensionFromUrl } from "@/lib/downloadFilename"
 import {
   formatBytes,
   formatDate,
@@ -90,12 +91,9 @@ import { imageSetLabel } from "@/lib/imageSet"
 import {
   adaptPublishStatus,
   adaptRunStatus,
-  knownStatus,
   statusIs,
-  type AdaptedPublishAttemptState,
   type AdaptedRunState,
   type ArtifactViewModel,
-  type PublishAttemptState,
   type PublishAttemptViewModel,
 } from "@/lib/productViewModels"
 import { navigate, parsePath, routeHref, usePath } from "@/lib/router"
@@ -188,8 +186,9 @@ export function HistoryWorkspace({
   const [isChecking, setIsChecking] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
+  const [isDownloading, setIsDownloading] = useState(false)
 
-  const { project } = useCurrentProject()
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([])
   const [publishTitle, setPublishTitle] = useState("")
   const [publishCaption, setPublishCaption] = useState("")
@@ -254,21 +253,6 @@ export function HistoryWorkspace({
         )
         setHistoryState("stale")
       }
-
-      const filtered = filterHistoryTasks(
-        taskList.tasks,
-        searchQuery,
-        artifactFilter
-      )
-      const nextTaskId =
-        (selectedTaskId &&
-          filtered.some((task) => task.task_id === selectedTaskId) &&
-          selectedTaskId) ||
-        filtered[0]?.task_id ||
-        null
-      if (nextTaskId !== selectedTaskId) {
-        navigate(libraryPath(routeQuery, { task: nextTaskId }))
-      }
     })
 
     return () => {
@@ -286,12 +270,7 @@ export function HistoryWorkspace({
           return
         }
         setPublishPlatforms(response.platforms)
-        setSelectedPlatforms(
-          defaultPublishPlatforms(
-            response.platforms,
-            project?.publish_platforms
-          )
-        )
+        setSelectedPlatforms(defaultPublishPlatforms(response.platforms))
       })
       .catch((error) => {
         if (!cancelled) {
@@ -301,8 +280,6 @@ export function HistoryWorkspace({
     return () => {
       cancelled = true
     }
-    // 项目平台只作为进入页面时的预选。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -435,7 +412,6 @@ export function HistoryWorkspace({
     () => adaptPublishAttempts(publishRecord, publishPlatforms),
     [publishPlatforms, publishRecord]
   )
-  const selectedPublishState = summarizePublishState(publishAttempts)
   const publishCaptionWithHashtags = appendHashtags(publishCaption, hashtags)
   const requiresTitle = selectedPlatforms.includes("youtube")
   const runState = adaptRunStatus(detailStatus(detail) || selectedTask?.status)
@@ -468,16 +444,46 @@ export function HistoryWorkspace({
 
   function submitSearch(value: string) {
     const nextQuery = value.trim()
-    const nextTasks = filterHistoryTasks(
-      history?.tasks ?? [],
-      nextQuery,
-      artifactFilter
-    )
     updateLibraryQuery({
       q: nextQuery || null,
       page: 1,
-      task: nextTasks[0]?.task_id ?? null,
+      task: null,
     })
+  }
+
+  function toggleTaskSelection(taskId: string) {
+    setSelectedTaskIds((current) =>
+      current.includes(taskId)
+        ? current.filter((id) => id !== taskId)
+        : [...current, taskId]
+    )
+  }
+
+  async function downloadTasks(tasks: HistoryTaskSummary[]) {
+    if (tasks.length === 0) return
+    setIsDownloading(true)
+    try {
+      for (const task of tasks) {
+        const taskDetail = await getHistoryTaskDetail(task.task_id)
+        const taskArtifact = adaptHistoryArtifact(taskDetail, task)
+        await downloadArtifact(taskArtifact)
+      }
+      toast({
+        title:
+          tasks.length === 1
+            ? "作品已开始下载"
+            : `已开始下载 ${tasks.length} 个作品`,
+        variant: "success",
+      })
+    } catch (error) {
+      toast({
+        title: "下载失败",
+        description: readableError(error),
+        variant: "error",
+      })
+    } finally {
+      setIsDownloading(false)
+    }
   }
 
   async function checkConfig() {
@@ -537,112 +543,136 @@ export function HistoryWorkspace({
     <PageFrame>
       <WorkspaceHeader
         actions={
-          <Button
-            aria-label="刷新作品库"
-            disabled={isHistoryRefreshing}
-            onClick={() => setRefreshToken((token) => token + 1)}
-            size="icon-sm"
-            variant="outline"
-          >
-            <RefreshCcw className={cn(isHistoryRefreshing && "animate-spin")} />
-          </Button>
+          <div className="flex items-center gap-2">
+            {selectedTaskId ? (
+              <Button
+                onClick={() =>
+                  updateLibraryQuery({ publish: null, task: null })
+                }
+                size="sm"
+                variant="outline"
+              >
+                <ArrowLeft data-icon="inline-start" />
+                返回作品库
+              </Button>
+            ) : null}
+            <Button
+              aria-label={selectedTaskId ? "刷新作品详情" : "刷新作品库"}
+              disabled={isHistoryRefreshing}
+              onClick={() => {
+                setRefreshToken((token) => token + 1)
+                if (selectedTaskId) {
+                  setDetailRefreshToken((token) => token + 1)
+                }
+              }}
+              size="icon-sm"
+              variant="outline"
+            >
+              <RefreshCcw
+                className={cn(isHistoryRefreshing && "animate-spin")}
+              />
+            </Button>
+          </div>
         }
-        description="筛选产物，预览内容并查看发布状态。"
-        title="作品与发布"
+        description={
+          selectedTaskId
+            ? "预览作品、下载文件并查看发布状态。"
+            : "按封面浏览和管理已经产出的内容。"
+        }
+        title={selectedTaskId ? "作品详情" : "作品库"}
       />
 
-      <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2 border-b pb-4">
-        <Stat label="全部" value={statistics?.total_tasks} />
-        <Stat label="已完成" value={statistics?.completed} />
-        <Stat
-          destructive={(statistics?.failed ?? 0) > 0}
-          label="失败"
-          value={statistics?.failed}
-        />
-      </div>
+      {!selectedTaskId ? (
+        <>
+          <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2 border-b pb-4">
+            <Stat label="全部" value={statistics?.total_tasks} />
+            <Stat label="已完成" value={statistics?.completed} />
+            <Stat
+              destructive={(statistics?.failed ?? 0) > 0}
+              label="失败"
+              value={statistics?.failed}
+            />
+          </div>
 
-      <div className="flex flex-col gap-3 border-b pb-4">
-        <LibrarySearchForm
-          initialQuery={searchQuery}
-          key={searchQuery}
-          onSubmit={submitSearch}
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          <Select
-            onValueChange={(value) => {
-              const nextTasks = filterHistoryTasks(
-                history?.tasks ?? [],
-                searchQuery,
-                value
-              )
-              updateLibraryQuery({
-                kind: value === "all" ? null : value,
-                page: 1,
-                task: nextTasks[0]?.task_id ?? null,
-              })
-            }}
-            value={artifactFilter}
-          >
-            <SelectTrigger aria-label="筛选作品形态" className="w-auto">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="all">全部形态</SelectItem>
-                <SelectItem value="video">视频</SelectItem>
-                <SelectItem value="image_set">图集</SelectItem>
-                <SelectItem value="text">长文</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <Select
-            onValueChange={(value) =>
-              updateLibraryQuery({
-                status: value === "all" ? null : value,
-                page: 1,
-                task: null,
-              })
-            }
-            value={statusFilter}
-          >
-            <SelectTrigger aria-label="筛选作品状态" className="w-auto">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="all">全部状态</SelectItem>
-                <SelectItem value="completed">已完成</SelectItem>
-                <SelectItem value="failed">失败</SelectItem>
-                <SelectItem value="running">生成中</SelectItem>
-                <SelectItem value="pending">排队中</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <Select
-            onValueChange={(value) =>
-              updateLibraryQuery({
-                sort: value === "created_at:desc" ? null : value,
-                page: 1,
-                task: null,
-              })
-            }
-            value={sort}
-          >
-            <SelectTrigger aria-label="排序作品" className="w-auto">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="created_at:desc">最新创建</SelectItem>
-                <SelectItem value="created_at:asc">最早创建</SelectItem>
-                <SelectItem value="completed_at:desc">最近完成</SelectItem>
-                <SelectItem value="duration:desc">时长最长</SelectItem>
-                <SelectItem value="status:asc">按状态</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+          <div className="flex flex-col gap-3 border-b pb-4">
+            <LibrarySearchForm
+              initialQuery={searchQuery}
+              key={searchQuery}
+              onSubmit={submitSearch}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                onValueChange={(value) =>
+                  updateLibraryQuery({
+                    kind: value === "all" ? null : value,
+                    page: 1,
+                    task: null,
+                  })
+                }
+                value={artifactFilter}
+              >
+                <SelectTrigger aria-label="筛选作品形态" className="w-auto">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="all">全部形态</SelectItem>
+                    <SelectItem value="video">视频</SelectItem>
+                    <SelectItem value="image_set">图集</SelectItem>
+                    <SelectItem value="text">长文</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Select
+                onValueChange={(value) =>
+                  updateLibraryQuery({
+                    status: value === "all" ? null : value,
+                    page: 1,
+                    task: null,
+                  })
+                }
+                value={statusFilter}
+              >
+                <SelectTrigger aria-label="筛选作品状态" className="w-auto">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="all">全部状态</SelectItem>
+                    <SelectItem value="completed">已完成</SelectItem>
+                    <SelectItem value="failed">失败</SelectItem>
+                    <SelectItem value="running">生成中</SelectItem>
+                    <SelectItem value="pending">排队中</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Select
+                onValueChange={(value) =>
+                  updateLibraryQuery({
+                    sort: value === "created_at:desc" ? null : value,
+                    page: 1,
+                    task: null,
+                  })
+                }
+                value={sort}
+              >
+                <SelectTrigger aria-label="排序作品" className="w-auto">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="created_at:desc">最新创建</SelectItem>
+                    <SelectItem value="created_at:asc">最早创建</SelectItem>
+                    <SelectItem value="completed_at:desc">最近完成</SelectItem>
+                    <SelectItem value="duration:desc">时长最长</SelectItem>
+                    <SelectItem value="status:asc">按状态</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {historyState === "stale" ? (
         <AsyncState
@@ -699,107 +729,142 @@ export function HistoryWorkspace({
         />
       ) : null}
 
-      {history && history.tasks.length > 0 ? (
-        <div className="grid min-w-0 gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <section aria-labelledby="library-list-heading" className="min-w-0">
-            <div className="flex items-baseline justify-between gap-3 border-b pb-2">
+      {history && history.tasks.length > 0 && !selectedTaskId ? (
+        <section aria-labelledby="library-list-heading" className="min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+            <div>
               <h3 className="text-sm font-medium" id="library-list-heading">
                 作品
               </h3>
-              <span className="text-xs text-muted-foreground">
-                {history.total} 条
-              </span>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {history.total} 条 · 点击封面查看详情
+              </p>
             </div>
-
-            {isHistoryRefreshing ? (
-              <div
-                aria-live="polite"
-                className="flex items-center gap-2 border-b py-2 text-xs text-muted-foreground"
-              >
-                <Loader2 className="size-3.5 animate-spin" />
-                正在更新列表
+            {selectedTaskIds.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  已选 {selectedTaskIds.length} 项
+                </span>
+                <Button
+                  disabled={isDownloading}
+                  onClick={() =>
+                    void downloadTasks(
+                      visibleTasks.filter((task) =>
+                        selectedTaskIds.includes(task.task_id)
+                      )
+                    )
+                  }
+                  size="sm"
+                  variant="outline"
+                >
+                  {isDownloading ? (
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
+                  ) : (
+                    <Download data-icon="inline-start" />
+                  )}
+                  下载已选
+                </Button>
+                <Button
+                  onClick={() => setSelectedTaskIds([])}
+                  size="sm"
+                  variant="ghost"
+                >
+                  取消选择
+                </Button>
               </div>
             ) : null}
+          </div>
 
-            {visibleTasks.length === 0 ? (
-              <EmptyState
-                actions={
-                  <Button
-                    onClick={() =>
-                      updateLibraryQuery({ kind: null, q: null, task: null })
-                    }
-                    size="sm"
-                    variant="outline"
-                  >
-                    清除筛选
-                  </Button>
+          {isHistoryRefreshing ? (
+            <div
+              aria-live="polite"
+              className="flex items-center gap-2 border-b py-2 text-xs text-muted-foreground"
+            >
+              <Loader2 className="size-3.5 animate-spin" />
+              正在更新列表
+            </div>
+          ) : null}
+
+          {visibleTasks.length === 0 ? (
+            <EmptyState
+              actions={
+                <Button
+                  onClick={() =>
+                    updateLibraryQuery({ kind: null, q: null, task: null })
+                  }
+                  size="sm"
+                  variant="outline"
+                >
+                  清除筛选
+                </Button>
+              }
+              className="mt-3 min-h-40"
+              description="调整关键词或作品形态后再试。"
+              title="没有匹配的作品"
+            />
+          ) : (
+            <div
+              className="grid grid-cols-2 gap-3 pt-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6"
+              role="list"
+            >
+              {visibleTasks.map((task) => (
+                <LibraryCard
+                  checked={selectedTaskIds.includes(task.task_id)}
+                  downloading={isDownloading}
+                  key={task.task_id}
+                  metrics={metricsByTask[task.task_id] ?? null}
+                  onCheck={() => toggleTaskSelection(task.task_id)}
+                  onDownload={() => void downloadTasks([task])}
+                  onSelect={() => selectTask(task.task_id)}
+                  task={task}
+                />
+              ))}
+            </div>
+          )}
+
+          {history.total > 0 ? (
+            <div className="mt-5 flex items-center justify-between gap-3 border-t pt-3">
+              <Button
+                disabled={page <= 1 || isHistoryRefreshing}
+                onClick={() =>
+                  updateLibraryQuery({
+                    page: Math.max(1, page - 1),
+                    task: null,
+                  })
                 }
-                className="mt-3 min-h-40"
-                description="调整关键词或作品形态后再试。"
-                title="没有匹配的作品"
-              />
-            ) : (
-              <div
-                className="-mx-4 flex snap-x snap-mandatory gap-2 overflow-x-auto px-4 pb-2 xl:mx-0 xl:block xl:overflow-visible xl:px-0 xl:pb-0"
-                role="list"
+                size="sm"
+                variant="outline"
               >
-                {visibleTasks.map((task) => (
-                  <LibraryRow
-                    key={task.task_id}
-                    metrics={metricsByTask[task.task_id] ?? null}
-                    onOpenPublish={() => {
-                      updateLibraryQuery({ publish: "1", task: task.task_id })
-                    }}
-                    onSelect={() => selectTask(task.task_id)}
-                    publishState={
-                      selectedTaskId === task.task_id
-                        ? selectedPublishState
-                        : null
-                    }
-                    selected={selectedTaskId === task.task_id}
-                    task={task}
-                  />
-                ))}
+                上一页
+              </Button>
+              <div className="text-xs text-muted-foreground">
+                第 {history.page} / {history.total_pages ?? 1} 页
               </div>
-            )}
+              <Button
+                disabled={
+                  isHistoryRefreshing || page >= (history.total_pages ?? 1)
+                }
+                onClick={() =>
+                  updateLibraryQuery({
+                    page: Math.min(history.total_pages ?? page, page + 1),
+                    task: null,
+                  })
+                }
+                size="sm"
+                variant="outline"
+              >
+                下一页
+              </Button>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
-            {history.total > 0 ? (
-              <div className="flex items-center justify-between gap-3 border-t pt-3">
-                <Button
-                  disabled={page <= 1 || isHistoryRefreshing}
-                  onClick={() =>
-                    updateLibraryQuery({
-                      page: Math.max(1, page - 1),
-                      task: null,
-                    })
-                  }
-                  size="sm"
-                  variant="outline"
-                >
-                  上一页
-                </Button>
-                <div className="text-xs text-muted-foreground">
-                  第 {history.page} / {history.total_pages ?? 1} 页
-                </div>
-                <Button
-                  disabled={
-                    isHistoryRefreshing || page >= (history.total_pages ?? 1)
-                  }
-                  onClick={() =>
-                    updateLibraryQuery({
-                      page: Math.min(history.total_pages ?? page, page + 1),
-                      task: null,
-                    })
-                  }
-                  size="sm"
-                  variant="outline"
-                >
-                  下一页
-                </Button>
-              </div>
-            ) : null}
-          </section>
-
+      {history && selectedTaskId ? (
+        <div className="min-w-0">
           <DetailPanel
             artifact={artifact}
             canPublish={
@@ -991,7 +1056,8 @@ function DetailPanel({
       pipeline_topic_to_video_base_v1: "topic_to_video",
       pipeline_topic_to_image_post_base_v1: "topic_to_image_post",
       pipeline_topic_to_long_form_base_v1: "topic_to_long_form",
-    }[templateId] ?? "")
+    }[templateId] ??
+      "")
   const remakeTemplateCandidate =
     finalDraftRecipeByTopicRoute[sourcePipelineId] ?? templateId
   const remakeTemplateId = templateIds.has(remakeTemplateCandidate)
@@ -1208,20 +1274,22 @@ function DetailPanel({
   )
 }
 
-function LibraryRow({
+function LibraryCard({
   task,
-  selected,
+  checked,
+  downloading,
   onSelect,
-  onOpenPublish,
+  onCheck,
+  onDownload,
   metrics,
-  publishState,
 }: {
   task: HistoryTaskSummary
-  selected: boolean
+  checked: boolean
+  downloading: boolean
   onSelect: () => void
-  onOpenPublish: () => void
+  onCheck: () => void
+  onDownload: () => void
   metrics: ContentItemMetrics | null
-  publishState: AdaptedPublishAttemptState | null
 }) {
   const result = readRecord(task.result)
   const artifactType = historyArtifactKind(result)
@@ -1249,24 +1317,44 @@ function LibraryRow({
   return (
     <div
       className={cn(
-        "group flex w-[min(88vw,340px)] shrink-0 snap-start items-center gap-1 rounded-lg border p-1 xl:w-auto xl:rounded-none xl:border-x-0 xl:border-t-0 xl:p-0 xl:py-2 xl:last:border-b-0",
-        selected && "bg-muted"
+        "group relative overflow-hidden rounded-xl border bg-card transition-[border-color,box-shadow] hover:border-primary/35 hover:shadow-sm",
+        checked && "border-primary ring-1 ring-primary/20"
       )}
       role="listitem"
     >
+      <label className="absolute top-2 left-2 z-10 grid size-8 cursor-pointer place-items-center rounded-md border bg-background/95 shadow-sm">
+        <input
+          aria-label={`选择${title}`}
+          checked={checked}
+          className="size-4 accent-primary"
+          disabled={!statusIs(runState, "completed")}
+          onChange={onCheck}
+          type="checkbox"
+        />
+      </label>
       <button
-        aria-pressed={selected}
-        className="flex min-h-16 min-w-0 flex-1 items-center gap-3 rounded-md px-2 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="block w-full text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         onClick={onSelect}
         type="button"
       >
-        <div className="relative flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted text-muted-foreground">
-          {isImageSet && coverUrl ? (
-            <img alt="" className="size-full object-cover" src={coverUrl} />
+        <div
+          className={cn(
+            "relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden text-muted-foreground",
+            isVideo ? "bg-black" : "bg-muted"
+          )}
+          data-slot="library-cover"
+        >
+          {coverUrl ? (
+            <img
+              alt=""
+              className="size-full object-contain"
+              loading="lazy"
+              src={coverUrl}
+            />
           ) : isVideo && videoUrl ? (
             <video
               aria-hidden="true"
-              className="size-full object-cover"
+              className="size-full object-contain"
               muted
               playsInline
               preload="metadata"
@@ -1280,11 +1368,13 @@ function LibraryRow({
             <Video className="size-4" />
           )}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{title}</div>
+        <div className="min-w-0 p-3 pb-2">
+          <div className="line-clamp-2 min-h-10 text-sm leading-5 font-medium">
+            {title}
+          </div>
           <div
             className={cn(
-              "mt-0.5 truncate text-xs",
+              "mt-1 truncate text-xs",
               isFailed || visibleFailureMessage
                 ? "text-destructive"
                 : "text-muted-foreground"
@@ -1294,29 +1384,25 @@ function LibraryRow({
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <StatusBadge status={runState} />
-            {publishState ? <StatusBadge status={publishState} /> : null}
           </div>
         </div>
       </button>
 
-      <div className="flex shrink-0 items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
-        {isVideo && videoUrl ? (
-          <Button asChild size="icon-sm" variant="ghost">
-            <a aria-label="下载视频" download href={videoUrl}>
-              <Download />
-            </a>
-          </Button>
-        ) : null}
-        {isVideo && statusIs(runState, "completed") ? (
-          <Button
-            aria-label="发布视频"
-            onClick={onOpenPublish}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <Send />
-          </Button>
-        ) : null}
+      <div className="flex items-center justify-end border-t px-2 py-1.5">
+        <Button
+          aria-label={`下载${title}`}
+          disabled={downloading || !statusIs(runState, "completed")}
+          onClick={onDownload}
+          size="sm"
+          variant="ghost"
+        >
+          {downloading ? (
+            <Loader2 className="animate-spin" data-icon="inline-start" />
+          ) : (
+            <Download data-icon="inline-start" />
+          )}
+          下载
+        </Button>
       </div>
     </div>
   )
@@ -1488,6 +1574,50 @@ function adaptHistoryArtifact(
   }
 }
 
+async function downloadArtifact(artifact: ArtifactViewModel | null) {
+  if (!artifact) {
+    throw new Error("作品文件尚未就绪。")
+  }
+  if (artifact.kind === "video") {
+    triggerBrowserDownload(
+      artifact.downloadUrl,
+      downloadFilename(artifact.title, "mp4", "未命名视频")
+    )
+    return
+  }
+  if (artifact.kind === "text") {
+    const blobUrl = URL.createObjectURL(
+      new Blob([artifact.article], { type: "text/markdown;charset=utf-8" })
+    )
+    triggerBrowserDownload(
+      blobUrl,
+      downloadFilename(artifact.title, "md", "未命名长文")
+    )
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1_000)
+    return
+  }
+  artifact.images.forEach((image, index) => {
+    window.setTimeout(() => {
+      triggerBrowserDownload(
+        image.url,
+        downloadFilename(
+          `${artifact.title}-${String(index + 1).padStart(2, "0")}`,
+          extensionFromUrl(image.url),
+          `未命名图集-${index + 1}`
+        )
+      )
+    }, index * 150)
+  })
+}
+
+function triggerBrowserDownload(url: string, filename: string) {
+  const anchor = document.createElement("a")
+  anchor.href = url
+  anchor.download = filename
+  anchor.rel = "noopener"
+  anchor.click()
+}
+
 function adaptPublishAttempts(
   record: PublishRecord | null,
   platforms: PublishPlatform[]
@@ -1512,35 +1642,6 @@ function adaptPublishAttempts(
       canRetry: statusIs(state, "failed"),
     }
   })
-}
-
-function summarizePublishState(
-  attempts: PublishAttemptViewModel[]
-): AdaptedPublishAttemptState | null {
-  const failed = findPublishState(attempts, "failed")
-  if (failed) return failed
-  const publishing = findPublishState(attempts, "publishing")
-  if (publishing) return publishing
-  const scheduled = findPublishState(attempts, "scheduled")
-  if (scheduled) return scheduled
-  const unknown = attempts.find((attempt) => attempt.state.kind === "unknown")
-  if (unknown) return unknown.state
-  if (
-    attempts.length > 0 &&
-    attempts.every((attempt) => statusIs(attempt.state, "published"))
-  ) {
-    return knownStatus("published")
-  }
-  return findPublishState(attempts, "idle")
-}
-
-function findPublishState(
-  attempts: PublishAttemptViewModel[],
-  expected: PublishAttemptState
-) {
-  return (
-    attempts.find((attempt) => statusIs(attempt.state, expected))?.state ?? null
-  )
 }
 
 function getPublishDisabledReason({

@@ -34,9 +34,9 @@ function BoundaryFrame({
 export function ProjectScopeBoundary({
   children,
   className,
-  emptyDescription = "请先创建一个项目，再开始内容生产。",
-  emptyTitle = "还没有可用项目",
-  errorMessage = "暂时无法读取项目列表，请重试。",
+  emptyDescription = "请先创建一个内容空间，再开始内容生产。",
+  emptyTitle = "还没有可用内容空间",
+  errorMessage = "暂时无法读取内容空间列表，请重试。",
   onManageProjects,
   onRetry,
   state,
@@ -57,7 +57,7 @@ export function ProjectScopeBoundary({
   if (state === "loading") {
     return (
       <BoundaryFrame className={className} state={state}>
-        <AsyncState state="loading" title="正在读取项目…" />
+        <AsyncState state="loading" title="正在读取内容空间…" />
       </BoundaryFrame>
     )
   }
@@ -75,7 +75,7 @@ export function ProjectScopeBoundary({
           }
           description={errorMessage}
           state="error"
-          title="项目读取失败"
+          title="内容空间读取失败"
         />
       </BoundaryFrame>
     )
@@ -86,7 +86,7 @@ export function ProjectScopeBoundary({
       <EmptyState
         actions={
           onManageProjects ? (
-            <Button onClick={onManageProjects}>管理项目</Button>
+            <Button onClick={onManageProjects}>管理内容空间</Button>
           ) : undefined
         }
         className="max-w-2xl"

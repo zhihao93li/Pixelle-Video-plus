@@ -133,7 +133,7 @@ export const FORMAL_SURFACES: readonly FormalSurface[] = [
   {
     name: "project-detail",
     path: `/settings/projects/${fixtureIds.project}`,
-    heading: "项目详情",
+    heading: "内容空间详情",
   },
 ]
 

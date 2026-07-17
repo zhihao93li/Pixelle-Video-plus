@@ -84,40 +84,6 @@ async def split_confirmed_script(
     )
 
 
-async def rewrite_review_unit(
-    *,
-    llm_service,
-    text: str,
-    instruction: str = "",
-    kind: str = "scene",
-    model: str | None = None,
-    provider_id: str | None = None,
-) -> str:
-    """Rewrite one review unit without changing its role in the surrounding plan."""
-
-    from pixelle_video.generation.drafting_support import _call_llm_retrying_empty
-
-    noun = "分页文案" if kind == "image_pages" else "分镜文案"
-    direction = instruction.strip() or "保持原意和信息完整，但换一种更清晰、自然的表达。"
-    prompt = f"""你正在修改一条{noun}。
-修改要求：{direction}
-原文：{text}
-
-只输出修改后的正文，不要编号、引号、解释或 Markdown。"""
-    rewritten = await _call_llm_retrying_empty(
-        llm_service,
-        prompt=prompt,
-        provider_id=provider_id,
-        model=model or None,
-        temperature=0.7,
-        max_tokens=800,
-    )
-    rewritten = (rewritten or "").strip().strip('"').strip("'")
-    if not rewritten:
-        raise ValueError(f"{noun}重写没有返回内容。")
-    return rewritten
-
-
 async def draft_digital_human_script(
     *, llm_service, goods_title: str, model: str | None = None
 ) -> str:

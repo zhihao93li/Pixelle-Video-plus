@@ -223,6 +223,17 @@ test("生产任务只在分镜确认站展示分镜编辑", async ({ page }) => 
   ).toBeVisible()
   await expect(page.getByRole("button", { name: "整套重新生成" })).toBeVisible()
   await expect(
+    page.getByRole("button", { name: "重新生成选中项" })
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole("button", { name: "删除第 1 镜并合并到上一镜" })
+  ).toBeDisabled()
+  await page.getByRole("button", { name: "删除第 2 镜并合并到上一镜" }).click()
+  await expect(page.getByLabel("第 1 镜文案")).toHaveValue(
+    "猫咪先闻到猫薄荷。随后短暂兴奋起来。"
+  )
+  await expect(page.getByLabel("第 2 镜文案")).toHaveCount(0)
+  await expect(
     page.getByRole("button", { name: "确认分镜并继续" })
   ).toHaveCount(1)
   await expect(

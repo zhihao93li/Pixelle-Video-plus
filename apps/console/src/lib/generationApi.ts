@@ -739,9 +739,8 @@ export class ApiError extends Error {
   }
 }
 
-export async function listTemplates(projectId?: string) {
-  const query = projectId ? `?project=${encodeURIComponent(projectId)}` : ""
-  return fetchJson<TemplateListResponse>(`/generation/templates${query}`)
+export async function listTemplates() {
+  return fetchJson<TemplateListResponse>("/generation/templates")
 }
 
 export async function listPipelines() {
@@ -900,7 +899,7 @@ export async function deleteProductionTemplate(templateId: string) {
   )
 }
 
-/** 用户侧启用/停用模板（退役的内置模板不可启用；被项目默认引用的不可停用）。 */
+/** 用户侧启用/停用模板（退役的内置模板不可重新启用）。 */
 export async function setTemplateEnabled(templateId: string, enabled: boolean) {
   return fetchJson<ProductionTemplate>(
     `/generation/templates/${templateId}/enabled`,
@@ -1053,11 +1052,7 @@ export type SceneManifest = {
 }
 
 export type ReviewAction =
-  | "direct_edit"
-  | "rewrite_script"
-  | "regenerate_selected"
-  | "regenerate_all"
-  | "confirm"
+  "direct_edit" | "rewrite_script" | "regenerate_all" | "confirm"
 
 export type ReviewReference = {
   title: string
@@ -1260,11 +1255,9 @@ export async function confirmContentItem(
 
 export async function reviseContentReview(input: {
   itemId: string
-  action:
-    "direct_edit" | "rewrite_script" | "regenerate_selected" | "regenerate_all"
+  action: "direct_edit" | "rewrite_script" | "regenerate_all"
   reviewId: string
   contentVersion: string
-  selectedSceneIds?: string[]
   instruction?: string
   variants?: Record<string, ContentVariant>
   sceneManifest?: SceneManifest
@@ -1278,7 +1271,6 @@ export async function reviseContentReview(input: {
         action: input.action,
         review_id: input.reviewId,
         content_version: input.contentVersion,
-        selected_scene_ids: input.selectedSceneIds ?? [],
         instruction: input.instruction?.trim() || null,
         variants: input.variants ?? null,
         scene_manifest: input.sceneManifest ?? null,
@@ -1831,7 +1823,7 @@ function outputRelativePath(path: string) {
 }
 
 // ---------------------------------------------------------------------------
-// 项目（品牌级内容线）
+// 内容空间
 // ---------------------------------------------------------------------------
 
 export type Project = {
@@ -1839,10 +1831,6 @@ export type Project = {
   name: string
   description: string
   status: "active" | "archived"
-  default_production_template_id: string | null
-  languages: string[]
-  tts_voice_by_language: Record<string, string>
-  publish_platforms: string[]
   created_at: string
   updated_at: string
 }
@@ -1855,22 +1843,12 @@ export type ProjectListResponse = {
 export type ProjectInput = {
   name: string
   description?: string
-  defaultProductionTemplateId?: string | null
-  languages?: string[]
-  ttsVoiceByLanguage?: Record<string, string>
-  publishPlatforms?: string[]
-  copyFromProjectId?: string
 }
 
 function projectBody(input: Partial<ProjectInput>) {
   return {
     name: input.name,
     description: input.description,
-    default_production_template_id: input.defaultProductionTemplateId,
-    languages: input.languages,
-    tts_voice_by_language: input.ttsVoiceByLanguage,
-    publish_platforms: input.publishPlatforms,
-    copy_from_project_id: input.copyFromProjectId,
   }
 }
 
@@ -1892,13 +1870,6 @@ export async function updateProject(
   return fetchJson<Project>(`/projects/${projectId}`, {
     method: "PUT",
     body: JSON.stringify(projectBody(patch)),
-  })
-}
-
-export async function setDefaultProject(projectId: string) {
-  return fetchJson<ProjectListResponse>("/projects/default", {
-    method: "PUT",
-    body: JSON.stringify({ project_id: projectId }),
   })
 }
 

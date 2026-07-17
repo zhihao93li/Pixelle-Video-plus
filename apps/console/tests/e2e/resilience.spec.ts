@@ -20,7 +20,7 @@ test.describe("极端内容与移动安全区", () => {
     await page.goto("/#/create", { waitUntil: "networkidle" })
 
     const projectSwitcher = page.getByRole("combobox", {
-      name: `切换项目，当前：${LONG_PROJECT_NAME}`,
+      name: `切换内容空间，当前：${LONG_PROJECT_NAME}`,
     })
     await expect(projectSwitcher).toBeVisible()
     await expect(projectSwitcher).toHaveAttribute("title", LONG_PROJECT_NAME)
@@ -154,7 +154,9 @@ test.describe("200% reflow 近似", () => {
     await page.goto(`/#/create/generate/${fixtureIds.videoTemplate}`, {
       waitUntil: "networkidle",
     })
-    await expect(page.getByRole("combobox", { name: /切换项目/ })).toBeVisible()
+    await expect(
+      page.getByRole("combobox", { name: /切换内容空间/ })
+    ).toBeVisible()
     await expect(
       page.getByRole("button", { name: "开始生成" }).last()
     ).toBeVisible()

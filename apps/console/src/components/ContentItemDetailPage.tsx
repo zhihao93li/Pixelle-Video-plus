@@ -704,6 +704,7 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
                         }
                         items={items}
                         key={taskId}
+                        title={item.title}
                       />
                     )
                   }
@@ -984,7 +985,7 @@ export function ContentItemDetailPage({ itemId }: { itemId: string }) {
 
           <TechDetails
             items={[
-              { label: "项目", value: item.project },
+              { label: "内容空间", value: item.project },
               { label: "条目 ID", value: item.item_id },
               {
                 label: "任务 ID",

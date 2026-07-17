@@ -24,7 +24,6 @@ ReviewKind = Literal["script", "video_scenes", "agent_image_scenes", "image_page
 ReviewAction = Literal[
     "direct_edit",
     "rewrite_script",
-    "regenerate_selected",
     "regenerate_all",
     "confirm",
 ]
@@ -241,7 +240,6 @@ def build_pending_review(item: ContentItem) -> PendingReviewSession | None:
         )
         allowed_actions = [
             "direct_edit",
-            "regenerate_selected",
             "regenerate_all",
             "confirm",
         ]

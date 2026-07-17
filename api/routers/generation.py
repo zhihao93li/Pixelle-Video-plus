@@ -170,13 +170,13 @@ def _production_template_response(template: ProductionTemplate) -> ProductionTem
 
 
 @router.get("/templates", response_model=ProductionTemplateListResponse)
-async def list_generation_templates(project: str | None = None):
+async def list_generation_templates():
     registry = build_default_production_template_registry()
     all_templates = _production_template_responses(registry.list())
     templates = [template for template in all_templates if template.access_scope == "public"]
     agent_templates = [template for template in all_templates if template.access_scope == "agent"]
     return ProductionTemplateListResponse(
-        default_template=_default_template_for_project(project),
+        default_template=_default_template_id(),
         templates=templates,
         agent_templates=agent_templates,
     )
@@ -293,20 +293,9 @@ class TemplateEnabledRequest(BaseModel):
     enabled: bool
 
 
-def _project_using_default_template(template_id: str) -> str | None:
-    """返回把该模板设为默认生产模板的项目名（含 archived）；无则 None。"""
-    from pixelle_video.content.projects import list_projects
-
-    _, projects = list_projects()
-    for project in projects:
-        if project.default_production_template_id == template_id:
-            return project.name
-    return None
-
-
 @router.put("/templates/{template_id}/enabled", response_model=ProductionTemplateResponse)
 async def set_template_enabled(template_id: str, request: TemplateEnabledRequest):
-    """用户侧启用/停用模板（退役的内置模板不可启用；被项目默认引用的不可停用）。"""
+    """用户侧启用/停用模板（退役的内置模板不可启用）。"""
     from pixelle_video.generation.template_overrides import save_enabled
     from pixelle_video.generation.templates import code_level_enabled
 
@@ -325,12 +314,6 @@ async def set_template_enabled(template_id: str, request: TemplateEnabledRequest
         # 清除停用开关，回到代码默认启用
         save_enabled(template_id, None)
     else:
-        used_by = _project_using_default_template(template_id)
-        if used_by:
-            raise HTTPException(
-                status_code=400,
-                detail=f"项目「{used_by}」正在用它作默认模板，请先换默认再停用。",
-            )
         save_enabled(template_id, False)
 
     return _production_template_response(
@@ -478,25 +461,14 @@ def _resolve_project_id(explicit: str | None) -> str:
         return explicit
     project = get_default_project()
     if project is None:
-        raise HTTPException(status_code=409, detail="No default project is configured.")
+        raise HTTPException(status_code=409, detail="No active content space is configured.")
     return project.project_id
 
 
-def _default_template_for_project(project_id: str | None) -> str | None:
-    """默认生产模板：项目 default_production_template_id（须存在且 enabled）> registry 内置默认。"""
+def _default_template_id() -> str | None:
+    """Return the code-level initial suggestion for legacy callers without an explicit id."""
     registry = build_default_production_template_registry()
-    if project_id:
-        from pixelle_video.content.projects import get_project
-
-        project = get_project(project_id)
-        if project and project.default_production_template_id:
-            try:
-                template = registry.get(project.default_production_template_id)
-            except ProductionTemplateError:
-                template = None
-            if template is not None and template.enabled:
-                return template.id
-    return registry.default_template_id(project="PetWoods", channel="xiaohongshu")
+    return registry.initial_template_id()
 
 
 @router.post("/batches", response_model=GenerationBatchResponse)

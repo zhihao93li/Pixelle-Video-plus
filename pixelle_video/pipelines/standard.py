@@ -101,9 +101,7 @@ class StandardPipeline(LinearVideoPipeline):
         confirmed_scenes = ctx.params.get("_confirmed_scenes")
         if isinstance(confirmed_scenes, list) and confirmed_scenes:
             narrations = [
-                str(narration).strip()
-                for narration in confirmed_scenes
-                if str(narration).strip()
+                str(narration).strip() for narration in confirmed_scenes if str(narration).strip()
             ]
             if not narrations:
                 raise ValueError("Confirmed scene plan is empty")
@@ -537,6 +535,7 @@ class StandardPipeline(LinearVideoPipeline):
                 "status": "completed",
                 "input": input_with_title,
                 "result": {
+                    "title": storyboard.title,
                     "video_path": result.video_path,
                     "duration": result.duration,
                     "file_size": result.file_size,

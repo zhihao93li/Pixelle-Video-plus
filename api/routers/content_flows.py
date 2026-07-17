@@ -99,10 +99,9 @@ class ConfirmRequest(TraceRequest):
 
 
 class ReviseReviewRequest(TraceRequest):
-    action: Literal["direct_edit", "rewrite_script", "regenerate_selected", "regenerate_all"]
+    action: Literal["direct_edit", "rewrite_script", "regenerate_all"]
     review_id: str = Field(min_length=1)
     content_version: str = Field(min_length=1)
-    selected_scene_ids: list[str] = Field(default_factory=list)
     instruction: str | None = Field(default=None, max_length=2000)
     variants: dict[str, ContentVariant] | None = None
     scene_manifest: SceneManifest | None = None
@@ -440,7 +439,6 @@ async def revise_review(
             identity.actor,
             {
                 "action": request.action,
-                "selected_scene_ids": request.selected_scene_ids,
                 "has_instruction": bool((request.instruction or "").strip()),
                 **_trace(request),
             },
@@ -489,7 +487,7 @@ async def _run_review_regeneration(
 ) -> None:
     """Run an LLM-assisted review revision after returning an acceptance response."""
 
-    from pixelle_video.content.drafting import draft_topic, rewrite_review_unit
+    from pixelle_video.content.drafting import draft_topic
     from pixelle_video.content.production_tasks import (
         load_production_task,
         set_task_state,
@@ -527,51 +525,28 @@ async def _run_review_regeneration(
             manifest = item.scene_manifest
             if manifest is None:
                 raise ValueError("当前没有可重新生成的分镜或分页。")
-            if request.action == "regenerate_all":
-                confirmed_variant = next(
-                    (variant for variant in item.variants.values() if variant.script.strip()),
-                    None,
+            confirmed_variant = next(
+                (variant for variant in item.variants.values() if variant.script.strip()),
+                None,
+            )
+            if confirmed_variant is None:
+                raise ValueError("没有可用于重新规划的文案。")
+            narrations = await split_confirmed_script(
+                llm_service=pixelle_video.llm,
+                script=confirmed_variant.script,
+                settings=task.effective_params,
+                language=confirmed_variant.language,
+                topic=item.title,
+            )
+            manifest.scenes = [
+                SceneDraft(
+                    scene_id=f"scene-{index}",
+                    order=index,
+                    narration=narration,
+                    image_prompt=narration,
                 )
-                if confirmed_variant is None:
-                    raise ValueError("没有可用于重新规划的文案。")
-                narrations = await split_confirmed_script(
-                    llm_service=pixelle_video.llm,
-                    script=confirmed_variant.script,
-                    settings=task.effective_params,
-                    language=confirmed_variant.language,
-                    topic=item.title,
-                )
-                manifest.scenes = [
-                    SceneDraft(
-                        scene_id=f"scene-{index}",
-                        order=index,
-                        narration=narration,
-                        image_prompt=narration,
-                    )
-                    for index, narration in enumerate(narrations, start=1)
-                ]
-            else:
-                selected = set(request.selected_scene_ids)
-                if not selected:
-                    raise ValueError("请至少选择一个要重新生成的镜头或分页。")
-                known = {scene.scene_id for scene in manifest.scenes}
-                unknown = sorted(selected - known)
-                if unknown:
-                    raise ValueError(f"找不到选中的镜头或分页：{', '.join(unknown)}")
-                model = str(task.effective_params.get("split_model") or "") or None
-                provider_id = str(task.effective_params.get("split_provider_id") or "") or None
-                for scene in manifest.scenes:
-                    if scene.scene_id in selected:
-                        scene.narration = await rewrite_review_unit(
-                            llm_service=pixelle_video.llm,
-                            text=scene.narration,
-                            instruction=request.instruction or "",
-                            provider_id=provider_id,
-                            kind=manifest.review_kind,
-                            model=model,
-                        )
-                        if manifest.review_kind == "agent_image_scenes":
-                            scene.image_prompt = scene.narration
+                for index, narration in enumerate(narrations, start=1)
+            ]
             manifest.confirmed = False
             manifest.updated_at = now_iso()
 
@@ -587,7 +562,6 @@ async def _run_review_regeneration(
             actor,
             {
                 "action": request.action,
-                "selected_scene_ids": request.selected_scene_ids,
                 "has_instruction": bool((request.instruction or "").strip()),
                 **_trace(request),
             },
@@ -967,6 +941,7 @@ async def _run_confirmed_digital_human(
             surface="agent" if identity.is_agent else "public",
         )
         generation_request.params = dict(task.effective_params)
+        generation_request.params["title"] = confirmed_variant.title or item.title
         generation_request.input["script"] = confirmed_variant.script
         generation_task = generation_service.submit(
             generation_request,
@@ -1647,6 +1622,9 @@ async def produce_item(
                 # 主题路线在提交主题时已冻结本次设置。人工确认后
                 # 必须继续使用同一份快照，不能重读已变化的模板默认。
                 generation_request.params = dict(production_task.effective_params)
+                content_title = str(input_payload.get("title") or "").strip()
+                if content_title:
+                    generation_request.params["title"] = content_title
             task = generation_service.submit(
                 generation_request,
                 surface="agent" if identity.is_agent else "public",

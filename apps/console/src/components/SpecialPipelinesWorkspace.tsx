@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 
 import { AdvancedGroup } from "@/components/shared/AdvancedGroup"
+import { BatchInputGuide } from "@/components/shared/BatchInputGuide"
 import { AsyncState } from "@/components/shared/AsyncState"
 import { FileDropzone } from "@/components/shared/FileDropzone"
 import {
@@ -145,7 +146,7 @@ export function SpecialPipelinesWorkspace({
       setIsRefreshing(true)
       setLoadError(null)
       try {
-        const response = await listTemplates(projectId ?? undefined)
+        const response = await listTemplates()
         if (!cancelled) {
           setTemplates(response.templates)
           cachedTemplatesRef.current = {
@@ -188,7 +189,7 @@ export function SpecialPipelinesWorkspace({
     return (
       <SpecialStateShell mode={initialMode}>
         <AsyncState
-          description="正在同步当前项目的专用生产模板。"
+          description="正在同步专用生产模板。"
           state="loading"
           title="正在读取模板"
         />
@@ -498,7 +499,8 @@ function SpecialWorkspace({
       const failedCount = results.length - createdCount
       if (createdCount === 0) {
         const firstFailure = results.find(
-          (result): result is PromiseRejectedResult => result.status === "rejected"
+          (result): result is PromiseRejectedResult =>
+            result.status === "rejected"
         )
         throw firstFailure?.reason ?? new Error("批量任务创建失败。")
       }
@@ -730,7 +732,6 @@ function SpecialWorkspace({
                 <InlineError message={submitError} title="提交失败" />
               ) : null}
             </WorkspacePanel>
-
           </section>
 
           {inBatch ? (
@@ -832,6 +833,17 @@ function ImageToVideoFields({
         onChange={onFilesChange}
         required
       />
+      {inBatch ? (
+        <BatchInputGuide
+          rules={[
+            "每张上传图片创建一条独立视频，不使用分隔线。",
+            "上传区里的每个文件卡片就是一个批量条目；移除图片，就不会为它创建任务。",
+            "所有视频共用同一段运动描述、视频标题和本次设置。",
+            "提交后每条视频都是独立任务；其中一条失败，不影响其他任务继续运行。",
+          ]}
+          title="批量图片如何区分"
+        />
+      ) : null}
       <PromptField
         id="i2v-prompt"
         label="运动描述"

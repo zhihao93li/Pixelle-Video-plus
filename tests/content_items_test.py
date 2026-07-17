@@ -21,7 +21,7 @@ BASE = "/api/content-items"
 @pytest.fixture(autouse=True)
 def isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(content_store, "CONTENT_ITEMS_DIR", tmp_path / "content-items")
-    # 隔离项目存储；首次读取会创建本地原生默认项目。
+    # 隔离内容空间存储；首次读取会创建本地初始空间。
     monkeypatch.setattr(projects, "get_data_path", lambda *parts: str(tmp_path / Path(*parts)))
     monkeypatch.setattr(task_store, "GENERATION_TASK_DIR", tmp_path / "generation-tasks")
     yield

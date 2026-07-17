@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
+  CircleCheck,
   FileText,
   Layers,
   Loader2,
   Play,
   RefreshCcw,
+  Settings2,
+  TriangleAlert,
   UploadCloud,
   X,
 } from "lucide-react"
@@ -44,6 +47,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { FileDropzone } from "@/components/shared/FileDropzone"
+import { BatchInputGuide } from "@/components/shared/BatchInputGuide"
 import { ProductionSettingsEditor } from "@/components/shared/ProductionSettingsEditor"
 import {
   artifactKindLabel,
@@ -67,6 +71,7 @@ import {
 } from "@/lib/templatePresentation"
 import { useExpertMode } from "@/lib/expertMode"
 import { navigate } from "@/lib/router"
+import { settingsLink } from "@/lib/settingsLinks"
 import { useCurrentProject } from "@/lib/currentProject"
 import { useLocalStorageState } from "@/lib/useLocalStorageState"
 import { frameTemplateLabel } from "@/lib/templateLabels"
@@ -100,6 +105,7 @@ import {
   type StandardGenerationSettings,
 } from "@/lib/productionDrafts"
 import { resolveGenerateTemplate } from "@/lib/productionTemplateResolution"
+import { pipelineReadiness } from "@/lib/productionReadiness"
 import {
   useProductionSettingsResources,
   type ProductionSettingsResources,
@@ -377,6 +383,12 @@ export function GenerateWorkspace({
   const selectedPipeline = resources.pipelines.find(
     (item) => item.id === template?.pipeline_id
   )
+  const readinessItems = pipelineReadiness(
+    selectedPipeline,
+    resources.diagnostics,
+    advancedSettings.imageProvider
+  )
+  const missingReadinessItems = readinessItems.filter((item) => !item.ok)
   const confirmationSummary =
     selectedPipeline?.stages
       .filter((stage) => stage.actor === "user")
@@ -440,6 +452,7 @@ export function GenerateWorkspace({
     loadState === "ready" &&
     templateCanSubmit &&
     hasRequiredTemplateInput &&
+    missingReadinessItems.length === 0 &&
     !isSubmitting
   const submitDisabledReason = canSubmit
     ? null
@@ -449,11 +462,13 @@ export function GenerateWorkspace({
         ? "正在读取可用模板"
         : !templateCanSubmit
           ? "当前模板暂不支持在此页提交"
-          : templateNeedsAssets
-            ? "请先选择素材文件"
-            : templateNeedsTopic
-              ? "请先输入选题"
-              : "请先输入文案"
+          : missingReadinessItems.length > 0
+            ? `还需完成：${missingReadinessItems.map((item) => item.label).join("、")}`
+            : templateNeedsAssets
+              ? "请先选择素材文件"
+              : templateNeedsTopic
+                ? "请先输入选题"
+                : "请先输入文案"
 
   useEffect(() => {
     let cancelled = false
@@ -462,8 +477,7 @@ export function GenerateWorkspace({
       setLoadState("loading")
       setTemplatesError(null)
       try {
-        // 默认模板 = 项目默认 > 全局（后端按 project 解析 default_template）
-        const response = await listTemplates(projectId ?? undefined)
+        const response = await listTemplates()
         if (cancelled) {
           return
         }
@@ -508,11 +522,11 @@ export function GenerateWorkspace({
     return () => {
       cancelled = true
     }
-  }, [reloadToken, templateId, projectId])
+  }, [reloadToken, templateId])
 
   async function submitTask() {
     if (!template || !canSubmit || !projectId) {
-      if (!projectId) setSubmitError("请先选择项目。")
+      if (!projectId) setSubmitError("请先选择内容空间。")
       return
     }
 
@@ -663,26 +677,49 @@ export function GenerateWorkspace({
               templates={templates}
             />
           </div>
-          {loadState === "ready" && template ? (
-            <div className="hidden shrink-0 lg:block">
-              <GenerationSubmitControl
-                batchCount={batchItems.length}
-                batchMeasureWord={batchMeasureWord}
-                batchOutputNoun={batchOutputNoun}
-                canSubmit={canSubmit}
-                inBatch={inBatch}
-                isSubmitting={isSubmitting}
-                onSubmitBatch={submitBatch}
-                onSubmitTask={submitTask}
-                submitDisabledReason={submitDisabledReason}
-                templateNeedsAssets={templateNeedsAssets}
-              />
-            </div>
-          ) : null}
         </div>
 
         {loadState === "ready" && template ? (
           <>
+            {missingReadinessItems.length > 0 ? (
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+                <div className="flex min-w-0 gap-3">
+                  <TriangleAlert className="mt-0.5 size-5 shrink-0 text-amber-700 dark:text-amber-400" />
+                  <div>
+                    <p className="text-sm font-medium">
+                      开始前还需完成必要设置
+                    </p>
+                    <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                      {missingReadinessItems.map((item) => (
+                        <li key={item.id}>
+                          · {item.label}：{item.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+                <Button
+                  onClick={() =>
+                    navigate(
+                      settingsLink({
+                        kind: missingReadinessItems[0].settingsKind,
+                      })
+                    )
+                  }
+                  size="sm"
+                  variant="outline"
+                >
+                  <Settings2 data-icon="inline-start" />
+                  去完成设置
+                </Button>
+              </div>
+            ) : readinessItems.length > 0 ? (
+              <div className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
+                <CircleCheck className="size-4 text-emerald-600" />
+                当前模板所需的基础环境已就绪
+              </div>
+            ) : null}
+
             <div
               className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(420px,min(42%,720px))] xl:gap-5"
               data-slot="production-workspace"
@@ -874,26 +911,35 @@ export function GenerateWorkspace({
               )}
             </div>
 
-            <div className="sticky bottom-[calc(4.25rem+var(--safe-area-bottom))] z-20 mt-4 border-t bg-background/95 px-1 py-3 backdrop-blur lg:hidden">
-              <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                <span className="truncate">{overrideSummary}</span>
-                <span className="shrink-0">
-                  {template?.estimated_turnaround || "约 2 分钟"}
-                </span>
+            <div className="sticky bottom-[calc(4.25rem+var(--safe-area-bottom))] z-30 mt-4 rounded-t-lg border bg-background/95 px-4 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur lg:bottom-0">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">
+                    {missingReadinessItems.length > 0
+                      ? `还需完成 ${missingReadinessItems.length} 项设置`
+                      : inBatch
+                        ? `准备生成 ${batchItems.length} ${batchMeasureWord}${batchOutputNoun}`
+                        : "本次生产已准备好"}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span className="truncate">{overrideSummary}</span>
+                    <span>{template?.estimated_turnaround || "约 2 分钟"}</span>
+                  </div>
+                </div>
+                <GenerationSubmitControl
+                  batchCount={batchItems.length}
+                  batchMeasureWord={batchMeasureWord}
+                  batchOutputNoun={batchOutputNoun}
+                  canSubmit={canSubmit}
+                  className="w-full sm:w-auto sm:min-w-36"
+                  inBatch={inBatch}
+                  isSubmitting={isSubmitting}
+                  onSubmitBatch={submitBatch}
+                  onSubmitTask={submitTask}
+                  submitDisabledReason={submitDisabledReason}
+                  templateNeedsAssets={templateNeedsAssets}
+                />
               </div>
-              <GenerationSubmitControl
-                batchCount={batchItems.length}
-                batchMeasureWord={batchMeasureWord}
-                batchOutputNoun={batchOutputNoun}
-                canSubmit={canSubmit}
-                className="w-full"
-                inBatch={inBatch}
-                isSubmitting={isSubmitting}
-                onSubmitBatch={submitBatch}
-                onSubmitTask={submitTask}
-                submitDisabledReason={submitDisabledReason}
-                templateNeedsAssets={templateNeedsAssets}
-              />
             </div>
           </>
         ) : null}
@@ -953,7 +999,7 @@ function GenerationSubmitControl({
               {batchOutputNoun}？
             </AlertDialogTitle>
             <AlertDialogDescription>
-              每条会占用一次生成额度。提交后可以在当前页面或「任务」中查看进度，失败项目可单独重试。
+              每条会创建一个独立任务。提交后统一到工作台查看进度，失败任务可单独重试。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1068,13 +1114,16 @@ function TemplateSummaryBar({
           </Badge>
           <Badge variant="outline">预计 {template.estimated_turnaround}</Badge>
         </div>
-        <button
-          className="shrink-0 self-start text-xs text-primary transition-colors hover:underline sm:self-auto"
+        <Button
+          className="shrink-0 self-start sm:self-auto"
           onClick={() => navigate(`/create/recipes/${template.id}`)}
+          size="sm"
           type="button"
+          variant="outline"
         >
-          调整默认模板
-        </button>
+          <Settings2 data-icon="inline-start" />
+          管理模板
+        </Button>
       </div>
       <p className="line-clamp-1 text-xs leading-5 text-muted-foreground">
         {template.description}
@@ -1147,12 +1196,6 @@ function StandardInput({
           ? "这段文字会逐行排版成图集，不配音、不合成视频。"
           : "这段文字会按原文拆分、配音、配画面并合成视频。"
   const batchListLabel = artifactKind === "text" ? "稿件列表" : "文案列表"
-  const batchListHint =
-    artifactKind === "text"
-      ? "每篇会按模板的长文提示词扩写成结构化 markdown，换行不影响结果。"
-      : artifactKind === "image_set"
-        ? "用 --- 单独一行分隔多条；每条首行作标题。图文线按行分页，注意换行即分页。"
-        : "用 --- 单独一行分隔多条；每条首行作标题。"
   const expertMode = useExpertMode()
   const previewText =
     previewCopy(inputKind, text, advancedSettings.title) ||
@@ -1260,7 +1303,6 @@ function StandardInput({
       {batchMode ? (
         <BatchScriptInput
           artifactKind={artifactKind}
-          hint={batchListHint}
           items={batchItems}
           label={batchListLabel}
           onRemoveItem={onRemoveBatchItem}
@@ -1752,7 +1794,6 @@ function previewCopy(
 function BatchScriptInput({
   text,
   label,
-  hint,
   items,
   artifactKind,
   onTextChange,
@@ -1760,12 +1801,18 @@ function BatchScriptInput({
 }: {
   text: string
   label: string
-  hint: string
   items: ParsedScriptItem[]
   artifactKind: ArtifactKind
   onTextChange?: (value: string) => void
   onRemoveItem?: (index: number) => void
 }) {
+  const contentRule =
+    artifactKind === "text"
+      ? "每个区块创建一篇独立长文；标题之后的内容是扩写素材，最终结构由长文提示词决定。"
+      : artifactKind === "image_set"
+        ? "每个区块创建一篇独立图文；分页遵循本次的内容拆分方式，选择“按行直出”时每个非空行是一页。"
+        : "每个区块创建一条独立视频；标题之后的内容是视频文案，分镜数量与切分由分镜模型决定。"
+
   return (
     <div className="flex flex-col gap-3">
       <Field>
@@ -1779,8 +1826,22 @@ function BatchScriptInput({
           }
           value={text}
         />
-        <FieldDescription>{hint}</FieldDescription>
+        <FieldDescription>
+          输入后，下方会按实际提交结果实时显示解析预览。
+        </FieldDescription>
       </Field>
+      <BatchInputGuide
+        example={
+          "第一条标题\n第一条正文第一段\n第一条正文第二段\n\n---\n\n第二条标题\n第二条完整正文"
+        }
+        rules={[
+          "在两条内容之间输入一行 ---；分隔线必须单独占一行。",
+          "每个区块的第一行作为标题，标题后面的所有内容作为正文。",
+          "如果区块只有一行，这一行会同时作为标题和正文；多余的空区块会被忽略。",
+          contentRule,
+          "所有条目共用当前页面的本次设置，提交后会成为彼此独立的任务。",
+        ]}
+      />
       {items.length > 0 ? (
         <div className="rounded-lg border bg-muted/30 p-3">
           <div className="text-sm font-medium">

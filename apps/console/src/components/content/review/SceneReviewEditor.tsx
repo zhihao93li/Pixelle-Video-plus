@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -8,6 +9,7 @@ import {
   type PendingReviewSession,
   type SceneDraft,
 } from "@/lib/generationApi"
+import { mergeSceneIntoPrevious } from "@/lib/sceneReview"
 
 export function SceneReviewEditor({
   busy,
@@ -19,11 +21,7 @@ export function SceneReviewEditor({
   busy: boolean
   review: PendingReviewSession
   onConfirm: (scenes: SceneDraft[]) => Promise<void>
-  onRegenerate: (
-    action: "regenerate_selected" | "regenerate_all",
-    selectedSceneIds: string[],
-    instruction: string
-  ) => Promise<void>
+  onRegenerate: (instruction: string) => Promise<void>
   onSave: (scenes: SceneDraft[]) => Promise<void>
 }) {
   const manifest =
@@ -33,7 +31,6 @@ export function SceneReviewEditor({
   const [scenes, setScenes] = useState(() =>
     (manifest?.scenes ?? []).map((scene) => ({ ...scene }))
   )
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [instruction, setInstruction] = useState("")
   const invalid =
     scenes.length === 0 ||
@@ -52,24 +49,9 @@ export function SceneReviewEditor({
     )
   }
 
-  function selectionControl(scene: SceneDraft) {
-    return (
-      <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-muted-foreground">
-        <input
-          checked={selectedIds.includes(scene.scene_id)}
-          className="size-4 accent-primary"
-          onChange={(event) =>
-            setSelectedIds((current) =>
-              event.target.checked
-                ? [...current, scene.scene_id]
-                : current.filter((id) => id !== scene.scene_id)
-            )
-          }
-          type="checkbox"
-        />
-        <span className="text-xs">选择</span>
-      </label>
-    )
+  function removeScene(index: number) {
+    if (index === 0) return
+    setScenes((current) => mergeSceneIntoPrevious(current, index))
   }
 
   return (
@@ -126,7 +108,16 @@ export function SceneReviewEditor({
                     约 {scene.duration} 秒
                   </span>
                 ) : null}
-                {selectionControl(scene)}
+                <Button
+                  aria-label={`删除第 ${scene.order} 镜并合并到上一镜`}
+                  disabled={busy || index === 0}
+                  onClick={() => removeScene(index)}
+                  size="icon-sm"
+                  title={index === 0 ? "第一镜没有上一镜，不能删除" : undefined}
+                  variant="ghost"
+                >
+                  <Trash2 />
+                </Button>
               </div>
             ) : (
               <div className="min-w-0 flex-1 space-y-2">
@@ -135,7 +126,20 @@ export function SceneReviewEditor({
                     第 {scene.order} {isPages ? "页" : "镜"}
                     {scene.duration ? ` · 约 ${scene.duration} 秒` : ""}
                   </span>
-                  {selectionControl(scene)}
+                  <Button
+                    aria-label={`删除第 ${scene.order} ${isPages ? "页" : "镜"}并合并到上一${isPages ? "页" : "镜"}`}
+                    disabled={busy || index === 0}
+                    onClick={() => removeScene(index)}
+                    size="icon-sm"
+                    title={
+                      index === 0
+                        ? `第一${isPages ? "页" : "镜"}没有上一项，不能删除`
+                        : undefined
+                    }
+                    variant="ghost"
+                  >
+                    <Trash2 />
+                  </Button>
                 </div>
                 <Textarea
                   aria-label={`第 ${scene.order} ${isPages ? "页" : "镜"}文案`}
@@ -170,23 +174,14 @@ export function SceneReviewEditor({
         aria-label="重新生成修改意见"
         className="min-h-20 resize-y"
         onChange={(event) => setInstruction(event.target.value)}
-        placeholder="修改方向（选填）"
+        placeholder="整套重新生成的修改方向（选填）"
         value={instruction}
       />
 
       <div className="flex flex-wrap justify-end gap-2 border-t pt-3">
         <Button
-          disabled={busy || selectedIds.length === 0}
-          onClick={() =>
-            void onRegenerate("regenerate_selected", selectedIds, instruction)
-          }
-          variant="ghost"
-        >
-          重新生成选中项
-        </Button>
-        <Button
           disabled={busy}
-          onClick={() => void onRegenerate("regenerate_all", [], instruction)}
+          onClick={() => void onRegenerate(instruction)}
           variant="ghost"
         >
           整套重新生成
