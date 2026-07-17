@@ -686,6 +686,132 @@
     },
     {
       "access_scope": "public",
+      "category": "general",
+      "description": "把文案的每个非空行直接作为一个已确定分镜，不再由分镜模型重新拆分。",
+      "id": "line_script_to_video",
+      "input": {
+        "description": "提供已按行分好镜的完整文案，每个非空行是一镜。",
+        "optional_fields": [
+          {
+            "default": null,
+            "description": "Optional user-provided title",
+            "field_type": "string",
+            "name": "title"
+          }
+        ],
+        "required_fields": [
+          {
+            "default": null,
+            "description": "Line-delimited confirmed scene script",
+            "field_type": "string",
+            "name": "script"
+          }
+        ]
+      },
+      "launch_surfaces": [
+        "react",
+        "agent",
+        "batch"
+      ],
+      "name": "逐行分镜生成视频",
+      "outputs": [
+        {
+          "description": "Final video",
+          "kind": "video",
+          "required": true,
+          "role": "primary_video"
+        },
+        {
+          "description": "Storyboard and scene metadata",
+          "kind": "storyboard",
+          "required": false,
+          "role": "storyboard"
+        }
+      ],
+      "product_family": "口播视频",
+      "quick_setting_keys": [
+        "frame_template",
+        "tts_voice",
+        "tts_speed",
+        "bgm_path"
+      ],
+      "required_capabilities": [
+        "llm",
+        "tts",
+        "media",
+        "ffmpeg",
+        "persistence"
+      ],
+      "stages": [
+        {
+          "actor": "system",
+          "description": "",
+          "id": "parse_line_scenes",
+          "name": "读取逐行分镜",
+          "setting_keys": []
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_image_prompts",
+          "name": "视觉提示",
+          "setting_keys": [
+            "prompt_prefix",
+            "image_prompt_visual_context",
+            "image_prompt_generation_rules"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_tts",
+          "name": "配音",
+          "setting_keys": [
+            "tts_inference_mode",
+            "tts_workflow",
+            "tts_voice",
+            "tts_speed",
+            "ref_audio"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "generate_media",
+          "name": "画面",
+          "setting_keys": [
+            "image_provider",
+            "image_model",
+            "media_workflow",
+            "frame_template",
+            "template_params",
+            "media_width",
+            "media_height"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "compose_video",
+          "name": "合成",
+          "setting_keys": [
+            "compose_runtime",
+            "bgm_path",
+            "bgm_volume",
+            "bgm_mode"
+          ]
+        },
+        {
+          "actor": "system",
+          "description": "",
+          "id": "save_artifacts",
+          "name": "保存产物",
+          "setting_keys": []
+        }
+      ]
+    },
+    {
+      "access_scope": "public",
       "category": "long_form",
       "description": "把确认稿扩写成结构化长文。",
       "id": "long_form",
@@ -1636,6 +1762,57 @@
       "required_capabilities": [
         "llm",
         "media",
+        "persistence"
+      ],
+      "version": "v1"
+    },
+    {
+      "access_scope": "public",
+      "allowed_user_params": [
+        "title",
+        "frame_template",
+        "template_params",
+        "media_workflow",
+        "image_provider",
+        "image_model",
+        "media_width",
+        "media_height",
+        "prompt_prefix",
+        "image_prompt_visual_context",
+        "image_prompt_generation_rules",
+        "bgm_path",
+        "bgm_volume",
+        "bgm_mode",
+        "tts_inference_mode",
+        "tts_workflow",
+        "tts_voice",
+        "tts_speed",
+        "ref_audio",
+        "compose_runtime"
+      ],
+      "description": "每个非空行固定作为一个分镜，不再由 AI 重新拆分；后续继续生成配图、配音、字幕并合成口播视频。",
+      "display_name": "逐行分镜口播视频",
+      "enabled_by_code": true,
+      "fixed_param_keys": [
+        "allow_silent",
+        "bgm_mode",
+        "bgm_volume",
+        "compose_runtime",
+        "frame_template",
+        "quality_profile",
+        "video_fps"
+      ],
+      "id": "pipeline_line_script_to_video_base_v1",
+      "input_requirements": [
+        "script"
+      ],
+      "passthrough_input_fields": [],
+      "pipeline_id": "line_script_to_video",
+      "required_capabilities": [
+        "llm",
+        "tts",
+        "media",
+        "ffmpeg",
         "persistence"
       ],
       "version": "v1"

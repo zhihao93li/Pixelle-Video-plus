@@ -6,6 +6,7 @@ from pixelle_video.generation.templates import (
 )
 
 STANDARD_SKELETON = "pipeline_standard_base_v1"
+LINE_SCRIPT_SKELETON = "pipeline_line_script_to_video_base_v1"
 TOPIC_SKELETON = "pipeline_topic_to_video_base_v1"
 ASSET_SKELETON = "pipeline_asset_based_base_v1"
 CODEX_IMAGE_STORY = "codex_image_story_v1"
@@ -42,9 +43,9 @@ def test_standard_skeleton_compiles_to_existing_generation_request():
     assert request.metadata["production_template"] == {
         "id": STANDARD_SKELETON,
         "version": "v1",
-            "name": "图文口播视频",
-            "pipeline_id": "script_to_video",
-            "quality_tier": "daily",
+        "name": "图文口播视频",
+        "pipeline_id": "script_to_video",
+        "quality_tier": "daily",
     }
 
 
@@ -79,6 +80,27 @@ def test_codex_image_story_is_codex_only_and_preserves_confirmed_scenes():
     assert request.input == {"scenes": scenes}
     assert request.params["prompt_prefix"] == "warm editorial illustration"
     assert "media_workflow" not in request.params
+
+
+def test_line_script_skeleton_preserves_lines_without_scene_planning_settings():
+    registry = build_default_production_template_registry()
+    template = registry.get(LINE_SCRIPT_SKELETON)
+
+    assert template.pipeline_id == "line_script_to_video"
+    assert template.input_requirements == ["script"]
+    assert not any(key.startswith("split_") for key in template.allowed_user_params)
+    assert not any(key.startswith("split_") for key in template.fixed_params)
+
+    request = registry.compile_request(
+        LINE_SCRIPT_SKELETON,
+        input={
+            "script": "第一镜\n\n第二镜",
+            "title": "逐行测试",
+        },
+    )
+    assert request.pipeline_id == "line_script_to_video"
+    assert request.input == {"script": "第一镜\n\n第二镜"}
+    assert request.params["title"] == "逐行测试"
 
 
 def test_writing_and_scene_settings_belong_to_the_route_recipe():
@@ -147,6 +169,7 @@ def test_builtin_video_templates_inherit_the_system_tts_service():
     for template_id in (
         TOPIC_SKELETON,
         STANDARD_SKELETON,
+        LINE_SCRIPT_SKELETON,
         ASSET_SKELETON,
         "pixelle_digital_human_basic_v1",
     ):
@@ -208,8 +231,9 @@ def test_registry_lists_current_skeletons_in_stable_order():
 
     assert ids[0] == TOPIC_SKELETON
     assert ids[1] == STANDARD_SKELETON
-    assert ids[2] == CODEX_IMAGE_STORY
-    assert ids[3] == ASSET_SKELETON
+    assert ids[2] == LINE_SCRIPT_SKELETON
+    assert ids[3] == CODEX_IMAGE_STORY
+    assert ids[4] == ASSET_SKELETON
 
 
 def test_special_workflow_templates_compile_to_unified_generation_requests():

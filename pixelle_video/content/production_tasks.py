@@ -97,6 +97,8 @@ class ProductionTask(BaseModel):
     produced_at: str | None = None
     cancelled_at: str | None = None
     cancellation_request_id: str | None = None
+    archived_at: str | None = None
+    archived_by: ProductionActor | None = None
 
 
 class ProductionTaskConflict(ValueError):
@@ -165,6 +167,29 @@ def delete_production_task(task_id: str, directory: Path | None = None) -> bool:
             return False
         path.unlink()
         return True
+
+
+def set_task_archived(
+    task_id: str,
+    *,
+    archived: bool,
+    actor: ProductionActor,
+    directory: Path | None = None,
+) -> ProductionTask:
+    """Hide or restore one workbench card without changing its production state."""
+
+    with _lock:
+        task = load_production_task(task_id, directory)
+        if task is None:
+            raise KeyError(f"Unknown production task: {task_id}")
+        if archived and task.state not in {"failed", "produced", "cancelled"}:
+            raise ValueError("只能归档失败、已产出或已取消的任务。")
+        if archived == (task.archived_at is not None):
+            return task
+        task.archived_at = now_iso() if archived else None
+        task.archived_by = actor if archived else None
+        task.updated_at = now_iso()
+        return save_production_task(task, directory)
 
 
 def create_production_task(

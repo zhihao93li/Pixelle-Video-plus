@@ -153,6 +153,161 @@ def test_production_create_rejects_removed_entry_field(isolated_production):
     assert response.status_code == 422
 
 
+def _workbench_task(
+    *,
+    project_id: str,
+    content_item_id: str,
+    request_id: str,
+    state: str,
+    title: str,
+):
+    task, _ = create_production_task(
+        content_item_id=content_item_id,
+        project_id=project_id,
+        pipeline_id="script_to_video",
+        recipe_id="pipeline_standard_base_v1",
+        recipe_version="v1",
+        title=title,
+        artifact_type="video",
+        source="react",
+        actor="user",
+        stage_id="review_script" if state == "needs_user" else state,
+        stage_label=title,
+        next_actor="user",
+        request_id=request_id,
+        request_hash=f"{request_id}-hash",
+        state=state,
+    )
+    return task
+
+
+def test_workbench_cards_are_sorted_by_latest_update_descending(isolated_production):
+    _, project = isolated_production
+    older_item = new_content_item(title="较早任务", project=project.project_id)
+    newer_item = new_content_item(title="较新任务", project=project.project_id)
+    content_store.save_item(older_item)
+    content_store.save_item(newer_item)
+    older = _workbench_task(
+        project_id=project.project_id,
+        content_item_id=older_item.item_id,
+        request_id="workbench-order-older",
+        state="needs_user",
+        title="较早任务",
+    )
+    newer = _workbench_task(
+        project_id=project.project_id,
+        content_item_id=newer_item.item_id,
+        request_id="workbench-order-newer",
+        state="needs_user",
+        title="较新任务",
+    )
+    older.updated_at = "2026-01-01T00:00:00+00:00"
+    newer.updated_at = "2026-02-01T00:00:00+00:00"
+    save_production_task(older)
+    save_production_task(newer)
+
+    async def fake_generation_service():
+        return FakeGenerationService()
+
+    app.dependency_overrides[get_generation_service] = fake_generation_service
+    response = TestClient(app).get(
+        "/api/production-tasks",
+        params={"project_id": project.project_id, "state": "needs_user"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert [item["production_task_id"] for item in response.json()["items"]] == [
+        newer.production_task_id,
+        older.production_task_id,
+    ]
+
+
+def test_workbench_task_archive_is_reversible_and_does_not_change_state(
+    isolated_production,
+):
+    _, project = isolated_production
+    item = new_content_item(title="可归档任务", project=project.project_id)
+    content_store.save_item(item)
+    task = _workbench_task(
+        project_id=project.project_id,
+        content_item_id=item.item_id,
+        request_id="workbench-archive",
+        state="failed",
+        title="可归档任务",
+    )
+
+    async def fake_generation_service():
+        return FakeGenerationService()
+
+    app.dependency_overrides[get_generation_service] = fake_generation_service
+    client = TestClient(app)
+    archived = client.post(
+        "/api/production-tasks/batch/archive",
+        json={"task_ids": [task.production_task_id]},
+    )
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["changed_count"] == 1
+    assert archived.json()["items"][0]["state"] == "failed"
+    assert archived.json()["items"][0]["archived_at"] is not None
+
+    hidden = client.get(
+        "/api/production-tasks",
+        params={"project_id": project.project_id, "state": "failed"},
+    )
+    assert hidden.json()["items"] == []
+    visible = client.get(
+        "/api/production-tasks",
+        params={
+            "project_id": project.project_id,
+            "state": "failed",
+            "include_archived": True,
+        },
+    )
+    assert visible.json()["items"][0]["production_task_id"] == task.production_task_id
+    assert visible.json()["items"][0]["archived_at"] is not None
+
+    restored = client.post(
+        "/api/production-tasks/batch/restore",
+        json={"task_ids": [task.production_task_id]},
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["items"][0]["archived_at"] is None
+    assert restored.json()["items"][0]["state"] == "failed"
+
+
+def test_workbench_archive_rejects_active_tasks_without_partial_changes(
+    isolated_production,
+):
+    _, project = isolated_production
+    failed_item = new_content_item(title="失败任务", project=project.project_id)
+    running_item = new_content_item(title="运行任务", project=project.project_id)
+    content_store.save_item(failed_item)
+    content_store.save_item(running_item)
+    failed = _workbench_task(
+        project_id=project.project_id,
+        content_item_id=failed_item.item_id,
+        request_id="archive-atomic-failed",
+        state="failed",
+        title="失败任务",
+    )
+    running = _workbench_task(
+        project_id=project.project_id,
+        content_item_id=running_item.item_id,
+        request_id="archive-atomic-running",
+        state="in_progress",
+        title="运行任务",
+    )
+
+    response = TestClient(app).post(
+        "/api/production-tasks/batch/archive",
+        json={"task_ids": [failed.production_task_id, running.production_task_id]},
+    )
+
+    assert response.status_code == 409, response.text
+    assert load_production_task(failed.production_task_id).archived_at is None
+    assert load_production_task(running.production_task_id).archived_at is None
+
+
 @pytest.mark.asyncio
 async def test_restart_recovers_safe_scene_planning_stage(
     isolated_production,

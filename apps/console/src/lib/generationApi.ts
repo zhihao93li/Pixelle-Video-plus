@@ -204,6 +204,8 @@ export type ProductionTask = {
   produced_at: string | null
   cancelled_at: string | null
   cancellation_request_id: string | null
+  archived_at: string | null
+  archived_by: "user" | "system" | "agent" | null
   error: GenerationError | null
 }
 
@@ -259,6 +261,8 @@ export type WorkbenchTaskCard = {
   waiting_since: string | null
   failed_at: string | null
   produced_at: string | null
+  archived_at: string | null
+  archived_by: "user" | "system" | "agent" | null
 }
 
 export type WorkbenchTaskListResponse = {
@@ -796,6 +800,26 @@ export async function cancelProductionTask(taskId: string) {
     `/production-tasks/${taskId}?request_id=${encodeURIComponent(requestId)}`,
     {
       method: "DELETE",
+    }
+  )
+}
+
+export async function archiveProductionTasks(taskIds: string[]) {
+  return fetchJson<{ items: ProductionTask[]; changed_count: number }>(
+    "/production-tasks/batch/archive",
+    {
+      method: "POST",
+      body: JSON.stringify({ task_ids: taskIds }),
+    }
+  )
+}
+
+export async function restoreProductionTasks(taskIds: string[]) {
+  return fetchJson<{ items: ProductionTask[]; changed_count: number }>(
+    "/production-tasks/batch/restore",
+    {
+      method: "POST",
+      body: JSON.stringify({ task_ids: taskIds }),
     }
   )
 }

@@ -17,6 +17,7 @@ def test_default_pipeline_manifests_have_one_input_contract_each():
     assert [manifest.id for manifest in manifests] == [
         "topic_to_video",
         "script_to_video",
+        "line_script_to_video",
         "codex_scene_video",
         "asset_based",
         "topic_to_image_post",
@@ -46,6 +47,14 @@ def test_default_pipeline_manifests_have_one_input_contract_each():
     assert set(script.quick_setting_keys) <= {
         key for stage in script.stages for key in stage.setting_keys
     }
+
+    line_script = next(item for item in manifests if item.id == "line_script_to_video")
+    assert _field_names(line_script.input.required_fields) == ["script"]
+    assert line_script.stages[0].id == "parse_line_scenes"
+    assert all(stage.id != "split_scenes" for stage in line_script.stages)
+    assert all(
+        not key.startswith("split_") for stage in line_script.stages for key in stage.setting_keys
+    )
 
     codex = next(item for item in manifests if item.id == "codex_scene_video")
     assert codex.access_scope == "agent"
@@ -101,6 +110,7 @@ def test_default_pipeline_registry_can_be_built_without_running_generation():
     assert registry.pipeline_ids() == [
         "topic_to_video",
         "script_to_video",
+        "line_script_to_video",
         "codex_scene_video",
         "asset_based",
         "topic_to_image_post",
@@ -123,6 +133,7 @@ async def test_pixelle_core_registers_pipeline_instances_and_manifests():
     expected = {
         "topic_to_video",
         "script_to_video",
+        "line_script_to_video",
         "codex_scene_video",
         "asset_based",
         "topic_to_image_post",
@@ -138,5 +149,9 @@ async def test_pixelle_core_registers_pipeline_instances_and_manifests():
     assert core.pipeline_registry.get_pipeline("topic_to_video") is core.pipelines["topic_to_video"]
     assert (
         core.pipeline_registry.get_pipeline("script_to_video") is core.pipelines["script_to_video"]
+    )
+    assert (
+        core.pipeline_registry.get_pipeline("line_script_to_video")
+        is core.pipelines["line_script_to_video"]
     )
     assert core.pipeline_registry.get_pipeline("i2v") is core.pipelines["i2v"]

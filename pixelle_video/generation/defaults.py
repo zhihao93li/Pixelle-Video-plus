@@ -54,6 +54,7 @@ def build_default_pipeline_manifests() -> list[PipelineManifest]:
     return [
         _topic_to_video_manifest(),
         _script_to_video_manifest(),
+        _line_script_to_video_manifest(),
         _codex_scene_video_manifest(),
         _asset_based_manifest(),
         _topic_to_image_post_manifest(),
@@ -190,6 +191,34 @@ def _script_to_video_manifest() -> PipelineManifest:
             ],
         ),
         stages=_video_production_stages(),
+        quick_setting_keys=[
+            "frame_template",
+            "tts_voice",
+            "tts_speed",
+            "bgm_path",
+        ],
+        outputs=_standard_outputs(),
+        required_capabilities=["llm", "tts", "media", "ffmpeg", "persistence"],
+        launch_surfaces=["react", "agent", "batch"],
+    )
+
+
+def _line_script_to_video_manifest() -> PipelineManifest:
+    return PipelineManifest(
+        id="line_script_to_video",
+        name="逐行分镜生成视频",
+        description="把文案的每个非空行直接作为一个已确定分镜，不再由分镜模型重新拆分。",
+        category="general",
+        product_family="口播视频",
+        input=_input(
+            description="提供已按行分好镜的完整文案，每个非空行是一镜。",
+            required=[_field("script", description="Line-delimited confirmed scene script")],
+            optional=[_field("title", description="Optional user-provided title")],
+        ),
+        stages=[
+            _stage("parse_line_scenes", "读取逐行分镜"),
+            *_video_production_stages()[1:],
+        ],
         quick_setting_keys=[
             "frame_template",
             "tts_voice",

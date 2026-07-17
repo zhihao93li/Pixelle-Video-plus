@@ -144,6 +144,7 @@ def test_generation_pipelines_endpoint_lists_registered_manifests():
     assert [pipeline["id"] for pipeline in payload["pipelines"]] == [
         "topic_to_video",
         "script_to_video",
+        "line_script_to_video",
         "asset_based",
         "topic_to_image_post",
         "image_post",
@@ -216,7 +217,8 @@ def test_generation_templates_endpoint_lists_builtin_production_templates():
     # 中性骨架排在最前，历史 PetWoods 预设不再进入当前注册表。
     assert ids[0] == "pipeline_topic_to_video_base_v1"
     assert ids[1] == "pipeline_standard_base_v1"
-    assert ids[2] == "pipeline_asset_based_base_v1"
+    assert ids[2] == "pipeline_line_script_to_video_base_v1"
+    assert ids[3] == "pipeline_asset_based_base_v1"
     for removed in [
         "petwoods_xhs_daily_v1",
         "petwoods_xhs_static_subtitle_v1",
@@ -231,6 +233,10 @@ def test_generation_templates_endpoint_lists_builtin_production_templates():
     assert templates_by_id["pipeline_standard_base_v1"]["display_name"] == "图文口播视频"
     assert templates_by_id["pipeline_standard_base_v1"]["use_case"] == "standard_base"
     assert templates_by_id["pipeline_standard_base_v1"]["enabled"] is True
+    assert (
+        templates_by_id["pipeline_line_script_to_video_base_v1"]["pipeline_id"]
+        == "line_script_to_video"
+    )
     assert templates_by_id["pipeline_asset_based_base_v1"]["display_name"] == "素材增强视频"
     assert templates_by_id["pipeline_asset_based_base_v1"]["requires_user_assets"] is True
     assert templates_by_id["pixelle_i2v_basic_v1"]["pipeline_id"] == "i2v"

@@ -30,6 +30,7 @@
 | `digital_human` | `character_assets` | compose_image → generate_tts → execute_workflow → download_video → save_artifacts | primary_video | react |
 | `i2v` | `assets, prompt` | execute_workflow → download_video → save_artifacts | primary_video | react |
 | `image_post` | `script` | paginate → generate_image_prompts → generate_media → compose_pages → save_artifacts | cover, page | react, agent, batch |
+| `line_script_to_video` | `script` | parse_line_scenes → generate_image_prompts → generate_tts → generate_media → compose_video → save_artifacts | primary_video | react, agent, batch |
 | `long_form` | `script` | write_article → save_artifacts | article | react, agent, batch |
 | `script_to_video` | `script` | split_scenes → generate_image_prompts → generate_tts → generate_media → compose_video → save_artifacts | primary_video | react, agent, batch |
 | `topic_to_image_post` | `topic` | generate_script → review_script → paginate → review_pages → generate_image_prompts → generate_media → compose_pages → save_artifacts | cover, page | react, agent, batch |
@@ -43,6 +44,7 @@
 | `codex_image_story_v1` | `codex_scene_video` | `scenes` | 15 | agent |
 | `pipeline_asset_based_base_v1` | `asset_based` | `assets` | 6 | public |
 | `pipeline_image_post_base_v1` | `image_post` | `script` | 13 | public |
+| `pipeline_line_script_to_video_base_v1` | `line_script_to_video` | `script` | 20 | public |
 | `pipeline_long_form_base_v1` | `long_form` | `script` | 5 | public |
 | `pipeline_standard_base_v1` | `script_to_video` | `script` | 24 | public |
 | `pipeline_topic_to_image_post_base_v1` | `topic_to_image_post` | `topic` | 21 | public |

@@ -9,6 +9,7 @@ import type { ProductionTemplate } from "@/lib/generationApi"
 const PIPELINE_CHIP_LABELS: Record<string, string> = {
   topic_to_video: "主题到视频",
   script_to_video: "文案到视频",
+  line_script_to_video: "逐行分镜到视频",
   codex_scene_video: "Agent 配图合成",
   asset_based: "素材线",
   image_post: "图文线",

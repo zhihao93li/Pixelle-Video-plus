@@ -17,6 +17,17 @@ import { PageFrame } from "@/components/shared/PageFrame"
 import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
 import { WorkspacePanel } from "@/components/shared/WorkspacePanel"
 import { Badge } from "@/components/ui/badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { formatDate, readableError } from "@/lib/format"
@@ -48,6 +59,46 @@ function sourceLabel(source: ProductionTask["source"]) {
   if (source === "agent") return "Agent 发起"
   if (source === "batch") return "批量发起"
   return "控制台发起"
+}
+
+function CancelTaskButton({
+  disabled,
+  kind,
+  onConfirm,
+  pending,
+}: {
+  disabled: boolean
+  kind: "cancel" | "abandon"
+  onConfirm: () => void
+  pending: boolean
+}) {
+  const abandoning = kind === "abandon"
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button disabled={disabled} size="sm" variant="outline">
+          {pending ? <LoaderCircle className="animate-spin" /> : <Square />}
+          {abandoning ? "放弃任务" : "取消任务"}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {abandoning ? "确定放弃这条任务？" : "确定取消这条任务？"}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            任务会停在当前位置，已保存的文案、分镜和产物不会被删除。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>继续任务</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm}>
+            {abandoning ? "确认放弃" : "确认取消"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
 }
 
 export function ProductionTaskDetailPage({ taskId }: { taskId: string }) {
@@ -199,7 +250,6 @@ export function ProductionTaskDetailPage({ taskId }: { taskId: string }) {
 
   const latestGenerationTaskId = task?.generation_task_ids.at(-1)
   const progress = task?.progress_percentage
-  const canCancel = task?.state === "in_progress"
   const canRetry = task?.state === "failed" || task?.state === "cancelled"
   const artifact = resultArtifactViewModel(result, null)
   const primaryHref = useMemo(() => {
@@ -343,28 +393,38 @@ export function ProductionTaskDetailPage({ taskId }: { taskId: string }) {
           title={currentTitle}
         >
           {task.state === "needs_user" ? (
-            pendingReview ? (
-              <CurrentReviewWorkspace
-                itemId={task.content_item_id}
-                onChanged={refresh}
-                review={pendingReview}
-              />
-            ) : (
-              <AsyncState
-                action={
-                  <Button
-                    onClick={() => void refresh()}
-                    size="sm"
-                    variant="outline"
-                  >
-                    重新读取
-                  </Button>
-                }
-                description="任务正在等待人工确认，但当前确认内容还未读取到。"
-                state="stale"
-                title="确认内容暂未就绪"
-              />
-            )
+            <div className="space-y-4">
+              {pendingReview ? (
+                <CurrentReviewWorkspace
+                  itemId={task.content_item_id}
+                  onChanged={refresh}
+                  review={pendingReview}
+                />
+              ) : (
+                <AsyncState
+                  action={
+                    <Button
+                      onClick={() => void refresh()}
+                      size="sm"
+                      variant="outline"
+                    >
+                      重新读取
+                    </Button>
+                  }
+                  description="任务正在等待人工确认，但当前确认内容还未读取到。"
+                  state="stale"
+                  title="确认内容暂未就绪"
+                />
+              )}
+              <div className="flex justify-end">
+                <CancelTaskButton
+                  disabled={action != null}
+                  kind="abandon"
+                  onConfirm={() => void runAction("cancel")}
+                  pending={action === "cancel"}
+                />
+              </div>
+            </div>
           ) : task.state === "produced" ? (
             <div className="space-y-4">
               {item?.status === "published" ||
@@ -466,20 +526,13 @@ export function ProductionTaskDetailPage({ taskId }: { taskId: string }) {
                     原样重试
                   </Button>
                 ) : null}
-                {canCancel ? (
-                  <Button
+                {task.state === "in_progress" ? (
+                  <CancelTaskButton
                     disabled={action != null}
-                    onClick={() => void runAction("cancel")}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {action === "cancel" ? (
-                      <LoaderCircle className="animate-spin" />
-                    ) : (
-                      <Square />
-                    )}
-                    取消任务
-                  </Button>
+                    kind="cancel"
+                    onConfirm={() => void runAction("cancel")}
+                    pending={action === "cancel"}
+                  />
                 ) : null}
               </div>
             </div>

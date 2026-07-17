@@ -237,6 +237,7 @@ class PixelleVideoCore:
         self.pipelines = {
             "topic_to_video": standard_pipeline,
             "script_to_video": standard_pipeline,
+            "line_script_to_video": standard_pipeline,
             "codex_scene_video": CodexSceneVideoPipeline(self),
             "asset_based": AssetBasedPipeline(self),
             "topic_to_image_post": ImagePostPipeline(self),

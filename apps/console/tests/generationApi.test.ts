@@ -3,6 +3,7 @@ import test from "node:test"
 
 import {
   addRunninghubWorkflow,
+  archiveProductionTasks,
   cancelGenerationTask,
   checkPublishConfiguration,
   createGenerationTemplateTask,
@@ -27,6 +28,7 @@ import {
   publishTask,
   renderFramePreview,
   resetSettingsConfig,
+  restoreProductionTasks,
   setTemplateEnabled,
   synthesizeTtsPreview,
   testComfyuiConnection,
@@ -447,6 +449,23 @@ test("generation task cancel API uses task-scoped delete route", async () => {
 
   assert.equal(calls[0].url, "/api/generation/tasks/task-1")
   assert.equal(calls[0].init?.method, "DELETE")
+})
+
+test("workbench archive APIs send task-level batch actions", async () => {
+  const calls = installFetchMock({ items: [], changed_count: 2 })
+
+  await archiveProductionTasks(["task-1", "task-2"])
+  await restoreProductionTasks(["task-1"])
+
+  assert.equal(calls[0].url, "/api/production-tasks/batch/archive")
+  assert.equal(calls[0].init?.method, "POST")
+  assert.equal(
+    calls[0].init?.body,
+    JSON.stringify({ task_ids: ["task-1", "task-2"] })
+  )
+  assert.equal(calls[1].url, "/api/production-tasks/batch/restore")
+  assert.equal(calls[1].init?.method, "POST")
+  assert.equal(calls[1].init?.body, JSON.stringify({ task_ids: ["task-1"] }))
 })
 
 test("template enabled API PUTs the toggle to the enabled route", async () => {

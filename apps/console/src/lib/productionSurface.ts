@@ -16,6 +16,7 @@ const INPUT_LABELS: Record<string, string> = {
 const LINE_LABELS: Record<string, string> = {
   topic_to_video: "主题口播",
   script_to_video: "文案口播",
+  line_script_to_video: "逐行分镜口播",
   codex_scene_video: "Agent 配图合成",
   asset_based: "素材成片",
   image_post: "图文帖",
@@ -28,11 +29,14 @@ const LINE_LABELS: Record<string, string> = {
 }
 
 const PIPELINE_DESCRIPTIONS: Record<string, string> = {
+  line_script_to_video:
+    "每个非空行直接作为一个分镜，按原顺序生成配图、配音、字幕和视频。",
   codex_scene_video:
     "Agent 规划分镜并生成图片，Pixelle 完成配音、字幕和视频合成。",
   asset_based: "上传图片或视频素材，整理成带字幕与配音的完整短片。",
   image_post: "把文案排成封面和多页配图，生成可直接发布的图集。",
-  topic_to_image_post: "从主题生成适合图文媒介的文案，确认文案和分页后生成图集。",
+  topic_to_image_post:
+    "从主题生成适合图文媒介的文案，确认文案和分页后生成图集。",
   topic_to_long_form: "从主题直接生成结构化长文，产出后在作品库检查。",
   long_form: "把确认稿扩写成结构化长文，适合公众号、知乎和长图文。",
   i2v: "上传一张图片并描述运动方式，生成一段动态视频。",
@@ -52,6 +56,9 @@ export function productionStartRoute(template: ProductionTemplate) {
 }
 
 export function productionInputSummary(template: ProductionTemplate) {
+  if (template.pipeline_id === "line_script_to_video") {
+    return "逐行分镜文案"
+  }
   if (template.pipeline_id === "asset_based") {
     return "图片或视频、制作目标"
   }

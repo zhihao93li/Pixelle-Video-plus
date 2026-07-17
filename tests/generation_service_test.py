@@ -135,6 +135,27 @@ def test_text_and_image_routes_translate_content_input_to_runtime_text():
     assert topic_long_form_kwargs == {"text": "长文主题"}
 
 
+def test_line_script_route_uses_each_non_empty_line_as_a_confirmed_scene():
+    service = _service_for_pipeline(
+        SuccessfulPipeline(),
+        pipeline_id="line_script_to_video",
+    )
+
+    kwargs = service._build_pipeline_kwargs(
+        GenerationRequest(
+            pipeline_id="line_script_to_video",
+            input={"script": "  第一镜  \n\n第二镜\n   "},
+            params={"title": "逐行测试"},
+        )
+    )
+
+    assert kwargs == {
+        "text": "第一镜\n第二镜",
+        "title": "逐行测试",
+        "_confirmed_scenes": ["第一镜", "第二镜"],
+    }
+
+
 @pytest.mark.asyncio
 async def test_generation_service_runs_pipeline_and_returns_structured_result():
     pipeline = SuccessfulPipeline()

@@ -19,6 +19,7 @@ from pixelle_video.content.production_tasks import (
     list_production_tasks,
     load_production_task,
     save_production_task,
+    set_task_archived,
     set_task_state,
     sync_generation_task,
 )
@@ -166,12 +167,25 @@ class WorkbenchTaskCard(BaseModel):
     waiting_since: str | None
     failed_at: str | None
     produced_at: str | None
+    archived_at: str | None
+    archived_by: str | None
 
 
 class WorkbenchTaskListResponse(BaseModel):
     items: list[WorkbenchTaskCard]
     counts: dict[str, int]
     next_cursor: str | None
+
+
+class ProductionTaskBatchActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class ProductionTaskBatchActionResponse(BaseModel):
+    items: list[ProductionTask]
+    changed_count: int
 
 
 async def _plan_digital_human_script(*, item, task, input_payload, pixelle_video):
@@ -193,6 +207,9 @@ async def _plan_digital_human_script(*, item, task, input_payload, pixelle_video
         llm_service=pixelle_video.llm,
         goods_title=str(input_payload.get("goods_title") or item.title),
     )
+    current_task = load_production_task(task.production_task_id)
+    if current_task is None or current_task.state == "cancelled":
+        return current_task
     item.languages = ["Chinese"]
     item.variants = {
         "Chinese": ContentVariant(
@@ -264,6 +281,9 @@ async def _run_digital_human_script_stage(
             pixelle_video=pixelle_video,
         )
     except Exception as exc:  # noqa: BLE001 - durable task failure is the contract
+        current_task = load_production_task(task_id)
+        if current_task is None or current_task.state == "cancelled":
+            return
         set_task_state(
             task_id,
             state="failed",
@@ -521,7 +541,7 @@ async def list_workbench_tasks(
         item = load_item(task.content_item_id)
         if item is None:
             continue
-        if not include_archived and item.status == "archived":
+        if not include_archived and task.archived_at is not None:
             continue
         filtered.append(task)
 
@@ -531,7 +551,10 @@ async def list_workbench_tasks(
     }
     if state is not None:
         filtered = [task for task in filtered if task.state == state]
-    filtered.sort(key=_sort_key(state), reverse=state != "needs_user")
+    filtered.sort(
+        key=lambda task: (task.updated_at, task.production_task_id),
+        reverse=True,
+    )
     try:
         offset = max(int(cursor or "0"), 0)
     except ValueError:
@@ -542,6 +565,64 @@ async def list_workbench_tasks(
         items=[_card(task, allow_user_action=not identity.is_agent) for task in page],
         counts=counts,
         next_cursor=next_cursor,
+    )
+
+
+def _set_tasks_archived(
+    task_ids: list[str],
+    *,
+    archived: bool,
+    actor: str,
+) -> ProductionTaskBatchActionResponse:
+    unique_ids = list(dict.fromkeys(task_ids))
+    tasks: list[ProductionTask] = []
+    for task_id in unique_ids:
+        task = load_production_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"未找到生产任务：{task_id}")
+        if archived and task.state not in {"failed", "produced", "cancelled"}:
+            raise HTTPException(
+                status_code=409,
+                detail=f"任务“{task.title}”仍需要处理或正在运行，请先取消。",
+            )
+        tasks.append(task)
+
+    changed_count = sum(1 for task in tasks if archived != (task.archived_at is not None))
+    updated = [
+        set_task_archived(
+            task.production_task_id,
+            archived=archived,
+            actor="agent" if actor == "agent" else "user",
+        )
+        for task in tasks
+    ]
+    return ProductionTaskBatchActionResponse(
+        items=updated,
+        changed_count=changed_count,
+    )
+
+
+@router.post("/batch/archive", response_model=ProductionTaskBatchActionResponse)
+async def archive_production_tasks(
+    request: ProductionTaskBatchActionRequest,
+    identity: IdentityDep,
+):
+    return _set_tasks_archived(
+        request.task_ids,
+        archived=True,
+        actor=identity.actor,
+    )
+
+
+@router.post("/batch/restore", response_model=ProductionTaskBatchActionResponse)
+async def restore_production_tasks(
+    request: ProductionTaskBatchActionRequest,
+    identity: IdentityDep,
+):
+    return _set_tasks_archived(
+        request.task_ids,
+        archived=False,
+        actor=identity.actor,
     )
 
 
@@ -921,17 +1002,9 @@ def _card(task: ProductionTask, *, allow_user_action: bool) -> WorkbenchTaskCard
         waiting_since=task.waiting_since,
         failed_at=task.failed_at,
         produced_at=task.produced_at,
+        archived_at=task.archived_at,
+        archived_by=task.archived_by,
     )
-
-
-def _sort_key(state):
-    if state == "needs_user":
-        return lambda task: (task.waiting_since or task.state_since, task.production_task_id)
-    if state == "failed":
-        return lambda task: (task.failed_at or task.updated_at, task.production_task_id)
-    if state == "produced":
-        return lambda task: (task.produced_at or task.updated_at, task.production_task_id)
-    return lambda task: (task.updated_at, task.production_task_id)
 
 
 def _refresh_task(task: ProductionTask, generation_service) -> ProductionTask:

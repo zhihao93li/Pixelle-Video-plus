@@ -232,6 +232,11 @@ async def plan_video_scenes(
         language=confirmed_variant.language,
         topic=item.title,
     )
+    from pixelle_video.content.production_tasks import load_production_task
+
+    current_task = load_production_task(production_task.production_task_id)
+    if current_task is None or current_task.state == "cancelled":
+        return item
     item.scene_manifest = SceneManifest(
         review_kind=review_kind,
         scenes=[
@@ -317,6 +322,9 @@ async def run_scene_planning(
             review_kind=review_kind,
         )
     except Exception as exc:  # noqa: BLE001 - failure is persisted for the workbench
+        current_task = load_production_task(production_task_id)
+        if current_task is None or current_task.state == "cancelled":
+            return
         set_task_state(
             production_task_id,
             state="failed",
@@ -509,6 +517,9 @@ async def _run_review_regeneration(
                 languages=item.languages or ["Chinese"],
                 settings=task.effective_params,
             )
+            current_task = load_production_task(task.production_task_id)
+            if current_task is None or current_task.state == "cancelled":
+                return
             language_drafts = draft.get("language_drafts") or {}
             if not language_drafts:
                 raise ValueError("系统重写没有返回可确认文案。")
@@ -590,6 +601,9 @@ async def _run_review_regeneration(
         )
         complete_operation(operation, {"item_id": item.item_id, "status": item.status})
     except Exception as exc:  # noqa: BLE001 - preserve the old review and expose the failure
+        current_task = load_production_task(task.production_task_id)
+        if current_task is None or current_task.state == "cancelled":
+            return
         fail_operation(operation, str(exc), layer="runtime")
         stage_is_pages = bool(
             item.scene_manifest and item.scene_manifest.review_kind == "image_pages"
@@ -795,7 +809,10 @@ async def _run_draft(
     if operation is None or item is None:
         return
     try:
-        from pixelle_video.content.production_tasks import latest_task_for_content
+        from pixelle_video.content.production_tasks import (
+            latest_task_for_content,
+            load_production_task,
+        )
 
         production_task = latest_task_for_content(
             item.item_id,
@@ -810,6 +827,9 @@ async def _run_draft(
             languages=item.languages,
             settings=production_task.effective_params,
         )
+        current_task = load_production_task(production_task.production_task_id)
+        if current_task is None or current_task.state == "cancelled":
+            return
         operation.phase = "external_completed"
         save_operation(operation)
         if not draft.get("language_drafts"):
@@ -853,6 +873,10 @@ async def _run_draft(
                 operation_id=operation.operation_id,
             )
     except Exception as exc:  # noqa: BLE001 - persisted failure is the API contract
+        if "production_task" in locals():
+            current_task = load_production_task(production_task.production_task_id)
+            if current_task is None or current_task.state == "cancelled":
+                return
         item = load_item(item_id)
         if item is not None and item.status == "drafting":
             item.status = "idea"
@@ -971,6 +995,9 @@ async def _run_confirmed_digital_human(
         )
         save_item(item)
     except Exception as exc:  # noqa: BLE001 - failure must be visible in the workbench
+        current_task = load_production_task(production_task_id)
+        if current_task is None or current_task.state == "cancelled":
+            return
         set_task_state(
             production_task_id,
             state="failed",
@@ -997,11 +1024,14 @@ async def _run_confirmed_content_production(
 ) -> None:
     """Submit approved scenes/pages without holding the confirmation request open."""
 
-    from pixelle_video.content.production_tasks import set_task_state
+    from pixelle_video.content.production_tasks import load_production_task, set_task_state
 
     try:
         await produce_item(item_id, request, identity, generation_service)
     except Exception as exc:  # noqa: BLE001 - failure is persisted for retry
+        current_task = load_production_task(production_task_id)
+        if current_task is None or current_task.state == "cancelled":
+            return
         set_task_state(
             production_task_id,
             state="failed",

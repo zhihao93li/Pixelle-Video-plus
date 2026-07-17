@@ -182,9 +182,24 @@ const ASSET_OVERRIDE_TRACKED: Array<{
   { key: "ttsSpeed", label: "语速" },
 ]
 
-function previewContentSections(text: string, artifactKind: ArtifactKind) {
+function previewContentSections(
+  text: string,
+  artifactKind: ArtifactKind,
+  pipelineId?: string
+) {
   const trimmed = text.trim()
-  if (!trimmed || artifactKind === "video") {
+  if (!trimmed) {
+    return []
+  }
+
+  if (pipelineId === "line_script_to_video") {
+    return trimmed
+      .split(/\n/)
+      .map((item) => item.replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+  }
+
+  if (artifactKind === "video") {
     return []
   }
 
@@ -1185,8 +1200,15 @@ function StandardInput({
 }) {
   const trimmedText = text.trim()
   const inputId = inputKind === "topic" ? "topic" : "script"
+  const usesLineScenes = template.pipeline_id === "line_script_to_video"
   const title =
-    inputKind === "topic" ? "选题或内容方向" : isNonVideo ? "文案" : "视频文案"
+    inputKind === "topic"
+      ? "选题或内容方向"
+      : usesLineScenes
+        ? "逐行分镜文案"
+        : isNonVideo
+          ? "文案"
+          : "视频文案"
   const description =
     inputKind === "topic"
       ? "AI 会先撰写文案，再继续拆分、配音、画面生成和合成。"
@@ -1194,7 +1216,9 @@ function StandardInput({
         ? "这段文字会扩写成结构化长文，不配音、不合成视频。"
         : artifactKind === "image_set"
           ? "这段文字会逐行排版成图集，不配音、不合成视频。"
-          : "这段文字会按原文拆分、配音、配画面并合成视频。"
+          : usesLineScenes
+            ? "每个非空行固定作为一个分镜；空行会忽略，不再由 AI 重新拆分。"
+            : "这段文字会按原文拆分、配音、配画面并合成视频。"
   const batchListLabel = artifactKind === "text" ? "稿件列表" : "文案列表"
   const expertMode = useExpertMode()
   const previewText =
@@ -1305,6 +1329,7 @@ function StandardInput({
           artifactKind={artifactKind}
           items={batchItems}
           label={batchListLabel}
+          lineBasedScenes={usesLineScenes}
           onRemoveItem={onRemoveBatchItem}
           onTextChange={onBatchTextChange}
           text={batchText}
@@ -1324,7 +1349,9 @@ function StandardInput({
                   ? "粘贴或输入需要扩写的长文素材…"
                   : artifactKind === "image_set"
                     ? "粘贴或输入图文文案；换行可作为分页依据…"
-                    : "粘贴或输入完整视频文案…"
+                    : usesLineScenes
+                      ? "第一镜文案…\n第二镜文案…\n第三镜文案…"
+                      : "粘贴或输入完整视频文案…"
             }
             value={text}
           />
@@ -1546,6 +1573,78 @@ function StoryboardPreviewPanel({
   template: ProductionTemplate | null
 }) {
   if (artifactKind === "video") {
+    const usesLineScenes = template?.pipeline_id === "line_script_to_video"
+    if (usesLineScenes) {
+      return (
+        <aside
+          className="min-w-0 xl:sticky xl:top-[5.5rem] xl:self-start"
+          data-slot="production-rail"
+        >
+          <Card className="flex min-h-[420px] flex-col overflow-hidden rounded-lg xl:h-[calc(100svh-10.25rem)] xl:min-h-[640px]">
+            <CardHeader className="border-b">
+              <CardTitle>逐行分镜预览</CardTitle>
+              <CardDescription>
+                {scenes.length > 0
+                  ? `已读取 ${scenes.length} 个分镜；提交后直接按这个顺序生产。`
+                  : "输入文案后，这里会按非空行显示真实分镜。"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+              {scenes.length === 0 ? (
+                <div className="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+                  <FileText className="size-6 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    每个非空行就是一镜
+                  </p>
+                </div>
+              ) : (
+                <ol className="min-h-0 flex-1 overflow-y-auto px-4">
+                  {scenes.map((scene, index) => (
+                    <li
+                      className="grid grid-cols-[2rem_minmax(0,1fr)] gap-3 border-b py-3 last:border-b-0"
+                      key={`${index}-${scene.slice(0, 24)}`}
+                    >
+                      <span className="flex size-7 items-center justify-center rounded-full bg-muted text-xs font-medium tabular-nums">
+                        {index + 1}
+                      </span>
+                      <p className="min-w-0 text-sm leading-6">{scene}</p>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              <div className="border-t bg-muted/20 p-4">
+                <dl className="grid grid-cols-2 gap-4">
+                  <div>
+                    <dt className="text-xs text-muted-foreground">当前模板</dt>
+                    <dd className="mt-1 truncate text-sm font-medium">
+                      {template?.display_name || "当前模板"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">
+                      人工确认站
+                    </dt>
+                    <dd className="mt-1 text-sm font-medium">
+                      {confirmationSummary}
+                    </dd>
+                  </div>
+                  <div className="col-span-2 border-t pt-4">
+                    <dt className="text-xs text-muted-foreground">本次设置</dt>
+                    <dd className="mt-1 text-sm leading-6">
+                      {settingsSummary}
+                    </dd>
+                    <dd className="mt-1 text-xs text-muted-foreground">
+                      {overrideSummary}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            </CardContent>
+          </Card>
+        </aside>
+      )
+    }
+
     const startsFromTopic = template?.input_requirements.includes("topic")
     return (
       <aside
@@ -1736,7 +1835,11 @@ function TaskPanel({
   settingsSummary: string
   template: ProductionTemplate | null
 }) {
-  const previewScenes = previewContentSections(previewText, artifactKind)
+  const previewScenes = previewContentSections(
+    previewText,
+    artifactKind,
+    template?.pipeline_id
+  )
 
   if (!isSubmitting) {
     return (
@@ -1796,6 +1899,7 @@ function BatchScriptInput({
   label,
   items,
   artifactKind,
+  lineBasedScenes,
   onTextChange,
   onRemoveItem,
 }: {
@@ -1803,6 +1907,7 @@ function BatchScriptInput({
   label: string
   items: ParsedScriptItem[]
   artifactKind: ArtifactKind
+  lineBasedScenes?: boolean
   onTextChange?: (value: string) => void
   onRemoveItem?: (index: number) => void
 }) {
@@ -1811,7 +1916,9 @@ function BatchScriptInput({
       ? "每个区块创建一篇独立长文；标题之后的内容是扩写素材，最终结构由长文提示词决定。"
       : artifactKind === "image_set"
         ? "每个区块创建一篇独立图文；分页遵循本次的内容拆分方式，选择“按行直出”时每个非空行是一页。"
-        : "每个区块创建一条独立视频；标题之后的内容是视频文案，分镜数量与切分由分镜模型决定。"
+        : lineBasedScenes
+          ? "每个区块创建一条独立视频；标题之后的每个非空行固定作为一个分镜，不再由 AI 重新拆分。"
+          : "每个区块创建一条独立视频；标题之后的内容是视频文案，分镜数量与切分由分镜模型决定。"
 
   return (
     <div className="flex flex-col gap-3">

@@ -241,6 +241,18 @@ class GenerationService:
                 kwargs["_confirmed_scenes"] = request.input["scenes"]
             return kwargs
 
+        if request.pipeline_id == "line_script_to_video":
+            scenes = [
+                line.strip() for line in str(request.input["script"]).splitlines() if line.strip()
+            ]
+            if not scenes:
+                raise ValueError("line_script_to_video requires at least one non-empty line")
+            return {
+                "text": "\n".join(scenes),
+                **params,
+                "_confirmed_scenes": scenes,
+            }
+
         if request.pipeline_id == "topic_to_long_form":
             return {
                 "text": request.input["topic"],

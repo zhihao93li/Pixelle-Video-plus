@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
+  Archive,
+  ArchiveRestore,
   Bot,
   CheckCircle2,
   CircleAlert,
   CircleX,
   Clock3,
+  ListChecks,
+  Loader2,
   RefreshCcw,
+  Square,
+  X,
 } from "lucide-react"
 
 import { AsyncState } from "@/components/shared/AsyncState"
@@ -14,7 +20,18 @@ import { WorkspaceHeader } from "@/components/shared/WorkspaceHeader"
 import { WorkspacePanel } from "@/components/shared/WorkspacePanel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Progress } from "@/components/ui/progress"
+import { useToast } from "@/components/ui/toast"
 import {
   Select,
   SelectContent,
@@ -26,9 +43,12 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useCurrentProject } from "@/lib/currentProject"
 import { formatDate, readableError } from "@/lib/format"
 import {
+  archiveProductionTasks,
+  cancelProductionTask,
   listWorkbenchTasks,
   listPipelines,
   listTemplates,
+  restoreProductionTasks,
   templatesForManagement,
   type PipelineManifest,
   type ProductionTemplate,
@@ -110,62 +130,169 @@ function artifactLabel(artifactType: string) {
   return "视频"
 }
 
-function TaskCard({ task }: { task: WorkbenchTaskCard }) {
+type TaskOperationKind = "archive" | "restore" | "cancel"
+type PendingTaskOperation = {
+  kind: TaskOperationKind
+  tasks: WorkbenchTaskCard[]
+}
+
+function canArchiveTask(task: WorkbenchTaskCard) {
+  return ["failed", "produced", "cancelled"].includes(task.state)
+}
+
+function TaskCard({
+  task,
+  managing,
+  selected,
+  onToggle,
+  onRequestOperation,
+}: {
+  task: WorkbenchTaskCard
+  managing: boolean
+  selected: boolean
+  onToggle: (task: WorkbenchTaskCard) => void
+  onRequestOperation: (
+    kind: TaskOperationKind,
+    tasks: WorkbenchTaskCard[]
+  ) => void
+}) {
   const progress = task.progress?.percentage
-  return (
-    <article className="group rounded-lg border bg-card text-left transition-colors hover:border-primary/40">
-      <a
-        className="block rounded-lg p-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
-        href={routeHref(`/board/tasks/${task.production_task_id}`)}
-      >
-        <div className="line-clamp-2 text-sm font-medium">{task.title}</div>
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline">{artifactLabel(task.artifact_type)}</Badge>
-          <Badge
-            variant={task.state === "failed" ? "destructive" : "secondary"}
+  const archived = task.archived_at != null
+  const selectable = archived || canArchiveTask(task)
+  const content = (
+    <>
+      <div className="flex items-start gap-2">
+        {managing ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border text-[10px] leading-none",
+              selected && "border-primary bg-primary text-primary-foreground"
+            )}
           >
-            {task.stage.label}
-          </Badge>
-        </div>
-
-        {task.state === "in_progress" ? (
-          <div className="mt-3 flex flex-col gap-1">
-            <Progress
-              aria-label={task.stage.label}
-              indeterminate={progress == null}
-              value={progress ?? undefined}
-            />
-            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-              <span className="truncate">{task.stage.label}</span>
-              <span className="shrink-0 tabular-nums">
-                {progress != null ? `${Math.round(progress)}%` : "正在处理…"}
-              </span>
-            </div>
-          </div>
-        ) : null}
-
-        {task.error ? (
-          <p className="mt-2 line-clamp-2 text-xs text-destructive">
-            {task.error.message}
-          </p>
-        ) : null}
-
-        {task.action ? (
-          <div className="mt-3 text-xs font-medium text-primary">
-            {task.action.label} →
-          </div>
-        ) : null}
-
-        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span className="inline-flex min-w-0 items-center gap-1">
-            {task.source === "agent" ? <Bot className="size-3" /> : null}
-            <span className="truncate">
-              {task.project_name} · {sourceLabel(task.source)}
-            </span>
+            {selected ? "✓" : null}
           </span>
-          <span>{formatDate(task.updated_at)}</span>
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <div className="line-clamp-2 text-sm font-medium">{task.title}</div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <Badge variant="outline">{artifactLabel(task.artifact_type)}</Badge>
+            <Badge
+              variant={task.state === "failed" ? "destructive" : "secondary"}
+            >
+              {task.stage.label}
+            </Badge>
+            {archived ? <Badge variant="outline">已归档</Badge> : null}
+          </div>
         </div>
-      </a>
+      </div>
+
+      {task.state === "in_progress" ? (
+        <div className="mt-3 flex flex-col gap-1">
+          <Progress
+            aria-label={task.stage.label}
+            indeterminate={progress == null}
+            value={progress ?? undefined}
+          />
+          <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+            <span className="truncate">{task.stage.label}</span>
+            <span className="shrink-0 tabular-nums">
+              {progress != null ? `${Math.round(progress)}%` : "正在处理…"}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {task.error ? (
+        <p className="mt-2 line-clamp-2 text-xs text-destructive">
+          {task.error.message}
+        </p>
+      ) : null}
+
+      {task.action && !archived ? (
+        <div className="mt-3 text-xs font-medium text-primary">
+          {task.action.label} →
+        </div>
+      ) : null}
+
+      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span className="inline-flex min-w-0 items-center gap-1">
+          {task.source === "agent" ? <Bot className="size-3" /> : null}
+          <span className="truncate">
+            {task.project_name} · {sourceLabel(task.source)}
+          </span>
+        </span>
+        <span>{formatDate(task.updated_at)}</span>
+      </div>
+    </>
+  )
+
+  return (
+    <article
+      className={cn(
+        "group rounded-lg border bg-card text-left transition-colors",
+        !managing && "hover:border-primary/40",
+        selected && "border-primary bg-primary/5",
+        archived && "bg-muted/30"
+      )}
+    >
+      {managing ? (
+        <button
+          aria-pressed={selected}
+          className="block w-full rounded-lg p-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={!selectable}
+          onClick={() => onToggle(task)}
+          type="button"
+        >
+          {content}
+          {!selectable ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {task.state === "in_progress"
+                ? "正在运行，请先取消任务"
+                : "正在等待你处理，请先放弃任务"}
+            </p>
+          ) : null}
+        </button>
+      ) : (
+        <>
+          <a
+            className="block rounded-t-lg p-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
+            href={routeHref(`/board/tasks/${task.production_task_id}`)}
+          >
+            {content}
+          </a>
+          <div className="flex justify-end border-t px-2 py-1.5">
+            {archived ? (
+              <Button
+                onClick={() => onRequestOperation("restore", [task])}
+                size="xs"
+                variant="ghost"
+              >
+                <ArchiveRestore data-icon="inline-start" />
+                恢复
+              </Button>
+            ) : task.state === "in_progress" || task.state === "needs_user" ? (
+              <Button
+                onClick={() => onRequestOperation("cancel", [task])}
+                size="xs"
+                variant="ghost"
+              >
+                <Square data-icon="inline-start" />
+                {task.state === "needs_user" ? "放弃任务" : "取消任务"}
+              </Button>
+            ) : (
+              <Button
+                onClick={() => onRequestOperation("archive", [task])}
+                size="xs"
+                variant="ghost"
+              >
+                <Archive data-icon="inline-start" />
+                归档
+              </Button>
+            )}
+          </div>
+        </>
+      )}
     </article>
   )
 }
@@ -177,6 +304,10 @@ function TaskLane({
   nextCursor,
   onLoadMore,
   totalCount,
+  managing,
+  selectedIds,
+  onToggle,
+  onRequestOperation,
 }: {
   column: WorkbenchColumn
   items: WorkbenchTaskCard[]
@@ -184,6 +315,13 @@ function TaskLane({
   nextCursor?: string | null
   onLoadMore?: () => void
   totalCount: number
+  managing: boolean
+  selectedIds: Set<string>
+  onToggle: (task: WorkbenchTaskCard) => void
+  onRequestOperation: (
+    kind: TaskOperationKind,
+    tasks: WorkbenchTaskCard[]
+  ) => void
 }) {
   const Icon = column.icon
   return (
@@ -206,7 +344,14 @@ function TaskLane({
       }
     >
       {items.map((task) => (
-        <TaskCard key={task.production_task_id} task={task} />
+        <TaskCard
+          key={task.production_task_id}
+          managing={managing}
+          onRequestOperation={onRequestOperation}
+          onToggle={onToggle}
+          selected={selectedIds.has(task.production_task_id)}
+          task={task}
+        />
       ))}
       {items.length === 0 ? (
         <div className="flex min-h-24 items-center justify-center rounded-lg border border-dashed px-3 text-center text-xs text-muted-foreground">
@@ -229,6 +374,7 @@ function TaskLane({
 
 export function WorkbenchBoard() {
   const { projectId } = useCurrentProject()
+  const toast = useToast()
   const [items, setItems] = useState<ColumnItems>(emptyItems)
   const [counts, setCounts] = useState<Record<ProductionTaskState, number>>({
     needs_user: 0,
@@ -248,6 +394,11 @@ export function WorkbenchBoard() {
   const [createdFrom, setCreatedFrom] = useState("")
   const [createdTo, setCreatedTo] = useState("")
   const [includeArchived, setIncludeArchived] = useState(false)
+  const [managing, setManaging] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [pendingOperation, setPendingOperation] =
+    useState<PendingTaskOperation | null>(null)
+  const [operationRunning, setOperationRunning] = useState(false)
   const [taskView, setTaskView] = useState<"active" | "cancelled">("active")
   const [pipelines, setPipelines] = useState<PipelineManifest[]>([])
   const [recipes, setRecipes] = useState<ProductionTemplate[]>([])
@@ -396,21 +547,113 @@ export function WorkbenchBoard() {
   const activeColumn =
     visibleColumns.find((column) => column.key === activeColumnKey) ??
     visibleColumns[0]
+  const visibleTasks = useMemo(
+    () => visibleColumns.flatMap((column) => items[column.key]),
+    [items, visibleColumns]
+  )
+  const selectedTasks = visibleTasks.filter((task) =>
+    selectedIds.has(task.production_task_id)
+  )
+  const selectedArchiveTasks = selectedTasks.filter(
+    (task) => task.archived_at == null && canArchiveTask(task)
+  )
+  const selectedRestoreTasks = selectedTasks.filter(
+    (task) => task.archived_at != null
+  )
+
+  function toggleTask(task: WorkbenchTaskCard) {
+    const selectable = task.archived_at != null || canArchiveTask(task)
+    if (!selectable) return
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(task.production_task_id))
+        next.delete(task.production_task_id)
+      else next.add(task.production_task_id)
+      return next
+    })
+  }
+
+  function requestOperation(
+    kind: TaskOperationKind,
+    tasks: WorkbenchTaskCard[]
+  ) {
+    if (tasks.length === 0) return
+    setPendingOperation({ kind, tasks })
+  }
+
+  async function runPendingOperation() {
+    if (!pendingOperation) return
+    setOperationRunning(true)
+    try {
+      const ids = pendingOperation.tasks.map((task) => task.production_task_id)
+      if (pendingOperation.kind === "archive") {
+        await archiveProductionTasks(ids)
+        toast({
+          title: `已归档 ${ids.length} 条任务`,
+          description: "作品、文件和生产记录仍然保留。",
+          variant: "success",
+        })
+      } else if (pendingOperation.kind === "restore") {
+        await restoreProductionTasks(ids)
+        toast({
+          title: `已恢复 ${ids.length} 条任务`,
+          variant: "success",
+        })
+      } else {
+        await Promise.all(ids.map((id) => cancelProductionTask(id)))
+        toast({
+          title:
+            pendingOperation.tasks[0]?.state === "needs_user"
+              ? "任务已放弃"
+              : "任务已取消",
+          variant: "success",
+        })
+      }
+      setSelectedIds(new Set())
+      setPendingOperation(null)
+      await refresh()
+    } catch (operationError) {
+      toast({
+        title: "操作失败",
+        description: readableError(operationError),
+        variant: "error",
+      })
+    } finally {
+      setOperationRunning(false)
+    }
+  }
 
   return (
     <PageFrame>
       <WorkspaceHeader
         actions={
-          <Button
-            aria-label="刷新"
-            className="size-11 lg:size-7"
-            disabled={loading}
-            onClick={() => void refresh()}
-            size="icon-sm"
-            variant="outline"
-          >
-            <RefreshCcw className={cn(loading && "animate-spin")} />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => {
+                setManaging((value) => !value)
+                setSelectedIds(new Set())
+              }}
+              size="sm"
+              variant={managing ? "secondary" : "outline"}
+            >
+              {managing ? (
+                <X data-icon="inline-start" />
+              ) : (
+                <ListChecks data-icon="inline-start" />
+              )}
+              {managing ? "完成管理" : "管理"}
+            </Button>
+            <Button
+              aria-label="刷新"
+              className="size-11 lg:size-7"
+              disabled={loading}
+              onClick={() => void refresh()}
+              size="icon-sm"
+              variant="outline"
+            >
+              <RefreshCcw className={cn(loading && "animate-spin")} />
+            </Button>
+          </div>
         }
         description="所有生产路线都在这里汇总；先看是否需要你处理、是否正常运行，以及最终是否已经产出。"
         title="工作台"
@@ -512,13 +755,66 @@ export function WorkbenchBoard() {
         </label>
         <Button
           aria-pressed={includeArchived}
-          onClick={() => setIncludeArchived((value) => !value)}
+          onClick={() => {
+            setIncludeArchived((value) => !value)
+            setSelectedIds(new Set())
+          }}
           size="sm"
           variant={includeArchived ? "secondary" : "outline"}
         >
-          {includeArchived ? "已包含归档" : "包含归档"}
+          {includeArchived ? "已显示归档" : "显示已归档"}
         </Button>
       </div>
+
+      {managing ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2">
+          <div className="text-sm">
+            已选择{" "}
+            <span className="font-medium tabular-nums">
+              {selectedTasks.length}
+            </span>{" "}
+            条任务
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              disabled={selectedArchiveTasks.length === 0}
+              onClick={() => requestOperation("archive", selectedArchiveTasks)}
+              size="sm"
+              variant="outline"
+            >
+              <Archive data-icon="inline-start" />
+              归档
+              {selectedArchiveTasks.length > 0
+                ? ` ${selectedArchiveTasks.length}`
+                : ""}
+            </Button>
+            {includeArchived ? (
+              <Button
+                disabled={selectedRestoreTasks.length === 0}
+                onClick={() =>
+                  requestOperation("restore", selectedRestoreTasks)
+                }
+                size="sm"
+                variant="outline"
+              >
+                <ArchiveRestore data-icon="inline-start" />
+                恢复
+                {selectedRestoreTasks.length > 0
+                  ? ` ${selectedRestoreTasks.length}`
+                  : ""}
+              </Button>
+            ) : null}
+            <Button
+              disabled={selectedTasks.length === 0}
+              onClick={() => setSelectedIds(new Set())}
+              size="sm"
+              variant="ghost"
+            >
+              取消选择
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {error && hasTasks ? (
         <AsyncState
@@ -598,8 +894,12 @@ export function WorkbenchBoard() {
               column={activeColumn}
               items={items[activeColumn.key]}
               loadingMore={loadingMore === activeColumn.key}
+              managing={managing}
               nextCursor={nextCursors[activeColumn.key]}
               onLoadMore={() => void loadMore(activeColumn.key)}
+              onRequestOperation={requestOperation}
+              onToggle={toggleTask}
+              selectedIds={selectedIds}
               totalCount={counts[activeColumn.key]}
             />
           </div>
@@ -623,8 +923,12 @@ export function WorkbenchBoard() {
                   items={items[column.key]}
                   key={column.key}
                   loadingMore={loadingMore === column.key}
+                  managing={managing}
                   nextCursor={nextCursors[column.key]}
                   onLoadMore={() => void loadMore(column.key)}
+                  onRequestOperation={requestOperation}
+                  onToggle={toggleTask}
+                  selectedIds={selectedIds}
                   totalCount={counts[column.key]}
                 />
               ))}
@@ -632,6 +936,57 @@ export function WorkbenchBoard() {
           </div>
         </>
       )}
+
+      <AlertDialog
+        onOpenChange={(open) =>
+          !open && !operationRunning && setPendingOperation(null)
+        }
+        open={pendingOperation != null}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingOperation?.kind === "archive"
+                ? `归档 ${pendingOperation.tasks.length} 条任务？`
+                : pendingOperation?.kind === "restore"
+                  ? `恢复 ${pendingOperation.tasks.length} 条任务？`
+                  : pendingOperation?.tasks[0]?.state === "needs_user"
+                    ? "放弃这条任务？"
+                    : "取消这条任务？"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingOperation?.kind === "archive"
+                ? "任务卡将从日常工作台隐藏，作品、文件和生产记录不会删除。"
+                : pendingOperation?.kind === "restore"
+                  ? "任务卡将重新回到原来的状态栏目。"
+                  : pendingOperation?.tasks[0]?.state === "needs_user"
+                    ? "这条路线将不再继续，任务会进入“已取消”。"
+                    : "系统会停止当前生产，已经产生的执行记录会保留。"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={operationRunning}>
+              返回
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={operationRunning}
+              onClick={(event) => {
+                event.preventDefault()
+                void runPendingOperation()
+              }}
+            >
+              {operationRunning ? <Loader2 className="animate-spin" /> : null}
+              {pendingOperation?.kind === "archive"
+                ? "确认归档"
+                : pendingOperation?.kind === "restore"
+                  ? "确认恢复"
+                  : pendingOperation?.tasks[0]?.state === "needs_user"
+                    ? "确认放弃"
+                    : "确认取消"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageFrame>
   )
 }

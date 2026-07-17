@@ -82,6 +82,15 @@ test("only compatible script recipes advertise batch submission", () => {
   )
 })
 
+test("line-delimited scene recipes expose their real input contract", () => {
+  const lineScript = template({
+    pipeline_id: "line_script_to_video",
+  })
+
+  assert.equal(productionInputSummary(lineScript), "逐行分镜文案")
+  assert.equal(productionSubmissionSummary(lineScript), "单条或文案批量")
+})
+
 test("Codex-only recipes are described as configuration-only in React", () => {
   const codex = template({
     id: "codex-image-story",
