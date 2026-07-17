@@ -9,6 +9,17 @@ class SharedKitShouldNotBeUsed:
     async def _get_or_create_comfykit(self):
         raise AssertionError("per-call RunningHub override should not use the shared ComfyKit")
 
+    async def execute_provider_workflow(
+        self,
+        kit,
+        workflow_input,
+        workflow_params,
+        *,
+        source,
+    ):
+        assert source == "runninghub"
+        return await kit.execute(workflow_input, workflow_params)
+
 
 @pytest.mark.asyncio
 async def test_image_analysis_uses_per_call_runninghub_instance_type(monkeypatch, tmp_path):

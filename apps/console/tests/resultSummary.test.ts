@@ -98,6 +98,25 @@ test("progress runtime items summarize provider detail without exposing choices"
     { label: "类型", value: "image" },
     { label: "超时", value: "600 秒" },
     { label: "服务任务", value: "rh-task-1" },
-    { label: "服务状态", value: "QUEUED" },
+    { label: "服务状态", value: "RunningHub 排队中" },
+  ])
+})
+
+test("progress runtime items expose the process-wide RunningHub queue", () => {
+  const items = buildProgressRuntimeItems({
+    provider: "runninghub",
+    provider_status: "LOCAL_QUEUED",
+    runninghub_timeout: 1200,
+    local_queue_position: 3,
+    local_queue_active: 1,
+    local_concurrency_limit: 1,
+  })
+
+  assert.deepEqual(items, [
+    { label: "媒体服务", value: "runninghub" },
+    { label: "超时", value: "1200 秒" },
+    { label: "服务状态", value: "Pixelle 本地排队中" },
+    { label: "本地队列", value: "第 3 位" },
+    { label: "RunningHub 并发", value: "1/1" },
   ])
 })

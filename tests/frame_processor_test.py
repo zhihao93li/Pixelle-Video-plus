@@ -66,7 +66,6 @@ def test_frame_processor_builds_provider_progress_detail_for_runninghub_media():
         "provider": "runninghub",
         "workflow": "runninghub/image_flux.json",
         "media_type": "image",
-        "runninghub_timeout": 600,
     }
 
 
@@ -128,6 +127,7 @@ async def test_frame_processor_reports_provider_task_status_during_media_generat
                 "provider": "runninghub",
                 "provider_task_id": "rh-task-1",
                 "provider_status": "QUEUED",
+                "runninghub_timeout": 1200,
             }
         )
         return FakeMediaResult()
@@ -180,7 +180,7 @@ async def test_frame_processor_reports_provider_task_status_during_media_generat
         "provider": "runninghub",
         "workflow": "runninghub/image_flux.json",
         "media_type": "image",
-        "runninghub_timeout": 600,
+        "runninghub_timeout": 1200,
         "provider_task_id": "rh-task-1",
         "provider_status": "QUEUED",
     }

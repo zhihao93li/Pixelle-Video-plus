@@ -62,7 +62,6 @@ class TTSService(ComfyBaseService):
         """
         super().__init__(config, service_name="tts", core=core)
 
-
     async def __call__(
         self,
         text: str,
@@ -79,7 +78,7 @@ class TTSService(ComfyBaseService):
         inference_mode: Optional[str] = None,
         # Output path
         output_path: Optional[str] = None,
-        **params
+        **params,
     ) -> str:
         """
         Generate speech using local Edge TTS or ComfyUI workflow
@@ -129,10 +128,7 @@ class TTSService(ComfyBaseService):
         # Route to appropriate implementation
         if mode == "local":
             return await self._call_local_tts(
-                text=text,
-                voice=voice,
-                speed=speed,
-                output_path=output_path
+                text=text, voice=voice, speed=speed, output_path=output_path
             )
         if mode == "fish":
             return await self._call_fish_audio_tts(
@@ -142,7 +138,7 @@ class TTSService(ComfyBaseService):
                 reference_id=reference_id,
                 fish_model=fish_model,
                 output_path=output_path,
-                **params
+                **params,
             )
         if mode == "comfyui":
             # 1. Resolve workflow (returns structured info)
@@ -157,12 +153,11 @@ class TTSService(ComfyBaseService):
                 voice=voice,
                 speed=speed,
                 output_path=output_path,
-                **params
+                **params,
             )
 
         raise ValueError(
-            f"Unsupported TTS inference_mode '{mode}'. "
-            "Expected one of: local, comfyui, fish."
+            f"Unsupported TTS inference_mode '{mode}'. Expected one of: local, comfyui, fish."
         )
 
     async def _call_local_tts(
@@ -194,7 +189,9 @@ class TTSService(ComfyBaseService):
         # Convert speed to rate parameter
         rate = speed_to_rate(final_speed)
 
-        logger.info(f"🎙️  Using local Edge TTS: voice={final_voice}, speed={final_speed}x (rate={rate})")
+        logger.info(
+            f"🎙️  Using local Edge TTS: voice={final_voice}, speed={final_speed}x (rate={rate})"
+        )
 
         # Generate output path if not provided
         if not output_path:
@@ -207,12 +204,7 @@ class TTSService(ComfyBaseService):
 
         # Call Edge TTS
         try:
-            await edge_tts(
-                text=text,
-                voice=final_voice,
-                rate=rate,
-                output_path=output_path
-            )
+            await edge_tts(text=text, voice=final_voice, rate=rate, output_path=output_path)
 
             logger.info(f"✅ Generated audio (local Edge TTS): {output_path}")
             return output_path
@@ -229,7 +221,7 @@ class TTSService(ComfyBaseService):
         reference_id: Optional[str] = None,
         fish_model: Optional[str] = None,
         output_path: Optional[str] = None,
-        **params
+        **params,
     ) -> str:
         """
         Generate speech using Fish Audio HTTP API.
@@ -260,9 +252,7 @@ class TTSService(ComfyBaseService):
             )
 
         base_url = (
-            params.pop("base_url", None)
-            or fish_config.get("base_url")
-            or "https://api.fish.audio"
+            params.pop("base_url", None) or fish_config.get("base_url") or "https://api.fish.audio"
         )
         endpoint = f"{base_url.rstrip('/')}/v1/tts"
         model = fish_model or params.pop("model", None) or fish_config.get("model", "s2-pro")
@@ -283,8 +273,7 @@ class TTSService(ComfyBaseService):
                 "speed": final_speed,
                 "volume": params.pop("volume", fish_config.get("volume", 0.0)),
                 "normalize_loudness": params.pop(
-                    "normalize_loudness",
-                    fish_config.get("normalize_loudness", True)
+                    "normalize_loudness", fish_config.get("normalize_loudness", True)
                 ),
             },
             "chunk_length": params.pop("chunk_length", fish_config.get("chunk_length", 300)),
@@ -293,20 +282,17 @@ class TTSService(ComfyBaseService):
             "latency": params.pop("latency", fish_config.get("latency", "normal")),
             "max_new_tokens": params.pop("max_new_tokens", fish_config.get("max_new_tokens", 1024)),
             "repetition_penalty": params.pop(
-                "repetition_penalty",
-                fish_config.get("repetition_penalty", 1.2)
+                "repetition_penalty", fish_config.get("repetition_penalty", 1.2)
             ),
             "min_chunk_length": params.pop(
-                "min_chunk_length",
-                fish_config.get("min_chunk_length", 50)
+                "min_chunk_length", fish_config.get("min_chunk_length", 50)
             ),
             "condition_on_previous_chunks": params.pop(
                 "condition_on_previous_chunks",
-                fish_config.get("condition_on_previous_chunks", True)
+                fish_config.get("condition_on_previous_chunks", True),
             ),
             "early_stop_threshold": params.pop(
-                "early_stop_threshold",
-                fish_config.get("early_stop_threshold", 1.0)
+                "early_stop_threshold", fish_config.get("early_stop_threshold", 1.0)
             ),
         }
 
@@ -320,8 +306,7 @@ class TTSService(ComfyBaseService):
             payload["mp3_bitrate"] = params.pop("mp3_bitrate", fish_config.get("mp3_bitrate", 128))
         if audio_format == "opus":
             payload["opus_bitrate"] = params.pop(
-                "opus_bitrate",
-                fish_config.get("opus_bitrate", -1000)
+                "opus_bitrate", fish_config.get("opus_bitrate", -1000)
             )
 
         if not output_path:
@@ -358,7 +343,9 @@ class TTSService(ComfyBaseService):
             response.raise_for_status()
             content_type = response.headers.get("content-type", "")
             if "application/json" in content_type.lower():
-                raise RuntimeError(f"Fish Audio TTS returned JSON instead of audio: {response.text}")
+                raise RuntimeError(
+                    f"Fish Audio TTS returned JSON instead of audio: {response.text}"
+                )
             if not response.content:
                 raise RuntimeError("Fish Audio TTS returned empty audio")
 
@@ -379,7 +366,7 @@ class TTSService(ComfyBaseService):
         voice: Optional[str] = None,
         speed: float = 1.0,
         output_path: Optional[str] = None,
-        **params
+        **params,
     ) -> str:
         """
         Generate speech using ComfyUI workflow
@@ -428,7 +415,12 @@ class TTSService(ComfyBaseService):
                 workflow_input = workflow_info["path"]
                 logger.info(f"Executing selfhost TTS workflow: {workflow_input}")
 
-            result = await kit.execute(workflow_input, workflow_params)
+            result = await self.core.execute_provider_workflow(
+                kit,
+                workflow_input,
+                workflow_params,
+                source=workflow_info["source"],
+            )
 
             # 4. Handle result
             if result.status != "completed":
@@ -441,19 +433,21 @@ class TTSService(ComfyBaseService):
             audio_path = None
 
             # Check for audio files in result.audios (if available)
-            if hasattr(result, 'audios') and result.audios:
+            if hasattr(result, "audios") and result.audios:
                 audio_path = result.audios[0]
                 logger.debug(f"✅ Found audio in result.audios: {audio_path}")
             # Check for files in result.files
-            elif hasattr(result, 'files') and result.files:
+            elif hasattr(result, "files") and result.files:
                 audio_path = result.files[0]
                 logger.debug(f"✅ Found audio in result.files: {audio_path}")
             # Check in outputs dictionary
-            elif hasattr(result, 'outputs') and result.outputs:
+            elif hasattr(result, "outputs") and result.outputs:
                 logger.debug(f"Searching for audio file in result.outputs: {result.outputs}")
                 # Try to find audio file in outputs
                 for key, value in result.outputs.items():
-                    if isinstance(value, str) and any(value.endswith(ext) for ext in ['.mp3', '.wav', '.flac']):
+                    if isinstance(value, str) and any(
+                        value.endswith(ext) for ext in [".mp3", ".wav", ".flac"]
+                    ):
                         audio_path = value
                         logger.debug(f"✅ Found audio in result.outputs[{key}]: {audio_path}")
                         break
@@ -468,7 +462,7 @@ class TTSService(ComfyBaseService):
                 raise Exception("No audio file generated by workflow")
 
             # If output_path provided and audio_path is URL, download to local
-            if output_path and audio_path.startswith(('http://', 'https://')):
+            if output_path and audio_path.startswith(("http://", "https://")):
                 # Ensure parent directory exists
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -477,7 +471,7 @@ class TTSService(ComfyBaseService):
                     response = await client.get(audio_path)
                     response.raise_for_status()
 
-                    with open(output_path, 'wb') as f:
+                    with open(output_path, "wb") as f:
                         f.write(response.content)
 
                 logger.info(f"✅ Generated audio (ComfyUI): {output_path}")

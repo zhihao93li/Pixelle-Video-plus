@@ -56,6 +56,16 @@ const roleLabels: Record<string, string> = {
   video_segment: "视频片段",
 }
 
+const providerStatusLabels: Record<string, string> = {
+  LOCAL_QUEUED: "Pixelle 本地排队中",
+  SUBMITTING: "正在提交到生成服务",
+  CREATED: "已提交到生成服务",
+  QUEUED: "RunningHub 排队中",
+  RUNNING: "RunningHub 生成中",
+  COMPLETED: "生成完成",
+  FAILED: "生成失败",
+}
+
 export function buildQualitySummary(
   qualityReview: QualityReviewInput | null | undefined
 ): QualitySummary {
@@ -116,6 +126,9 @@ export function buildProgressRuntimeItems(
   const runninghubTimeout = readNumber(detail.runninghub_timeout)
   const providerTaskId = readString(detail.provider_task_id)
   const providerStatus = readString(detail.provider_status)
+  const localQueuePosition = readNumber(detail.local_queue_position)
+  const localQueueActive = readNumber(detail.local_queue_active)
+  const localConcurrencyLimit = readNumber(detail.local_concurrency_limit)
 
   if (provider) {
     items.push({ label: "媒体服务", value: provider })
@@ -133,7 +146,20 @@ export function buildProgressRuntimeItems(
     items.push({ label: "服务任务", value: providerTaskId })
   }
   if (providerStatus) {
-    items.push({ label: "服务状态", value: providerStatus })
+    items.push({
+      label: "服务状态",
+      value:
+        providerStatusLabels[providerStatus.toUpperCase()] || providerStatus,
+    })
+  }
+  if (localQueuePosition !== null && localQueuePosition > 0) {
+    items.push({ label: "本地队列", value: `第 ${localQueuePosition} 位` })
+  }
+  if (localConcurrencyLimit !== null) {
+    items.push({
+      label: "RunningHub 并发",
+      value: `${localQueueActive ?? 0}/${localConcurrencyLimit}`,
+    })
   }
 
   return items

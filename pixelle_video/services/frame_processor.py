@@ -325,10 +325,6 @@ class FrameProcessor:
         }
         if config.image_model:
             detail["model"] = config.image_model
-        if provider == "runninghub":
-            timeout = self._runninghub_timeout()
-            if timeout:
-                detail["runninghub_timeout"] = timeout
         return detail
 
     def _default_media_workflow(self) -> Optional[str]:
@@ -345,17 +341,6 @@ class FrameProcessor:
         if "/" not in workflow:
             return "default"
         return workflow.split("/", 1)[0] or "default"
-
-    def _runninghub_timeout(self) -> Optional[int]:
-        core_config = getattr(self.core, "config", {}) or {}
-        comfyui_config = core_config.get("comfyui", {}) if isinstance(core_config, dict) else {}
-        timeout = (
-            comfyui_config.get("runninghub_timeout") if isinstance(comfyui_config, dict) else None
-        )
-        try:
-            return int(timeout) if timeout else None
-        except (TypeError, ValueError):
-            return None
 
     async def _step_compose_frame(
         self, frame: StoryboardFrame, storyboard: "Storyboard", config: StoryboardConfig

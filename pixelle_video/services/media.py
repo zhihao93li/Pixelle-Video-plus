@@ -23,9 +23,6 @@ from loguru import logger
 
 from pixelle_video.models.media import MediaResult
 from pixelle_video.services.comfy_base_service import ComfyBaseService
-from pixelle_video.services.provider_execution import (
-    execute_workflow_with_provider_progress,
-)
 
 
 class MediaService(ComfyBaseService):
@@ -288,7 +285,7 @@ class MediaService(ComfyBaseService):
                 workflow_input = workflow_info["path"]
                 logger.info(f"Executing selfhost workflow: {workflow_input}")
 
-            result = await execute_workflow_with_provider_progress(
+            result = await self.core.execute_provider_workflow(
                 kit,
                 workflow_input,
                 workflow_params,

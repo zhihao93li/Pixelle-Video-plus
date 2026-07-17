@@ -16,9 +16,6 @@ from pixelle_video.models.storyboard import (
     VideoGenerationResult,
 )
 from pixelle_video.pipelines.base import BasePipeline
-from pixelle_video.services.provider_execution import (
-    execute_workflow_with_provider_progress,
-)
 from pixelle_video.utils.os_util import create_task_output_dir
 
 
@@ -58,7 +55,7 @@ class WorkflowVideoPipeline(BasePipeline):
                 detail=detail,
             )
 
-        return await execute_workflow_with_provider_progress(
+        return await self.core.execute_provider_workflow(
             kit,
             workflow_input,
             params,
@@ -168,9 +165,7 @@ class WorkflowVideoPipeline(BasePipeline):
         try:
             duration = float(json.loads(completed.stdout)["format"]["duration"])
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise RuntimeError(
-                f"Cannot determine reference video duration: {video_path}"
-            ) from exc
+            raise RuntimeError(f"Cannot determine reference video duration: {video_path}") from exc
 
         if duration <= 0:
             raise RuntimeError(f"Reference video duration is invalid: {video_path}")
@@ -330,7 +325,9 @@ class ActionTransferPipeline(WorkflowVideoPipeline):
         seconds = int(duration or 0)
         if seconds <= 0:
             seconds = self._probe_video_seconds(reference_video)
-        self._report(progress_callback, "execute_workflow", 0.1, "Starting action transfer workflow")
+        self._report(
+            progress_callback, "execute_workflow", 0.1, "Starting action transfer workflow"
+        )
         workflow_result = await self._execute_workflow(
             self._workflow_path(workflow_key),
             {
@@ -411,7 +408,12 @@ class DigitalHumanPipeline(WorkflowVideoPipeline):
         generated_text = script
         if mode == "digital":
             if script.strip():
-                self._report(progress_callback, "compose_image", 0.15, "Combining product and character image")
+                self._report(
+                    progress_callback,
+                    "compose_image",
+                    0.15,
+                    "Combining product and character image",
+                )
                 image_result = await self._execute_workflow(
                     Path(str(workflow_paths["third_workflow_path"])),
                     {"firstimage": character_assets[0], "secondimage": (goods_assets or [])[0]},
@@ -420,7 +422,12 @@ class DigitalHumanPipeline(WorkflowVideoPipeline):
                 )
                 generated_image = self._first_image(image_result)
             else:
-                self._report(progress_callback, "compose_image", 0.15, "Generating digital human image and copy")
+                self._report(
+                    progress_callback,
+                    "compose_image",
+                    0.15,
+                    "Generating digital human image and copy",
+                )
                 image_result = await self._execute_workflow(
                     Path(str(workflow_paths["first_workflow_path"])),
                     {

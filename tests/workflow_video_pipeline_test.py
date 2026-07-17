@@ -15,6 +15,17 @@ class FakeCore:
     async def _get_or_create_comfykit(self):
         return SimpleNamespace()
 
+    async def execute_provider_workflow(
+        self,
+        kit,
+        workflow_input,
+        params,
+        *,
+        source,
+        provider_progress_callback=None,
+    ):
+        raise AssertionError("execute_provider_workflow must be replaced by the test")
+
 
 @pytest.mark.asyncio
 async def test_action_transfer_uses_reference_video_duration_when_not_provided(
@@ -90,7 +101,8 @@ async def test_workflow_video_reports_runninghub_provider_task_status(
         return SimpleNamespace(videos=["output/generated.mp4"])
 
     monkeypatch.setattr(
-        "pixelle_video.pipelines.workflow_video.execute_workflow_with_provider_progress",
+        pipeline.core,
+        "execute_provider_workflow",
         fake_execute_with_provider_progress,
     )
 

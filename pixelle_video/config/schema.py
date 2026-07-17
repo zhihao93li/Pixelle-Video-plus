@@ -211,6 +211,7 @@ class TTSSubConfig(BaseModel):
         default_factory=TTSFishAudioConfig, description="Fish Audio TTS configuration"
     )
 
+
 class ImageSubConfig(BaseModel):
     """Image-specific configuration (under comfyui.image)"""
 
@@ -248,7 +249,10 @@ class ComfyUIConfig(BaseModel):
         default=None, description="RunningHub API Key (optional)"
     )
     runninghub_concurrent_limit: int = Field(
-        default=1, ge=1, le=10, description="RunningHub concurrent execution limit (1-10)"
+        default=1,
+        ge=1,
+        le=10,
+        description="Process-wide RunningHub concurrent execution limit (1-10)",
     )
     runninghub_instance_type: Optional[str] = Field(
         default=None, description="RunningHub instance type (optional, set to 'plus' for 48GB VRAM)"

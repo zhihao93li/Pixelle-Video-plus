@@ -1012,23 +1012,29 @@ export function SettingsWorkspace() {
                       </SelectContent>
                     </Select>
                   </Field>
-                  <Field label="并发数">
-                    <Input
-                      max={10}
-                      min={1}
-                      onChange={(event) =>
-                        patchSettings({
-                          comfyui: {
-                            ...settings.comfyui,
-                            runninghub_concurrent_limit: Number(
-                              event.target.value || 1
-                            ),
-                          },
-                        })
-                      }
-                      type="number"
-                      value={settings.comfyui.runninghub_concurrent_limit}
-                    />
+                  <Field label="全局并发数">
+                    <div className="space-y-1.5">
+                      <Input
+                        max={10}
+                        min={1}
+                        onChange={(event) =>
+                          patchSettings({
+                            comfyui: {
+                              ...settings.comfyui,
+                              runninghub_concurrent_limit: Number(
+                                event.target.value || 1
+                              ),
+                            },
+                          })
+                        }
+                        type="number"
+                        value={settings.comfyui.runninghub_concurrent_limit}
+                      />
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        所有视频、图集和批量任务共用同一队列；当前账号只有 1
+                        路并发时请填 1。
+                      </p>
+                    </div>
                   </Field>
                   <Field label="超时秒数">
                     <Input

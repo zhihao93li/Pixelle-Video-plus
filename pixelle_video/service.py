@@ -18,7 +18,8 @@ Provides unified access to all capabilities (LLM, TTS, Image, etc.)
 
 import hashlib
 import json
-from typing import Optional
+from pathlib import Path
+from typing import Any, Callable, Optional
 
 from comfykit import ComfyKit
 from loguru import logger
@@ -42,6 +43,10 @@ from pixelle_video.services.image_analysis import ImageAnalysisService
 from pixelle_video.services.llm_service import LLMService
 from pixelle_video.services.media import MediaService
 from pixelle_video.services.persistence import PersistenceService
+from pixelle_video.services.provider_execution import (
+    execute_workflow_with_provider_progress,
+    get_process_runninghub_queue,
+)
 from pixelle_video.services.publish_manager import PublishManager
 from pixelle_video.services.tts_service import TTSService
 from pixelle_video.services.video import VideoService
@@ -95,6 +100,9 @@ class PixelleVideoCore:
         # ComfyKit lazy initialization (created on first use, recreated on config change)
         self._comfykit: Optional[ComfyKit] = None
         self._comfykit_config_hash: Optional[str] = None
+        self.runninghub_queue = get_process_runninghub_queue(
+            lambda: config_manager.config.comfyui.runninghub_concurrent_limit or 1
+        )
 
         # Core services (initialized in initialize())
         self.llm: Optional[LLMService] = None
@@ -189,6 +197,26 @@ class PixelleVideoCore:
             logger.info("✅ ComfyKit instance created")
 
         return self._comfykit
+
+    async def execute_provider_workflow(
+        self,
+        kit,
+        workflow_input: str | Path,
+        params: dict[str, Any],
+        *,
+        source: str,
+        provider_progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ):
+        """Execute a workflow through the process-wide provider gate."""
+
+        return await execute_workflow_with_provider_progress(
+            kit,
+            workflow_input,
+            params,
+            source=source,
+            provider_progress_callback=provider_progress_callback,
+            runninghub_queue=self.runninghub_queue,
+        )
 
     @staticmethod
     def _redact_sensitive_config(config: dict) -> dict:
