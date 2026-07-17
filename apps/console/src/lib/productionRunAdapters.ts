@@ -66,15 +66,17 @@ export function productionRunViewModel({
 
 export function resultArtifactViewModel(
   result: GenerationResult | null,
-  template: ProductionTemplate | null
+  template: ProductionTemplate | null,
+  titleOverride?: string | null
 ): ArtifactViewModel | null {
   if (!result) {
     return null
   }
   const title =
-    typeof result.metadata?.title === "string" && result.metadata.title.trim()
+    titleOverride?.trim() ||
+    (typeof result.metadata?.title === "string" && result.metadata.title.trim()
       ? result.metadata.title.trim()
-      : (template?.display_name ?? "生成结果")
+      : (template?.display_name ?? "生成结果"))
 
   if (result.artifact_type === "text") {
     const article =

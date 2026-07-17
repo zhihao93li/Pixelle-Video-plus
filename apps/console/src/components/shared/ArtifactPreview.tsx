@@ -4,7 +4,10 @@ import { ImageSetView } from "@/components/shared/ImageSetView"
 import { TextArticleView } from "@/components/shared/TextArticleView"
 import { Button } from "@/components/ui/button"
 import type { ArtifactViewModel } from "@/lib/productViewModels"
-import { downloadFilename } from "@/lib/downloadFilename"
+import {
+  downloadFilename,
+  downloadUrlWithFilename,
+} from "@/lib/downloadFilename"
 import { cn } from "@/lib/utils"
 
 /**
@@ -75,6 +78,8 @@ export function ArtifactPreview({
     )
   }
 
+  const filename = downloadFilename(artifact.title, "mp4", "未命名视频")
+
   return (
     <figure className={cn("flex min-w-0 flex-col gap-3", className)}>
       <div className="overflow-hidden rounded-lg border bg-black">
@@ -94,8 +99,8 @@ export function ArtifactPreview({
         </div>
         <Button asChild size="sm" variant="outline">
           <a
-            download={downloadFilename(artifact.title, "mp4", "未命名视频")}
-            href={artifact.downloadUrl}
+            download={filename}
+            href={downloadUrlWithFilename(artifact.downloadUrl, filename)}
           >
             <Download data-icon="inline-start" />
             下载视频

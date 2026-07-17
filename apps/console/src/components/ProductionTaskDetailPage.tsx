@@ -251,7 +251,7 @@ export function ProductionTaskDetailPage({ taskId }: { taskId: string }) {
   const latestGenerationTaskId = task?.generation_task_ids.at(-1)
   const progress = task?.progress_percentage
   const canRetry = task?.state === "failed" || task?.state === "cancelled"
-  const artifact = resultArtifactViewModel(result, null)
+  const artifact = resultArtifactViewModel(result, null, task?.title)
   const primaryHref = useMemo(() => {
     if (!task || task.state !== "produced" || !latestGenerationTaskId)
       return null
@@ -560,6 +560,7 @@ export function ProductionTaskDetailPage({ taskId }: { taskId: string }) {
               entries={visibleTimeline}
               resultErrors={timelineResultErrors}
               results={timelineResults}
+              title={task.title}
             />
             {timelineCursor ? (
               <div className="mt-5 flex justify-center border-t pt-4">

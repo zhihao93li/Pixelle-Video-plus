@@ -56,7 +56,11 @@ import {
 } from "@/components/ui/sheet"
 import { useToast } from "@/components/ui/toast"
 import { artifactKindLabel, type ArtifactKind } from "@/lib/artifactKind"
-import { downloadFilename, extensionFromUrl } from "@/lib/downloadFilename"
+import {
+  downloadFilename,
+  downloadUrlWithFilename,
+  extensionFromUrl,
+} from "@/lib/downloadFilename"
 import {
   formatBytes,
   formatDate,
@@ -1612,7 +1616,7 @@ async function downloadArtifact(artifact: ArtifactViewModel | null) {
 
 function triggerBrowserDownload(url: string, filename: string) {
   const anchor = document.createElement("a")
-  anchor.href = url
+  anchor.href = downloadUrlWithFilename(url, filename)
   anchor.download = filename
   anchor.rel = "noopener"
   anchor.click()

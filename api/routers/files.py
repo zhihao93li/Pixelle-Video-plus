@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from loguru import logger
 
@@ -28,10 +28,13 @@ router = APIRouter(prefix="/files", tags=["Files"])
 
 
 @router.get("/{file_path:path}")
-async def get_file(file_path: str):
+async def get_file(
+    file_path: str,
+    download_name: str | None = Query(default=None, max_length=180),
+):
     """
     Get file by path
-    
+
     Serves files from allowed directories:
     - output/ - Generated files (videos, images, audio)
     - workflows/ - ComfyUI workflow files
@@ -40,16 +43,16 @@ async def get_file(file_path: str):
     - data/bgm/ - Custom background music
     - data/templates/ - Custom templates
     - resources/ - Other resources (images, fonts, etc.)
-    
+
     - **file_path**: File path relative to allowed directories
-    
+
     Examples:
     - "abc123.mp4" → output/abc123.mp4
     - "workflows/runninghub/image_flux.json" → workflows/runninghub/image_flux.json
     - "templates/1080x1920/image_default.html" → templates/1080x1920/image_default.html
     - "bgm/default.mp3" → bgm/default.mp3
     - "resources/example.png" → resources/example.png
-    
+
     Returns file for download or preview.
     """
     try:
@@ -63,64 +66,70 @@ async def get_file(file_path: str):
             "data/templates/",
             "resources/",
         ]
-        
+
         # Check if path starts with an allowed prefix; bare paths are output-relative.
         full_path = None
         for prefix in allowed_prefixes:
             if file_path.startswith(prefix):
                 full_path = file_path
                 break
-        
+
         # Generated artifact URLs intentionally omit the repeated output/ prefix.
         if full_path is None:
             full_path = f"output/{file_path}"
-        
+
         abs_path = Path.cwd() / full_path
-        
+
         if not abs_path.exists():
             raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-        
+
         if not abs_path.is_file():
             raise HTTPException(status_code=400, detail=f"Path is not a file: {file_path}")
-        
+
         # Security: only allow access to specified directories
         try:
             rel_path = abs_path.relative_to(Path.cwd())
             rel_path_str = str(rel_path)
-            
+
             # Check if path starts with any allowed prefix
-            is_allowed = any(rel_path_str.startswith(prefix.rstrip('/')) for prefix in allowed_prefixes)
-            
+            is_allowed = any(
+                rel_path_str.startswith(prefix.rstrip("/")) for prefix in allowed_prefixes
+            )
+
             if not is_allowed:
                 raise HTTPException(
-                    status_code=403, 
-                    detail=f"Access denied: only {', '.join(p.rstrip('/') for p in allowed_prefixes)} directories are accessible"
+                    status_code=403,
+                    detail=f"Access denied: only {', '.join(p.rstrip('/') for p in allowed_prefixes)} directories are accessible",
                 )
         except ValueError:
             raise HTTPException(status_code=403, detail="Access denied")
-        
+
         # Determine media type
         suffix = abs_path.suffix.lower()
         media_types = {
-            '.mp4': 'video/mp4',
-            '.mp3': 'audio/mpeg',
-            '.wav': 'audio/wav',
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.gif': 'image/gif',
-            '.html': 'text/html',
-            '.json': 'application/json',
+            ".mp4": "video/mp4",
+            ".mp3": "audio/mpeg",
+            ".wav": "audio/wav",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".html": "text/html",
+            ".json": "application/json",
         }
-        media_type = media_types.get(suffix, 'application/octet-stream')
-        
-        # Use inline disposition for browser preview
+        media_type = media_types.get(suffix, "application/octet-stream")
+
+        disposition = (
+            _attachment_content_disposition(download_name, abs_path)
+            if download_name
+            else _inline_content_disposition(abs_path.name)
+        )
         return FileResponse(
             path=str(abs_path),
             media_type=media_type,
-            headers={"Content-Disposition": _inline_content_disposition(abs_path.name)},
+            headers={"Content-Disposition": disposition},
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -132,6 +141,17 @@ def _inline_content_disposition(filename: str) -> str:
     fallback = _ascii_fallback_filename(filename)
     encoded = quote(filename, safe="")
     return f"inline; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+
+
+def _attachment_content_disposition(requested_name: str, path: Path) -> str:
+    filename = re.sub(r'[\\/\x00-\x1f\x7f"]+', "_", requested_name).strip(" ._")
+    if not filename:
+        filename = path.name
+    if path.suffix and not filename.lower().endswith(path.suffix.lower()):
+        filename = f"{filename}{path.suffix.lower()}"
+    fallback = _ascii_fallback_filename(filename)
+    encoded = quote(filename, safe="")
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
 def _ascii_fallback_filename(filename: str) -> str:

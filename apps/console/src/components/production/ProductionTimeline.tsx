@@ -101,10 +101,12 @@ function OutputContent({
   entry,
   result,
   resultError,
+  title,
 }: {
   entry: ProductionTimelineEntry
   result: GenerationResult | null | undefined
   resultError: string | null | undefined
+  title: string
 }) {
   if (entry.event_type === "artifact_produced") {
     if (resultError) {
@@ -117,7 +119,11 @@ function OutputContent({
       )
     }
     if (!result) return <AsyncState state="loading" title="正在读取历史产物" />
-    return <ArtifactPreview artifact={resultArtifactViewModel(result, null)} />
+    return (
+      <ArtifactPreview
+        artifact={resultArtifactViewModel(result, null, title)}
+      />
+    )
   }
   if (entry.stage === "script") return <ScriptOutput entry={entry} />
   return <SceneOutput entry={entry} />
@@ -127,10 +133,12 @@ export function ProductionTimeline({
   entries,
   results,
   resultErrors,
+  title,
 }: {
   entries: ProductionTimelineEntry[]
   results: Record<string, GenerationResult | null>
   resultErrors: Record<string, string | null>
+  title: string
 }) {
   const latestOutputId = entries.find(
     (entry) => entry.category === "output"
@@ -228,6 +236,7 @@ export function ProductionTimeline({
                       ? resultErrors[entry.generation_task_id]
                       : undefined
                   }
+                  title={title}
                 />
               </div>
             </details>

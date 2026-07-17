@@ -3,6 +3,7 @@ import { Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   downloadFilename,
+  downloadUrlWithFilename,
   extensionFromUrl,
 } from "@/lib/downloadFilename"
 
@@ -35,12 +36,13 @@ export function ImageSetView({
       // 交错触发，减少浏览器多下载拦截；跨域时浏览器会改为在新标签打开供保存
       window.setTimeout(() => {
         const anchor = document.createElement("a")
-        anchor.href = item.url
-        anchor.download = downloadFilename(
+        const filename = downloadFilename(
           `${title || "未命名图集"}-${String(index + 1).padStart(2, "0")}`,
           extensionFromUrl(item.url),
           `未命名图集-${index + 1}`
         )
+        anchor.href = downloadUrlWithFilename(item.url, filename)
+        anchor.download = filename
         anchor.target = "_blank"
         anchor.rel = "noopener"
         anchor.click()

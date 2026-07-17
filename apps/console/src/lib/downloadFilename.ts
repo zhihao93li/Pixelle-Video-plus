@@ -40,3 +40,21 @@ export function extensionFromUrl(url: string, fallback = "png") {
     return fallback
   }
 }
+
+export function downloadUrlWithFilename(url: string, filename: string) {
+  try {
+    const base =
+      typeof window === "undefined" ? "http://localhost" : window.location.href
+    const parsed = new URL(url, base)
+    if (!parsed.pathname.includes("/files/")) {
+      return url
+    }
+    parsed.searchParams.set("download_name", filename)
+    if (url.startsWith("/")) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`
+    }
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
