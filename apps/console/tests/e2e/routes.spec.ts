@@ -48,8 +48,8 @@ test.describe("正式路由", () => {
     await expect(
       page.getByRole("heading", { name: "提示词库", exact: true })
     ).toBeVisible()
-    await expect(page.getByRole("button", { name: "写稿提示词" })).toBeVisible()
-    await expect(page.getByRole("button", { name: "分镜提示词" })).toBeVisible()
+    await expect(page.getByRole("tab", { name: "写稿提示词" })).toBeVisible()
+    await expect(page.getByRole("tab", { name: "分镜提示词" })).toBeVisible()
     await expect(page.getByRole("button", { name: "复制并编辑" })).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
@@ -57,8 +57,8 @@ test.describe("正式路由", () => {
   test("设置中心展示多条真实 LLM 服务", async ({ page }) => {
     const unhandledApi = await installApiFixtures(page)
     await preparePage(page)
-    await page.goto("/#/settings?view=ai-voice", { waitUntil: "networkidle" })
-    await expect(page.getByRole("heading", { name: "LLM 服务" })).toBeVisible()
+    await page.goto("/#/settings?view=llm", { waitUntil: "networkidle" })
+    await expect(page.getByRole("heading", { name: "AI 大模型" })).toBeVisible()
     await expect(
       page.getByRole("button", { name: /AiHubMix 主账号/ })
     ).toBeVisible()

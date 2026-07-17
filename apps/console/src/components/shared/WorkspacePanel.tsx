@@ -58,12 +58,12 @@ export function WorkspacePanel({
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             {title ? (
-              <h2 className="text-sm font-medium" id={resolvedTitleId}>
+              <h2 className="text-base font-semibold" id={resolvedTitleId}>
                 {title}
               </h2>
             ) : null}
             {description ? (
-              <div className="text-xs leading-5 text-pretty text-muted-foreground">
+              <div className="text-sm leading-5 text-pretty text-muted-foreground">
                 {description}
               </div>
             ) : null}

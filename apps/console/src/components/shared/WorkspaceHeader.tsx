@@ -32,7 +32,7 @@ export function WorkspaceHeader({
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <Heading
-          className="text-lg leading-7 font-medium tracking-tight text-balance"
+          className="text-xl leading-7 font-semibold tracking-tight text-balance"
           id={resolvedTitleId}
         >
           {title}

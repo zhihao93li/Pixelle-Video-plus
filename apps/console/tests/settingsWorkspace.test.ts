@@ -15,12 +15,17 @@ test("settings deep links resolve canonical views and sections", () => {
   assert.deepEqual(
     resolveSettingsLocation(new URLSearchParams("view=ai-voice&focus=tts")),
     {
-      view: "ai-voice",
-      focus: "tts",
+      view: "tts",
+      focus: null,
       template: null,
-      canonicalPath: "/settings?view=ai-voice&focus=tts",
-      needsNormalization: false,
+      canonicalPath: "/settings?view=tts",
+      needsNormalization: true,
     }
+  )
+  assert.equal(
+    resolveSettingsLocation(new URLSearchParams("view=generation"))
+      .canonicalPath,
+    "/settings?view=visual-generation"
   )
   assert.equal(
     resolveSettingsLocation(

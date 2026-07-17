@@ -105,15 +105,20 @@ export const FORMAL_SURFACES: readonly FormalSurface[] = [
     heading: "设置",
   },
   {
-    name: "settings-ai-voice",
-    path: "/settings?view=ai-voice",
+    name: "settings-llm",
+    path: "/settings?view=llm",
     heading: "设置",
   },
   {
-    name: "settings-generation",
-    path: "/settings?view=generation",
+    name: "settings-visual-generation",
+    path: "/settings?view=visual-generation",
     heading: "设置",
     mobileVisual: true,
+  },
+  {
+    name: "settings-tts",
+    path: "/settings?view=tts",
+    heading: "设置",
   },
   {
     name: "settings-publish-storage",

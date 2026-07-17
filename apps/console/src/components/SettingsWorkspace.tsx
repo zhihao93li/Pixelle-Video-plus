@@ -2,17 +2,19 @@ import { useEffect, useMemo, useState, type ReactNode } from "react"
 import {
   Bot,
   CheckCircle2,
+  ChevronRight,
   CircleHelp,
   FolderKanban,
   Gauge,
+  Images,
   Loader2,
+  Mic2,
   PanelsTopLeft,
   FileText,
   Plus,
   RefreshCw,
   Save,
   Send,
-  WandSparkles,
 } from "lucide-react"
 
 import { HelpWorkspace } from "@/components/HelpWorkspace"
@@ -95,61 +97,97 @@ const platformLabels = {
 
 type ActionState = "idle" | "loading" | "testing" | "saving"
 type WorkflowKind = "video" | "image" | "tts"
-type SaveSection = "ai-voice" | "generation" | "publish-storage"
+type SaveSection = "visual-generation" | "tts" | "publish-storage"
 
-const SETTINGS_NAV: Array<{
+type SettingsNavItem = {
   view: SettingsView
   label: string
   description: string
   icon: typeof Gauge
+}
+
+const SETTINGS_NAV_GROUPS: Array<{
+  label: string
+  items: SettingsNavItem[]
 }> = [
   {
-    view: "overview",
-    label: "概览",
-    description: "状态与专家模式",
-    icon: Gauge,
+    label: "准备情况",
+    items: [
+      {
+        view: "overview",
+        label: "概览",
+        description: "缺什么、去哪里处理",
+        icon: Gauge,
+      },
+    ],
   },
   {
-    view: "projects",
-    label: "内容空间",
-    description: "品牌与内容线",
-    icon: FolderKanban,
+    label: "工作空间",
+    items: [
+      {
+        view: "projects",
+        label: "内容空间",
+        description: "账号、品牌与内容方向",
+        icon: FolderKanban,
+      },
+    ],
   },
   {
-    view: "ai-voice",
-    label: "AI 与语音",
-    description: "模型、密钥与音色",
-    icon: Bot,
+    label: "服务连接",
+    items: [
+      {
+        view: "llm",
+        label: "AI 大模型",
+        description: "写稿、分镜与内容理解",
+        icon: Bot,
+      },
+      {
+        view: "visual-generation",
+        label: "图片与视频生成",
+        description: "画面服务、工作流与算力",
+        icon: Images,
+      },
+      {
+        view: "tts",
+        label: "语音生成（TTS）",
+        description: "配音服务、模型与音色",
+        icon: Mic2,
+      },
+      {
+        view: "publish-storage",
+        label: "发布与存储",
+        description: "平台账号与文件存储",
+        icon: Send,
+      },
+    ],
   },
   {
-    view: "generation",
-    label: "生成引擎",
-    description: "算力与资源清单",
-    icon: WandSparkles,
+    label: "生产规则",
+    items: [
+      {
+        view: "recipes",
+        label: "模板",
+        description: "长期生产默认设置",
+        icon: PanelsTopLeft,
+      },
+      {
+        view: "prompts",
+        label: "提示词库",
+        description: "写稿与分镜规则",
+        icon: FileText,
+      },
+    ],
   },
   {
-    view: "publish-storage",
-    label: "发布与存储",
-    description: "平台渠道与云存储",
-    icon: Send,
-  },
-  {
-    view: "recipes",
-    label: "模板",
-    description: "启停与克隆",
-    icon: PanelsTopLeft,
-  },
-  {
-    view: "prompts",
-    label: "提示词库",
-    description: "写稿与分镜规则",
-    icon: FileText,
-  },
-  {
-    view: "help",
-    label: "帮助",
-    description: "说明与故障恢复",
-    icon: CircleHelp,
+    label: "支持",
+    items: [
+      {
+        view: "help",
+        label: "帮助与诊断",
+        description: "操作说明与故障恢复",
+        icon: CircleHelp,
+      },
+    ],
   },
 ]
 
@@ -364,8 +402,12 @@ export function SettingsWorkspace() {
 
   const dirtySections = useMemo(
     () => ({
-      "ai-voice": isSettingsSectionDirty("ai-voice", settings, savedSettings),
-      generation: isSettingsSectionDirty("generation", settings, savedSettings),
+      tts: isSettingsSectionDirty("tts", settings, savedSettings),
+      "visual-generation": isSettingsSectionDirty(
+        "visual-generation",
+        settings,
+        savedSettings
+      ),
       "publish-storage": isSettingsSectionDirty(
         "publish-storage",
         settings,
@@ -564,7 +606,7 @@ export function SettingsWorkspace() {
         actions={
           <>
             <Badge variant={configured ? "secondary" : "destructive"}>
-              {configured ? "关键配置可用" : "AI 配置未完成"}
+              {configured ? "基础配置完整" : "AI 大模型待配置"}
             </Badge>
             <Button
               aria-label="刷新系统设置"
@@ -580,7 +622,7 @@ export function SettingsWorkspace() {
             </Button>
           </>
         }
-        description="管理内容空间、模型、生成引擎、发布与模板。每个分区独立保存。"
+        description="按用途管理内容空间、外部服务连接和长期生产规则。"
         title="设置中心"
       />
 
@@ -607,47 +649,54 @@ export function SettingsWorkspace() {
       <div className="grid min-w-0 gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
         <nav
           aria-label="设置分区"
-          className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-2 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0"
+          className="-mx-4 flex snap-x gap-4 overflow-x-auto px-4 pb-2 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0"
         >
-          {SETTINGS_NAV.map((item) => {
-            const Icon = item.icon
-            const active = item.view === activeView
-            const dirty =
-              item.view === "ai-voice" ||
-              item.view === "generation" ||
-              item.view === "publish-storage"
-                ? dirtySections[item.view]
-                : false
-            return (
-              <a
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex min-h-14 w-48 shrink-0 snap-start items-center gap-3 rounded-lg px-3 outline-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 lg:w-full",
-                  active && "bg-muted"
-                )}
-                href={routeHref(
-                  settingsLink({ kind: "view", view: item.view })
-                )}
-                key={item.view}
-              >
-                <Icon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium">
-                    {item.label}
-                  </span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {item.description}
-                  </span>
-                </span>
-                {dirty ? (
-                  <span
-                    aria-label="有未保存更改"
-                    className="size-2 rounded-full bg-warning"
-                  />
-                ) : null}
-              </a>
-            )
-          })}
+          {SETTINGS_NAV_GROUPS.map((group) => (
+            <div className="contents lg:block" key={group.label}>
+              <div className="hidden px-3 pt-2 pb-1 text-[0.6875rem] font-medium tracking-wider text-muted-foreground uppercase lg:block">
+                {group.label}
+              </div>
+              {group.items.map((item) => {
+                const Icon = item.icon
+                const active = item.view === activeView
+                const dirty =
+                  item.view === "tts" ||
+                  item.view === "visual-generation" ||
+                  item.view === "publish-storage"
+                    ? dirtySections[item.view]
+                    : false
+                return (
+                  <a
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "flex min-h-14 w-52 shrink-0 snap-start items-center gap-3 rounded-lg px-3 outline-none hover:bg-muted/60 focus-visible:ring-3 focus-visible:ring-ring/50 lg:w-full",
+                      active && "bg-muted"
+                    )}
+                    href={routeHref(
+                      settingsLink({ kind: "view", view: item.view })
+                    )}
+                    key={item.view}
+                  >
+                    <Icon className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium">
+                        {item.label}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {item.description}
+                      </span>
+                    </span>
+                    {dirty ? (
+                      <span
+                        aria-label="有未保存更改"
+                        className="size-2 rounded-full bg-warning"
+                      />
+                    ) : null}
+                  </a>
+                )
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="min-w-0">
@@ -681,47 +730,44 @@ export function SettingsWorkspace() {
           {activeView === "overview" && settings ? (
             <div className="flex flex-col gap-5">
               <SettingsViewHeader
-                description="检查关键连接，控制专家选项并进入各配置分区。"
-                title="系统概览"
+                description="先看哪些配置需要处理，再直接进入对应页面。"
+                title="生产准备情况"
               />
-              <DiagnosticsPanel checks={diagnostics} ok={diagnosticsOk} />
-              <ExpertModeSection />
-              <div className="divide-y border-y">
-                <OverviewLink
-                  description="模型、密钥、语音服务与默认音色"
-                  label="AI 与语音"
-                  view="ai-voice"
-                />
-                <OverviewLink
-                  description="生成节点、并发限制与资源清单"
-                  label="生成引擎"
-                  view="generation"
-                />
-                <OverviewLink
-                  description="社媒渠道映射与云存储"
-                  label="发布与存储"
-                  view="publish-storage"
-                />
-              </div>
-              <ResetSettingsDialog
-                isResetting={isResetting}
-                onReset={() => void resetSettings()}
+              <SettingsReadinessPanel
+                checks={diagnostics}
+                configured={configured}
+                ok={diagnosticsOk}
               />
+              <ServiceShortcutGrid />
+              <details className="group rounded-lg border bg-muted/15">
+                <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+                  高级与诊断
+                  <ChevronRight className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
+                </summary>
+                <div className="flex flex-col gap-5 border-t p-4">
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    下面展示底层前置检查。它反映配置是否齐全，不代表外部服务已经实时连通。
+                  </p>
+                  <DiagnosticsPanel checks={diagnostics} ok={diagnosticsOk} />
+                  <ExpertModeSection />
+                  <ResetSettingsDialog
+                    isResetting={isResetting}
+                    onReset={() => void resetSettings()}
+                  />
+                </div>
+              </details>
             </div>
           ) : null}
 
           {activeView === "projects" ? <ProjectsPanel /> : null}
 
-          {activeView === "ai-voice" && settings ? (
+          {activeView === "llm" && settings ? (
             <div className="flex flex-col gap-5">
               <SettingsViewHeader
-                description="配置内容起草模型与默认配音服务。"
-                dirty={dirtySections["ai-voice"]}
-                onSave={() => void saveSettings("ai-voice")}
-                saving={savingSection === "ai-voice"}
-                title="AI 与语音"
+                description="连接写稿、分镜和内容理解所使用的大模型服务。每个服务独立保存。"
+                title="AI 大模型"
               />
-              <Section id="llm" title="LLM 服务">
+              <Section id="llm" title="已连接服务">
                 <LlmProviderSettings
                   onSettingsChanged={(next) => {
                     setSettings((current) =>
@@ -734,9 +780,20 @@ export function SettingsWorkspace() {
                   settings={settings}
                 />
               </Section>
+            </div>
+          ) : null}
 
-              <Section id="tts" title="配音服务">
-                <Field label="默认配音服务">
+          {activeView === "tts" && settings ? (
+            <div className="flex flex-col gap-5">
+              <SettingsViewHeader
+                description="选择新任务默认使用的配音服务，并配置对应模型和音色。"
+                dirty={dirtySections.tts}
+                onSave={() => void saveSettings("tts")}
+                saving={savingSection === "tts"}
+                title="语音生成（TTS）"
+              />
+              <Section id="tts" title="默认配音服务">
+                <Field label="选择服务">
                   <Select
                     onValueChange={(value) =>
                       patchSettings({
@@ -752,7 +809,10 @@ export function SettingsWorkspace() {
                     }
                     value={settings.comfyui.tts.inference_mode ?? "local"}
                   >
-                    <SelectTrigger aria-label="默认配音服务" className="w-full">
+                    <SelectTrigger
+                      aria-label="选择默认配音服务"
+                      className="w-full"
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -770,9 +830,23 @@ export function SettingsWorkspace() {
                   新建任务默认使用这里选择的服务；模板明确指定其他服务时才会覆盖。
                 </p>
                 <div className="border-t pt-5">
-                  <h3 className="text-sm font-medium">Fish Audio</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-semibold">Fish Audio</h3>
+                    <Badge
+                      variant={
+                        settings.comfyui.tts.inference_mode === "fish"
+                          ? "secondary"
+                          : "outline"
+                      }
+                    >
+                      {settings.comfyui.tts.inference_mode === "fish"
+                        ? "当前默认"
+                        : "备用配置"}
+                    </Badge>
+                  </div>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    选择 Fish Audio 为默认服务时，使用下面的模型和默认音色。
+                    选择 Fish Audio
+                    为默认服务时，任务会使用下面的模型和默认音色。
                   </p>
                 </div>
                 <SecretSettingField
@@ -886,16 +960,13 @@ export function SettingsWorkspace() {
             </div>
           ) : null}
 
-          {activeView === "generation" && settings ? (
+          {activeView === "visual-generation" && settings ? (
             <div className="flex flex-col gap-5">
               <SettingsViewHeader
-                description="配置生成节点、算力限制与可用资源。"
-                dirty={dirtySections.generation}
-                onSave={() => void saveSettings("generation")}
-                saving={savingSection === "generation"}
-                title="生成引擎"
+                description="连接图片和视频生成服务，并管理工作流执行的并发与超时。"
+                title="图片与视频生成"
               />
-              <Section id="comfyui" title="生成节点">
+              <Section id="comfyui" title="Workflow 执行服务">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="ComfyUI 地址">
                     <Input
@@ -1054,9 +1125,36 @@ export function SettingsWorkspace() {
                     />
                   </Field>
                 </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                  <p className="max-w-xl text-xs leading-5 text-muted-foreground">
+                    RunningHub
+                    显示“已配置”只代表凭证已保存；真实可用性以任务执行结果为准。
+                  </p>
+                  <Button
+                    disabled={
+                      !dirtySections["visual-generation"] ||
+                      savingSection === "visual-generation"
+                    }
+                    onClick={() => void saveSettings("visual-generation")}
+                  >
+                    {savingSection === "visual-generation" ? (
+                      <Loader2
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
+                    ) : (
+                      <Save data-icon="inline-start" />
+                    )}
+                    保存 Workflow 服务
+                  </Button>
+                </div>
               </Section>
 
-              <Section id="image-providers" title="图片生成服务">
+              <Section id="image-providers" title="独立图片生成服务">
+                <p className="text-xs leading-5 text-muted-foreground">
+                  每个服务独立启用和保存，不会被上面的 Workflow
+                  服务保存按钮覆盖。
+                </p>
                 <ImageProviderSettings />
               </Section>
 
@@ -1160,36 +1258,50 @@ export function SettingsWorkspace() {
                 </Section>
               ) : null}
 
-              <Section id="resources" title="资源清单">
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <ResourceMetric
-                    label="背景音乐"
-                    value={resourceState.bgm.length}
-                  />
-                  <ResourceMetric
-                    label="画面模板"
-                    value={resourceState.frameTemplates.length}
-                  />
-                  <ResourceMetric
-                    label="媒体流程"
-                    value={resourceState.mediaWorkflows.length}
-                  />
-                  <ResourceMetric
-                    label="语音流程"
-                    value={resourceState.ttsWorkflows.length}
-                  />
+              <details
+                className="group scroll-mt-20 rounded-lg border bg-muted/15"
+                id="resources"
+              >
+                <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+                  查看本地资源清单
+                  <ChevronRight className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
+                </summary>
+                <div className="border-t p-4">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <ResourceMetric
+                      label="背景音乐"
+                      value={resourceState.bgm.length}
+                    />
+                    <ResourceMetric
+                      label="画面模板"
+                      value={resourceState.frameTemplates.length}
+                    />
+                    <ResourceMetric
+                      label="媒体流程"
+                      value={resourceState.mediaWorkflows.length}
+                    />
+                    <ResourceMetric
+                      label="语音流程"
+                      value={resourceState.ttsWorkflows.length}
+                    />
+                  </div>
+                  {resourceError ? (
+                    <div className="mt-4">
+                      <InlineError
+                        message={resourceError}
+                        title="资源读取失败"
+                      />
+                    </div>
+                  ) : null}
                 </div>
-                {resourceError ? (
-                  <InlineError message={resourceError} title="资源读取失败" />
-                ) : null}
-              </Section>
+              </details>
             </div>
           ) : null}
 
           {activeView === "publish-storage" && settings ? (
             <div className="flex flex-col gap-5">
               <SettingsViewHeader
-                description="配置发布渠道映射与腾讯云对象存储。"
+                description="连接发布账号与云存储；发布渠道可自动读取，原始 ID 只用于高级排查。"
                 dirty={dirtySections["publish-storage"]}
                 onSave={() => void saveSettings("publish-storage")}
                 saving={savingSection === "publish-storage"}
@@ -1249,41 +1361,41 @@ export function SettingsWorkspace() {
                     ok={bufferStatus.ok}
                   />
                 ) : null}
-                {bufferChannels.length > 0 ? (
-                  <div className="divide-y border-y text-xs">
-                    {bufferChannels.slice(0, 5).map((channel) => (
-                      <div
-                        className="py-2"
-                        key={channel.id ?? channel.displayName ?? channel.name}
-                      >
-                        {formatBufferChannel(channel)}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {Object.entries(platformLabels).map(([platform, label]) => (
-                    <Field key={platform} label={`${label} 渠道 ID`}>
-                      <Input
-                        onChange={(event) =>
-                          patchSettings({
-                            publish: {
-                              ...settings.publish,
-                              buffer: {
-                                ...settings.publish.buffer,
-                                channels: {
-                                  ...settings.publish.buffer.channels,
-                                  [platform]: event.target.value,
+                <BufferChannelSummary
+                  channels={settings.publish.buffer.channels}
+                  fetchedChannels={bufferChannels}
+                />
+                <details className="group rounded-lg border bg-muted/15">
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+                    高级：手动调整渠道 ID
+                    <ChevronRight className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
+                  </summary>
+                  <div className="grid gap-4 border-t p-3 sm:grid-cols-2">
+                    {Object.entries(platformLabels).map(([platform, label]) => (
+                      <Field key={platform} label={`${label} 渠道 ID`}>
+                        <Input
+                          onChange={(event) =>
+                            patchSettings({
+                              publish: {
+                                ...settings.publish,
+                                buffer: {
+                                  ...settings.publish.buffer,
+                                  channels: {
+                                    ...settings.publish.buffer.channels,
+                                    [platform]: event.target.value,
+                                  },
                                 },
                               },
-                            },
-                          })
-                        }
-                        value={settings.publish.buffer.channels[platform] ?? ""}
-                      />
-                    </Field>
-                  ))}
-                </div>
+                            })
+                          }
+                          value={
+                            settings.publish.buffer.channels[platform] ?? ""
+                          }
+                        />
+                      </Field>
+                    ))}
+                  </div>
+                </details>
               </Section>
 
               <Section id="cos" title="云存储">
@@ -1466,7 +1578,9 @@ function SettingsViewHeader({
   return (
     <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-4">
       <div>
-        <h2 className="text-lg font-medium">{title}</h2>
+        <h2 className="text-xl leading-7 font-semibold tracking-tight">
+          {title}
+        </h2>
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       </div>
       {onSave ? (
@@ -1488,28 +1602,166 @@ function SettingsViewHeader({
   )
 }
 
-function OverviewLink({
-  label,
-  description,
-  view,
+function SettingsReadinessPanel({
+  checks,
+  configured,
+  ok,
 }: {
-  label: string
-  description: string
-  view: SettingsView
+  checks: SettingsDiagnosticCheck[]
+  configured: boolean
+  ok: boolean
 }) {
+  const blocking = checks.filter(
+    (check) => !check.ok && check.severity === "error"
+  )
+  const optional = checks.filter(
+    (check) => !check.ok && check.severity !== "error"
+  )
+  const ready = configured && ok && blocking.length === 0
+
   return (
-    <a
-      className="flex min-h-16 items-center justify-between gap-4 py-3 outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
-      href={routeHref(settingsLink({ kind: "view", view }))}
+    <section
+      className={cn(
+        "rounded-xl border p-5",
+        ready
+          ? "border-success/30 bg-success/5"
+          : "border-destructive/30 bg-destructive/5"
+      )}
     >
-      <span>
-        <span className="block text-sm font-medium">{label}</span>
-        <span className="mt-0.5 block text-xs text-muted-foreground">
-          {description}
-        </span>
-      </span>
-      <span className="shrink-0 text-sm text-primary">打开</span>
-    </a>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <Badge variant={ready ? "success" : "destructive"}>
+            {ready ? "基础配置完整" : `${blocking.length || 1} 项需要处理`}
+          </Badge>
+          <h3 className="mt-3 text-base font-semibold">
+            {ready ? "可以开始生产" : "先完成必要连接"}
+          </h3>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+            {ready
+              ? "必要字段已经配置。外部服务是否实时在线，仍以连接测试和真实任务结果为准。"
+              : "下面只列出会阻塞核心生产的配置，并提供直接处理入口。"}
+          </p>
+        </div>
+        {ready ? (
+          <Button asChild>
+            <a href={routeHref("/create")}>去快速生产</a>
+          </Button>
+        ) : null}
+      </div>
+
+      {blocking.length > 0 ? (
+        <div className="mt-5 grid gap-3">
+          {blocking.map((check) => (
+            <ActionableDiagnostic key={check.id} check={check} />
+          ))}
+        </div>
+      ) : null}
+
+      {optional.length > 0 ? (
+        <details className="group mt-5 border-t pt-4">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+            按需补充的能力（{optional.length}）
+            <ChevronRight className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="mt-3 grid gap-2">
+            {optional.map((check) => (
+              <ActionableDiagnostic compact key={check.id} check={check} />
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </section>
+  )
+}
+
+function ActionableDiagnostic({
+  check,
+  compact = false,
+}: {
+  check: SettingsDiagnosticCheck
+  compact?: boolean
+}) {
+  const destination = diagnosticDestination(check.id)
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-background",
+        compact ? "px-3 py-2.5" : "p-4"
+      )}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium">{check.label}</div>
+        <div className="mt-1 text-xs leading-5 text-muted-foreground">
+          {check.message}
+        </div>
+      </div>
+      <Button asChild size="sm" variant="outline">
+        <a href={routeHref(settingsLink({ kind: "view", view: destination }))}>
+          {destination === "help" ? "查看帮助" : "去设置"}
+          <ChevronRight data-icon="inline-end" />
+        </a>
+      </Button>
+    </div>
+  )
+}
+
+function ServiceShortcutGrid() {
+  const items: SettingsNavItem[] = [
+    {
+      view: "llm",
+      label: "AI 大模型",
+      description: "写稿、分镜与内容理解",
+      icon: Bot,
+    },
+    {
+      view: "visual-generation",
+      label: "图片与视频生成",
+      description: "画面服务、工作流与算力",
+      icon: Images,
+    },
+    {
+      view: "tts",
+      label: "语音生成（TTS）",
+      description: "配音服务、模型与音色",
+      icon: Mic2,
+    },
+    {
+      view: "publish-storage",
+      label: "发布与存储",
+      description: "平台账号与文件存储",
+      icon: Send,
+    },
+  ]
+  return (
+    <section>
+      <h3 className="text-base font-semibold">服务连接</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        按要配置的能力进入，不需要理解底层模块名称。
+      </p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {items.map((item) => {
+          const Icon = item.icon
+          return (
+            <a
+              className="group flex min-h-24 items-center gap-3 rounded-xl border bg-background p-4 transition-colors outline-none hover:border-primary/40 hover:bg-muted/30 focus-visible:ring-3 focus-visible:ring-ring/50"
+              href={routeHref(settingsLink({ kind: "view", view: item.view }))}
+              key={item.view}
+            >
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground group-hover:text-primary">
+                <Icon className="size-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">{item.label}</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  {item.description}
+                </span>
+              </span>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+            </a>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -1524,7 +1776,7 @@ function ResetSettingsDialog({
     <section className="border-t pt-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h3 className="text-sm font-medium">恢复系统默认值</h3>
+          <h3 className="text-base font-semibold">恢复系统默认值</h3>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
             重置 AI、语音、生成、发布与存储配置。项目和已生成作品不会被删除。
           </p>
@@ -1589,7 +1841,7 @@ function Section({
 }) {
   return (
     <section className="scroll-mt-20 border-b pb-5" id={id}>
-      <h3 className="mb-4 text-sm font-medium">{title}</h3>
+      <h3 className="mb-4 text-base font-semibold tracking-tight">{title}</h3>
       <div className="flex max-w-3xl flex-col gap-4">{children}</div>
     </section>
   )
@@ -1723,10 +1975,57 @@ function StatusMessage({ ok, message }: { ok: boolean; message: string }) {
   )
 }
 
-function formatBufferChannel(channel: BufferChannel) {
-  const service = channel.service || "unknown"
-  const name = channel.displayName || channel.name || channel.id || "unnamed"
-  return `${service}: ${name} (${channel.id || "no id"})`
+function BufferChannelSummary({
+  channels,
+  fetchedChannels,
+}: {
+  channels: Record<string, string | undefined>
+  fetchedChannels: BufferChannel[]
+}) {
+  const configuredChannels = Object.entries(platformLabels).filter(
+    ([platform]) => Boolean(channels[platform])
+  )
+  if (configuredChannels.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+        尚未关联发布账号。配置 Buffer API Key
+        后点击“读取发布渠道”，系统会自动填入支持的平台。
+      </div>
+    )
+  }
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {configuredChannels.map(([platform, label]) => {
+        const channelId = channels[platform]
+        const channel = fetchedChannels.find((item) => item.id === channelId)
+        return (
+          <div
+            className="flex items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2.5"
+            key={platform}
+          >
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{label}</div>
+              <div className="truncate text-xs text-muted-foreground">
+                {channel?.displayName || channel?.name || "已关联发布账号"}
+              </div>
+            </div>
+            <Badge variant="secondary">已关联</Badge>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function diagnosticDestination(checkId: string): SettingsView {
+  if (checkId === "llm_config") return "llm"
+  if (checkId === "fish_audio_config") return "tts"
+  if (checkId === "buffer_publish" || checkId === "cos_publish") {
+    return "publish-storage"
+  }
+  if (checkId === "ffmpeg" || checkId === "hyperframes") return "help"
+  if (checkId === "settings_diagnostics") return "help"
+  return "visual-generation"
 }
 
 function diagnosticBadgeVariant(check: SettingsDiagnosticCheck) {
@@ -1765,8 +2064,9 @@ function mergeSettings(
 function requiresSettings(view: SettingsView) {
   return (
     view === "overview" ||
-    view === "ai-voice" ||
-    view === "generation" ||
+    view === "llm" ||
+    view === "visual-generation" ||
+    view === "tts" ||
     view === "publish-storage"
   )
 }
@@ -1787,8 +2087,8 @@ function settingsSectionSnapshot(
   section: SaveSection,
   settings: AppSettingsConfig
 ) {
-  if (section === "ai-voice") {
-    return { llm: settings.llm, tts: settings.comfyui.tts }
+  if (section === "tts") {
+    return settings.comfyui.tts
   }
   if (section === "publish-storage") {
     return settings.publish
@@ -1802,8 +2102,8 @@ function settingsUpdateForSection(
   section: SaveSection,
   settings: AppSettingsConfig
 ): SettingsConfigUpdate {
-  if (section === "ai-voice") {
-    return { llm: settings.llm, comfyui: { tts: settings.comfyui.tts } }
+  if (section === "tts") {
+    return { comfyui: { tts: settings.comfyui.tts } }
   }
   if (section === "publish-storage") {
     return { publish: settings.publish }
@@ -1818,10 +2118,9 @@ function reconcileSavedSection(
   server: AppSettingsConfig,
   current: AppSettingsConfig
 ): AppSettingsConfig {
-  if (section === "ai-voice") {
+  if (section === "tts") {
     return {
       ...current,
-      llm: server.llm,
       comfyui: { ...current.comfyui, tts: server.comfyui.tts },
     }
   }
@@ -1835,8 +2134,8 @@ function reconcileSavedSection(
 }
 
 function settingsSectionLabel(section: SaveSection) {
-  if (section === "ai-voice") return "AI 与语音"
-  if (section === "generation") return "生成引擎"
+  if (section === "tts") return "语音生成"
+  if (section === "visual-generation") return "图片与视频生成"
   return "发布与存储"
 }
 

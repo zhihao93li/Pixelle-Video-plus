@@ -155,9 +155,7 @@ export function ProjectsPanel() {
   }
 
   const activeProjects = projects.filter((item) => item.status === "active")
-  const archivedProjects = projects.filter(
-    (item) => item.status === "archived"
-  )
+  const archivedProjects = projects.filter((item) => item.status === "archived")
 
   function renderCard(project: Project) {
     const archived = project.status === "archived"
@@ -237,7 +235,10 @@ export function ProjectsPanel() {
     <section aria-labelledby="projects-heading" className="min-w-0">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
         <div>
-          <h2 className="text-lg font-medium" id="projects-heading">
+          <h2
+            className="text-xl leading-7 font-semibold tracking-tight"
+            id="projects-heading"
+          >
             内容空间
           </h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">

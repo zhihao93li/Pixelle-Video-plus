@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Copy,
   Loader2,
   PanelsTopLeft,
   RefreshCw,
+  Search,
   SlidersHorizontal,
   Trash2,
 } from "lucide-react"
@@ -58,6 +59,7 @@ import {
 /** 模板库存与可用性管理。 */
 
 type LoadState = "loading" | "ready" | "error" | "stale"
+type TemplateFilter = "all" | "enabled" | "disabled" | "agent"
 
 /** 从现有生产模板克隆一条自定义风格线（专家模式）。
  * id 自动生成（与 CreateGallery「新建模板」对齐，不再暴露内部「模板 ID」概念）。 */
@@ -250,7 +252,7 @@ function TemplateEnabledControl({
         {template.enabled ? "已启用" : "已停用"}
       </span>
       <Switch
-        aria-label={template.enabled ? "停用模板" : "启用模板"}
+        aria-label={`${template.display_name}：${template.enabled ? "停用模板" : "启用模板"}`}
         checked={template.enabled}
         disabled={isSaving}
         onCheckedChange={(next) => {
@@ -294,6 +296,8 @@ export function TemplateStatusPanel() {
   const [error, setError] = useState<string | null>(null)
   const [templates, setTemplates] = useState<ProductionTemplate[]>([])
   const [isRefreshing, setIsRefreshing] = useState(true)
+  const [query, setQuery] = useState("")
+  const [filter, setFilter] = useState<TemplateFilter>("all")
   const hasDataRef = useRef(false)
   const expertMode = useExpertMode()
 
@@ -324,12 +328,31 @@ export function TemplateStatusPanel() {
   const unavailableCount = templates.filter(
     (template) => !template.enabled
   ).length
+  const visibleTemplates = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase()
+    return templates.filter((template) => {
+      const matchesQuery =
+        !normalizedQuery ||
+        `${template.display_name} ${template.description}`
+          .toLocaleLowerCase()
+          .includes(normalizedQuery)
+      const matchesFilter =
+        filter === "all" ||
+        (filter === "enabled" && template.enabled) ||
+        (filter === "disabled" && !template.enabled) ||
+        (filter === "agent" && isCodexOnlyTemplate(template))
+      return matchesQuery && matchesFilter
+    })
+  }, [filter, query, templates])
 
   return (
     <section aria-labelledby="recipes-heading" className="min-w-0">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
         <div>
-          <h2 className="text-lg font-medium" id="recipes-heading">
+          <h2
+            className="text-xl leading-7 font-semibold tracking-tight"
+            id="recipes-heading"
+          >
             模板管理
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -416,8 +439,60 @@ export function TemplateStatusPanel() {
             <Fact label="暂不可用" value={`${unavailableCount} 个`} />
           </div>
 
+          <div className="mt-5 rounded-lg border bg-muted/15 p-4">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <label className="relative">
+                <span className="sr-only">搜索模板</span>
+                <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="搜索模板名称或说明"
+                  value={query}
+                />
+              </label>
+              <div
+                aria-label="筛选模板"
+                className="flex flex-wrap gap-2"
+                role="group"
+              >
+                {(
+                  [
+                    ["all", "全部"],
+                    ["enabled", "可用"],
+                    ["disabled", "已停用"],
+                    ["agent", "仅 Agent"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    aria-pressed={filter === value}
+                    key={value}
+                    onClick={() => setFilter(value)}
+                    size="sm"
+                    variant={filter === value ? "secondary" : "outline"}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+              可用模板会出现在快速生产；“仅 Agent 发起”的模板只供 Agent
+              使用，不会出现在普通生产入口。
+            </p>
+          </div>
+
+          {visibleTemplates.length === 0 ? (
+            <EmptyState
+              className="mt-5"
+              description="换一个关键词或筛选条件试试。"
+              icon={Search}
+              title="没有匹配的模板"
+            />
+          ) : null}
+
           <div className="mt-5 grid gap-3 lg:grid-cols-2">
-            {templates.map((template) => {
+            {visibleTemplates.map((template) => {
               const isSpecialPipeline = isSpecialPipelineTemplate(template)
               const codexOnly = isCodexOnlyTemplate(template)
               return (
@@ -439,7 +514,9 @@ export function TemplateStatusPanel() {
                       {codexOnly ? (
                         <Badge variant="info">仅 Agent 发起</Badge>
                       ) : null}
-                      <Badge variant={template.enabled ? "secondary" : "outline"}>
+                      <Badge
+                        variant={template.enabled ? "secondary" : "outline"}
+                      >
                         {template.enabled ? "可用" : "已停用"}
                       </Badge>
                     </div>
@@ -477,6 +554,7 @@ export function TemplateStatusPanel() {
                   <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
                     {template.enabled && (
                       <Button
+                        aria-label={`调整「${template.display_name}」参数`}
                         onClick={() =>
                           navigate(`/create/recipes/${template.id}`)
                         }
@@ -501,6 +579,7 @@ export function TemplateStatusPanel() {
                     )}
                     {!codexOnly ? (
                       <Button
+                        aria-label={`${isSpecialPipeline ? "打开" : "使用"}「${template.display_name}」`}
                         onClick={() => navigate(productionStartRoute(template))}
                         variant="outline"
                       >

@@ -178,11 +178,11 @@ test.describe("项目边界与页面异步状态", () => {
     })
     await preparePage(page)
     await page.goto("/#/settings?view=overview", { waitUntil: "networkidle" })
-    await expect(page.getByText("系统概览")).toBeVisible()
+    await expect(page.getByText("生产准备情况")).toBeVisible()
 
     await page.getByRole("button", { name: "刷新系统设置" }).click()
     await expect(page.getByText("系统设置可能不是最新状态")).toBeVisible()
-    await expect(page.getByText("系统概览")).toBeVisible()
+    await expect(page.getByText("生产准备情况")).toBeVisible()
     await expect(page.getByRole("button", { name: "重新读取" })).toBeVisible()
     await expect(page).toHaveScreenshot("desktop-settings-stale.png", {
       animations: "disabled",

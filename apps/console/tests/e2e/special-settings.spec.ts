@@ -109,13 +109,15 @@ test.describe("设置中心", () => {
     await preparePage(page)
     await page.goto("/#/settings?view=overview", { waitUntil: "networkidle" })
 
-    await expect(page.getByText("系统概览")).toBeVisible()
-    await expect(page.getByText("设置诊断服务暂时不可用。")).toBeVisible()
+    await expect(page.getByText("生产准备情况")).toBeVisible()
+    await expect(
+      page.getByText("设置诊断服务暂时不可用。").first()
+    ).toBeVisible()
     await page
       .getByRole("navigation", { name: "设置分区" })
-      .getByRole("link", { name: /AI 与语音/ })
+      .getByRole("link", { name: /AI 大模型/ })
       .click()
-    await expect(page.getByRole("heading", { name: "LLM 服务" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "AI 大模型" })).toBeVisible()
     await expect(page.getByLabel("API Key").first()).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
@@ -132,9 +134,7 @@ test.describe("设置中心", () => {
       .getByText("基本信息", { exact: true })
       .locator("xpath=ancestor::*[@data-slot='card'][1]")
     await basicCard.getByRole("button", { name: "保存更改" }).click()
-    await expect(
-      basicCard.getByText("内容空间名称不能为空。")
-    ).toBeVisible()
+    await expect(basicCard.getByText("内容空间名称不能为空。")).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 })

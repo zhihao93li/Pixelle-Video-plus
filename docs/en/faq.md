@@ -1,86 +1,45 @@
-# FAQ
+# Frequently Asked Questions
 
-Frequently Asked Questions.
+### What should I configure first?
 
----
+Open Settings → Overview first. It lists the required configuration currently blocking production and links directly to the right page. Once the required items are ready, open Quick Production, choose a template, and start a task.
 
-## Installation
+### Do I need to configure every service?
 
-### Q: How to install uv?
+No. Configure only the services used by the template you select. For example, connect an LLM for AI writing and an image service for automatic artwork. Overview separates required items from optional ones.
 
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+### What is the difference between “configured” and “connected”?
 
-### Q: Can I use something other than uv?
+“Configured” only means that values such as an endpoint or key were saved. It does not prove that the external service is currently reachable. Use a connection test or an actual task result as the source of truth.
 
-Yes, you can use traditional pip + venv approach.
+### How do I choose an LLM?
 
----
+Go to Settings → AI Models, add a real service connection, load its models, and save a default model. A template or one-off production setting can override that default when explicitly selected.
 
-## Configuration
+### How do I choose an image or video generation service?
 
-### Q: Do I need to configure ComfyUI?
+Go to Settings → Image & Video Generation and configure the service used by your template. Workflow services and independent image services save separately. You only need the connections you actually use.
 
-**Not necessarily** - it depends on your template choice:
+### How do I choose the default voice?
 
-| Template Type | ComfyUI | Best For | Speed |
-|--------------|---------|----------|-------|
-| Text-only<br/>(e.g., `simple.html`) | ❌ Not needed | Quotes, announcements, reading prompts | ⚡⚡⚡ Very fast |
-| AI Images<br/>(e.g., `image_default.html`) | ✅ Required | Rich visual content | ⚡ Standard |
+Go to Settings → Voice Generation (TTS), choose the default service, then provide the model or voice required by that service. New tasks use this default unless a template explicitly overrides it.
 
-**Tip**: Beginners can start with text-only templates for instant zero-barrier experience!
+### What should I do when generation fails?
 
-**Alternative**: If you need AI images but don't want local ComfyUI, use RunningHub cloud service.
+Open the failed task from the workspace and read the explicit error in its current status. Fix network, credential, or service problems on the relevant settings page, then retry the original task instead of creating duplicate content.
 
-### Q: Which LLMs are supported?
+### What is the difference between a template and one-off settings?
 
-All OpenAI-compatible LLMs, including:
-- Qianwen
-- GPT-4o
-- DeepSeek
-- Ollama (local)
+A template stores long-term defaults. One-off settings in Quick Production affect only the current task. Save repeated adjustments in a template and keep occasional changes in the current run.
 
----
+### What does editing a prompt affect?
 
-## Usage
+Changes in the Prompt Library affect templates that still reference that prompt. Templates with a saved custom body do not automatically follow later library changes. Check the reference or custom state shown by the editor.
 
-### Q: How long does first-time usage take?
+### Are publishing and storage required?
 
-Generating a 3-5 scene video takes approximately 2-5 minutes.
+No. Configure them only when you need platform publishing or object storage. Local generation and downloads can work without those connections.
 
-### Q: What if I'm not satisfied with the video?
+### Where can I find more detailed diagnostics?
 
-Try:
-1. Change LLM model
-2. Adjust image dimensions and prompt prefix
-3. Change TTS workflow
-4. Try different video templates
-
-### Q: What are the costs?
-
-- **Completely Free**: Ollama + Local ComfyUI = $0
-- **Recommended**: Qianwen + Local ComfyUI ≈ $0.01-0.05/video
-- **Cloud Solution**: OpenAI + RunningHub (higher cost)
-
----
-
-## Troubleshooting
-
-### Q: ComfyUI connection failed
-
-1. Confirm ComfyUI is running
-2. Check if URL is correct
-3. Click "Test Connection" in Web interface
-
-### Q: LLM API call failed
-
-1. Check if API Key is correct
-2. Check network connection
-3. Review error messages
-
----
-
-## Other Questions
-
-Have other questions? Check [Troubleshooting](troubleshooting.md) or submit an [Issue](https://github.com/zhihao93li/Pixelle-Video-plus/issues).
+For settings issues, open Settings → Overview → Advanced & Diagnostics. For production issues, open the task in the workspace and inspect the most recent failed stage in its timeline.

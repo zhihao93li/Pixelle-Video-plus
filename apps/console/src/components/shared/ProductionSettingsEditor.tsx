@@ -1300,7 +1300,7 @@ export function ProductionSettingsEditor({
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <SlidersHorizontal className="size-4 text-muted-foreground" />
-                <h2 className="text-sm font-medium">本次设置</h2>
+                <h2 className="text-base font-semibold">本次设置</h2>
                 <Badge
                   variant={changedLabels.length > 0 ? "warning" : "secondary"}
                 >

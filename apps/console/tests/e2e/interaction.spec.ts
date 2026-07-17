@@ -57,6 +57,7 @@ test.describe("键盘与浏览器历史", () => {
     await preparePage(page)
     await page.goto("/#/settings?view=overview", { waitUntil: "networkidle" })
 
+    await page.getByText("高级与诊断", { exact: true }).click()
     const trigger = page.getByRole("button", { name: "重置系统设置" })
     await trigger.focus()
     await page.keyboard.press("Enter")
@@ -77,11 +78,11 @@ test.describe("键盘与浏览器历史", () => {
 
     await page
       .getByRole("navigation", { name: "设置分区" })
-      .getByRole("link", { name: /生成引擎/ })
+      .getByRole("link", { name: /图片与视频生成/ })
       .click()
-    await expect(page).toHaveURL(/#\/settings\?view=generation$/)
+    await expect(page).toHaveURL(/#\/settings\?view=visual-generation$/)
     await expect(
-      page.getByRole("heading", { name: "生成引擎", exact: true })
+      page.getByRole("heading", { name: "图片与视频生成", exact: true })
     ).toBeVisible()
 
     await page
@@ -91,16 +92,18 @@ test.describe("键盘与浏览器历史", () => {
     await expect(page).toHaveURL(/#\/settings\?view=help$/)
 
     await page.goBack()
-    await expect(page).toHaveURL(/#\/settings\?view=generation$/)
+    await expect(page).toHaveURL(/#\/settings\?view=visual-generation$/)
     await expect(
       page
         .getByRole("navigation", { name: "设置分区" })
-        .getByRole("link", { name: /生成引擎/ })
+        .getByRole("link", { name: /图片与视频生成/ })
     ).toHaveAttribute("aria-current", "page")
 
     await page.goForward()
     await expect(page).toHaveURL(/#\/settings\?view=help$/)
-    await expect(page.getByRole("heading", { name: "帮助中心" })).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "帮助与诊断" })
+    ).toBeVisible()
     expect(unhandledApi).toEqual([])
   })
 

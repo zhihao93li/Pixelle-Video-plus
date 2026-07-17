@@ -85,7 +85,9 @@ function ProjectSwitcher({
         role="status"
       >
         <AlertCircle className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-xs">内容空间加载失败</span>
+        <span className="min-w-0 flex-1 truncate text-xs">
+          内容空间加载失败
+        </span>
         <Button
           aria-label="重新读取内容空间"
           className={cn(compact && "size-11")}
@@ -340,7 +342,7 @@ export function AppShell({
             <ThemeToggle compact />
           </div>
           <div className="mx-auto flex h-12 w-full max-w-[var(--page-content-width)] items-center px-4 lg:h-[68px] lg:px-6">
-            <h1 className="text-lg font-medium" id="page-title">
+            <h1 className="text-base font-semibold" id="page-title">
               {title}
             </h1>
           </div>

@@ -37,18 +37,28 @@ colors:
   dark-info: "oklch(0.72 0.12 235)"
   dark-danger: "oklch(0.7 0.19 27)"
 typography:
+  app-shell-title:
+    fontFamily: "Geist Variable, sans-serif"
+    fontSize: 16px
+    fontWeight: 600
+    lineHeight: 1.5
   page-title:
     fontFamily: "Geist Variable, sans-serif"
-    fontSize: 18px
-    fontWeight: 500
-    lineHeight: 1.55
-    letterSpacing: -0.01em
+    fontSize: 20px
+    fontWeight: 600
+    lineHeight: 1.4
+    letterSpacing: -0.015em
   section-title:
     fontFamily: "Geist Variable, sans-serif"
     fontSize: 16px
-    fontWeight: 500
+    fontWeight: 600
     lineHeight: 1.4
     letterSpacing: -0.005em
+  subsection-title:
+    fontFamily: "Geist Variable, sans-serif"
+    fontSize: 14px
+    fontWeight: 600
+    lineHeight: 1.45
   body:
     fontFamily: "Geist Variable, sans-serif"
     fontSize: 14px
@@ -265,9 +275,15 @@ components:
   title:
     textColor: "{colors.foreground}"
     typography: "{typography.page-title}"
+  app-shell-title:
+    textColor: "{colors.foreground}"
+    typography: "{typography.app-shell-title}"
   section-heading:
     textColor: "{colors.foreground}"
     typography: "{typography.section-title}"
+  subsection-heading:
+    textColor: "{colors.foreground}"
+    typography: "{typography.subsection-title}"
   field-label:
     textColor: "{colors.foreground}"
     typography: "{typography.label}"
@@ -406,26 +422,32 @@ Pixelle 使用接近白色的冷中性画布、纯白内容表面、深墨色文
 
 ### Hierarchy
 
-| 层级       | Token            | 典型用途                       |
-| ---------- | ---------------- | ------------------------------ |
-| 页面标题   | `page-title`     | AppShell 页名、工作区标题      |
-| 区块标题   | `section-title`  | 面板标题、设置分组、卡片主标题 |
-| 正文       | `body`           | 普通说明、表单值、列表正文     |
-| 强调正文   | `body-strong`    | 列表主项、重要数值、导航标签   |
-| 字段标签   | `label`          | 输入项名称、必须阅读的短标签   |
-| 控件文字   | `control`        | 按钮、切换、菜单动作           |
-| 小正文     | `body-small`     | 辅助说明、紧凑列表、错误详情   |
-| 元数据     | `caption`        | 时间、来源、数量、次级状态     |
-| 强调元数据 | `caption-strong` | Badge、状态标签、紧凑分类      |
+| 层级       | Token              | 典型用途                         |
+| ---------- | ------------------ | -------------------------------- |
+| 应用页名   | `app-shell-title`  | AppShell 顶栏中的稳定路由名称    |
+| 工作区标题 | `page-title`       | 当前对象、任务或设置分区标题     |
+| 区块标题   | `section-title`    | 面板标题、设置分组、主要章节     |
+| 小节标题   | `subsection-title` | 区块内部的服务、步骤或内容组名称 |
+| 正文       | `body`             | 普通说明、表单值、列表正文       |
+| 强调正文   | `body-strong`      | 列表主项、重要数值、导航标签     |
+| 字段标签   | `label`            | 输入项名称、必须阅读的短标签     |
+| 控件文字   | `control`          | 按钮、切换、菜单动作             |
+| 小正文     | `body-small`       | 辅助说明、紧凑列表、错误详情     |
+| 元数据     | `caption`          | 时间、来源、数量、次级状态       |
+| 强调元数据 | `caption-strong`   | Badge、状态标签、紧凑分类        |
 
 ### Writing and hierarchy rules
 
 - 页面只保留一个可访问的一级标题。工作区内部从二级标题开始。
-- 标题使用中等字重和略紧字距，不使用全粗体制造层级。
+- AppShell 页名是位置提示，不与当前工作区争夺注意力；工作区标题必须比应用页名和区块标题更醒目。
+- 工作区标题、区块标题和正文的字号至少形成 `20 / 16 / 14px` 三档；不得用 `18 / 16 / 14px` 这种差异过小的字阶承担三个连续层级。
+- 区块标题使用 16px 半粗体，小节标题使用 14px 半粗体；字段标签虽可同为 14px，但只能用中等字重，并通过与控件的 6–8px 间距表达从属关系。
+- 标题使用半粗体和略紧字距，不使用过重黑体、全大写或颜色堆叠制造层级。
 - 正文、说明、标签依靠字号、颜色和间距区分，不依靠全大写、斜体或随机颜色。
 - 数值统计使用等宽数字特性；技术路径、ID 和日志仅在专家详情中使用等宽字体。
 - 按钮使用动宾短语，如“开始制作”“保存模板”“重新读取”；避免“确定”“提交”等脱离上下文的词。
 - 标签是名词，说明文字回答“这是什么或会影响什么”，按钮回答“我可以做什么”。三者不得使用相同外观。
+- 相邻层级不得重复同一标题。若一个区块只有一个字段，优先省略冗余区块标题；确需保留区块标题时，字段标签必须描述具体选择对象，例如“默认配音服务”下使用“选择服务”。
 - 中文段落行宽以 40–60 个汉字为宜；说明文字一般不超过 3 行，长解释转入帮助页或详情区。
 
 ## Layout

@@ -3,8 +3,9 @@
 export const SETTINGS_VIEWS = [
   "overview",
   "projects",
-  "ai-voice",
-  "generation",
+  "llm",
+  "visual-generation",
+  "tts",
   "publish-storage",
   "recipes",
   "prompts",
@@ -42,11 +43,11 @@ export function settingsLink(target: SettingsTarget): string {
     case "projects":
       return settingsViewPath("projects")
     case "llm":
-      return settingsViewPath("ai-voice", { focus: "llm" })
+      return settingsViewPath("llm")
     case "tts":
-      return settingsViewPath("ai-voice", { focus: "tts" })
+      return settingsViewPath("tts")
     case "generation":
-      return settingsViewPath("generation")
+      return settingsViewPath("visual-generation")
     case "publish":
       return settingsViewPath("publish-storage")
     case "help":
@@ -59,10 +60,10 @@ export function resolveSettingsLocation(
 ): ResolvedSettingsLocation {
   const explicitView = query.get("view")
   const template = query.get("template")
-  const view =
-    explicitView && VIEW_SET.has(explicitView)
-      ? (explicitView as SettingsView)
-      : "overview"
+  const legacyView = normalizeLegacyView(explicitView, query.get("focus"))
+  const view = VIEW_SET.has(legacyView)
+    ? (legacyView as SettingsView)
+    : "overview"
   let focus = query.get("focus")
 
   focus = normalizeFocus(view, focus)
@@ -102,12 +103,12 @@ function serializeQuery(query: URLSearchParams) {
 
 function normalizeFocus(view: SettingsView, focus: string | null) {
   if (!focus) return null
-  if (view === "ai-voice" && (focus === "llm" || focus === "tts")) {
-    return focus
-  }
   if (
-    view === "generation" &&
-    (focus === "comfyui" || focus === "runninghub" || focus === "resources")
+    view === "visual-generation" &&
+    (focus === "comfyui" ||
+      focus === "image-providers" ||
+      focus === "runninghub" ||
+      focus === "resources")
   ) {
     return focus
   }
@@ -115,4 +116,10 @@ function normalizeFocus(view: SettingsView, focus: string | null) {
     if (focus === "buffer" || focus === "cos") return focus
   }
   return null
+}
+
+function normalizeLegacyView(view: string | null, focus: string | null) {
+  if (view === "ai-voice") return focus === "tts" ? "tts" : "llm"
+  if (view === "generation") return "visual-generation"
+  return view ?? "overview"
 }
